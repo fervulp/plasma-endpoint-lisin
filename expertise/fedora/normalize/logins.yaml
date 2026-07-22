@@ -1,0 +1,70 @@
+name: logins
+id: LS-N-18
+type: normalization_rule
+version: 2.0.0
+title: Login history
+# ВХОДЫ В СИСТЕМУ: кто, откуда, когда вошёл и когда вышел. Раньше всё время
+# лежало одной строкой «с - по (длительность)» — по ней нельзя ни отсортировать,
+# ни сопоставить с событием. Теперь отдельные колонки, время в UTC (как у
+# событий), а «ещё в системе» видно отдельным признаком.
+code: |
+  import re
+  from datetime import datetime, timezone
+
+  _TS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?")
+
+  def _utc(s):
+      if not s:
+          return ""
+      try:
+          d = datetime.fromisoformat(s)
+      except ValueError:
+          return ""
+      if d.tzinfo is None:
+          d = d.replace(tzinfo=timezone.utc)
+      return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+  def normalize(text):
+      rows = []
+      for line in (text or "").splitlines():
+          f = line.split()
+          if len(f) < 4 or f[0] in ("wtmp", "btmp", "reboot", ""):
+              continue
+          stamps = _TS.findall(line)
+          if not stamps:
+              continue
+          still = "still logged in" in line or "still running" in line
+          dur = ""
+          m = re.search(r"\((\d+\+)?[\d:]+\)", line)
+          if m:
+              dur = m.group(0).strip("()")
+          # у части строк `last` поля «откуда» нет — там сразу время
+          frm = f[2] if not _TS.match(f[2]) else ""
+          rows.append({
+              "user": f[0],
+              "tty": f[1],
+              "from": frm,
+              "start": _utc(stamps[0]),
+              "until": "" if still else (_utc(stamps[1]) if len(stamps) > 1 else ""),
+              "duration": dur,
+              "active": "yes" if still else "",
+          })
+      return rows
+tests:
+  - name: вход с выходом
+    input: "local    pts/2        :0               2026-07-19T02:25:33+03:00 - 2026-07-19T02:27:19+03:00  (00:01)\n"
+    rows: 1
+    row0:
+      user: local
+      tty: pts/2
+      from: ":0"
+      start: 2026-07-18T23:25:33Z
+      until: 2026-07-18T23:27:19Z
+      active: ""
+  - name: сеанс ещё открыт
+    input: "local    tty2         :1               2026-07-22T09:00:00+03:00   still logged in\n"
+    rows: 1
+    row0:
+      start: 2026-07-22T06:00:00Z
+      until: ""
+      active: yes

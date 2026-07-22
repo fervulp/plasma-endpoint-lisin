@@ -1,0 +1,17 @@
+name: at_jobs
+id: LS-I-34
+type: input
+version: 1.0.0
+title: at jobs
+# Разовые задания at → в таблицу scheduled (kind=at).
+command: |
+  if command -v atq >/dev/null 2>&1; then
+    atq 2>/dev/null | while read -r jid rest; do
+      [ -n "$jid" ] || continue
+      body=$(at -c "$jid" 2>/dev/null | tail -n +1 | tr '\n' ';' | cut -c1-500)
+      printf '%s\t%s\t%s\n' "$jid" "$rest" "$body"
+    done
+  fi
+  true
+interval: 300
+enabled: true

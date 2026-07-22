@@ -1,0 +1,22 @@
+name: persistence_unpackaged
+id: LS-FN-4
+type: finding
+version: 2.0.0
+title: Механизмы автозапуска, не принадлежащие ни одному пакету
+severity: high
+source: state
+sql: SELECT vector, path, detail, scope FROM persistence WHERE unpackaged='yes' ORDER BY vector, path
+evidence: '{vector}: {path}  {detail}'
+why: 'Файл лежит в системном механизме автозапуска (preload, ld.so.conf.d, profile.d, udev, генераторы
+  systemd), но ни один пакет его не ставил — значит он появился вручную. Правило не ищет «плохие имена»:
+  имя механизма ничего не говорит, эти каталоги полны легитимных файлов от пакетов. Ищется НЕСООТВЕТСТВИЕ:
+  системный путь без владельца-пакета.'
+action: Посмотрите содержимое файла и вспомните, ставили ли вы его. Если нет — удалите и выясните, что
+  его создало (события по этому пути).
+explore_table: persistence
+explore_col: unpackaged
+explore_val: 'yes'
+tag: persistence
+time_col: ''
+basis: mismatch
+reference: MITRE ATT&CK TA0003 Persistence — закрепление через штатные механизмы загрузки

@@ -1,0 +1,23 @@
+name: security
+id: LS-N-20
+type: normalization_rule
+version: 3.0.0
+title: Security posture
+# Плагин нормализации: Python-код прямо в правиле (самодостаточно — правило
+# можно передать другому пользователю как вклад). Функция обязательна:
+#   normalize(text) -> list[dict]   (text = stdout точки входа)
+# В namespace доступны re, json. Колонки таблицы = ключи dict.
+code: |
+  def normalize(text):
+      rows = []
+      for line in text.splitlines():
+          if "=" in line and ":" not in line:
+              k, _, v = line.partition("=")
+              if v.strip():
+                  rows.append({"item": k.strip(), "value": v.strip()})
+          elif ":" in line:
+              k, _, v = line.partition(":")
+              if v.strip():
+                  rows.append({"item": k.strip().lower().replace(" ", "_"),
+                               "value": v.strip()})
+      return rows

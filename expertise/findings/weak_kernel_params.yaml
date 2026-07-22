@@ -1,0 +1,19 @@
+name: weak_kernel_params
+id: LS-FN-6
+type: finding
+version: 1.0.0
+title: Параметры ядра разошлись с конфигурацией
+severity: medium
+source: state
+sql: SELECT param, value, declared, declared_in FROM kernel_params WHERE status='differs'
+evidence: '{param} = {value}, объявлено {declared} в {declared_in}'
+why: Значение в ядре отличается от того, что объявила сама система. Значит его поменяли на ходу (sysctl
+  -w, приложение или вредонос) — конфигурация больше не описывает реальность.
+action: Сверьте с файлом-источником и примените sysctl --system либо объясните расхождение.
+explore_table: kernel_params
+explore_col: status
+explore_val: расходится
+tag: hardening
+time_col: ''
+basis: mismatch
+reference: Расхождение с собственной конфигурацией системы (sysctl.d)

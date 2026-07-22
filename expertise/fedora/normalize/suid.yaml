@@ -1,0 +1,6 @@
+name: suid
+id: LS-N-17
+type: normalization_rule
+version: 3.0.0
+title: SUID binaries
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split(None, 3)\n        if len(f) >= 4:\n            rows.append({\"path\": f[3], \"mode\": f[0], \"owner\": f[1], \"grp\": f[2]})\n    return rows\n"

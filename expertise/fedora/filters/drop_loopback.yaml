@@ -1,0 +1,11 @@
+# Фильтр: пропускает строки, где ВСЕ условия истинны.
+# op: eq | ne | contains | not_contains | regex | in | not_in
+name: example_drop_loopback
+id: LS-F-1
+version: 1.0.0
+title: Drop loopback addresses
+type: filter
+conditions:
+  - field: addr
+    op: not_in
+    value: ["127.0.0.1", "[::1]"]

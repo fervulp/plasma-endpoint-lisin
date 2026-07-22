@@ -1,0 +1,18 @@
+name: sessions
+id: LS-I-27
+type: input
+version: 1.0.0
+title: Active sessions
+# Активные сессии всех пользователей: кто, где (tty/seat), откуда, чем занят.
+# w = активность; loginctl = класс/seat systemd-сессии. Формат:
+#   w<TAB>user<TAB>tty<TAB>from<TAB>login<TAB>idle<TAB>what
+#   lc<TAB>sid<TAB>uid<TAB>user<TAB>seat<TAB>tty<TAB>class
+command: |
+  w -h -i 2>/dev/null | awk '{
+    what=$8; for(i=9;i<=NF;i++) what=what" "$i;
+    printf "w\t%s\t%s\t%s\t%s\t%s\t%s\n",$1,$2,$3,$4,$5,what }'
+  loginctl list-sessions --no-legend 2>/dev/null | awk '{
+    printf "lc\t%s\t%s\t%s\t%s\t%s\t%s\n",$1,$2,$3,$4,$7,$6 }'
+  true
+interval: 30
+enabled: true

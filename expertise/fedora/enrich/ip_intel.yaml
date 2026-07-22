@@ -1,0 +1,39 @@
+name: ip_intel
+id: LS-E-2
+type: enrichment
+version: 1.0.0
+title: IP → ASN / owner / country / rDNS
+# ОБОГАЩЕНИЕ событий: узнаём, ЧТО за IP-адрес в destination_ip.
+# Источники без ключей: DNS Team Cymru (ASN, страна) + whois(1) как запасной
+# + обратный DNS. Приватные адреса наружу не уходят (помечаются private).
+# Результаты кэшируются на диске, за прогон не больше 20 новых адресов —
+# конвейер не блокируется, кэш наполняется постепенно.
+# Заполняет поля таксономии: destination_as_number / destination_as_org /
+# destination_geo_country / destination_domain.
+code: |
+  def enrich(rows):
+      from agent import ipintel
+      ips = []
+      for r in rows:
+          ip = r.get("destination_ip") or ""
+          if ip:
+              ips.append(ip)
+      if not ips:
+          return rows
+      info = ipintel.lookup_many(ips)
+      for r in rows:
+          d = info.get(r.get("destination_ip") or "")
+          if not d:
+              continue
+          if d.get("as_number"):
+              r["destination_as_number"] = d["as_number"]
+          if d.get("as_org"):
+              r["destination_as_org"] = d["as_org"]
+          if d.get("country"):
+              r["destination_geo_country"] = d["country"]
+          if d.get("rdns") and not r.get("destination_domain"):
+              r["destination_domain"] = d["rdns"]
+          # приватный адрес — это тоже полезный факт, помечаем явно
+          if d.get("scope") == "private" and not r.get("destination_as_org"):
+              r["destination_as_org"] = "(private network)"
+      return rows

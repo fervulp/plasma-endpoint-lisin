@@ -1,0 +1,24 @@
+name: user_privileges
+id: LS-E-12
+type: enrichment
+version: 3.0.1
+title: User privileges
+code: "def enrich(rows):\n    \"\"\"Что может пользователь — по объявлениям САМОЙ системы, не по списку.\n\n    Раньше здесь был зашит перечень «административных» групп (wheel, sudo,\n    adm, docker, libvirt).\
+  \ На чужой машине он врёт: в Fedora группы sudo\n    нет, а права могут быть выданы своей группой. Теперь группы выводятся\n    из двух фактов, которые есть на любой системе и без root:\n\n      1) ПРАВИЛА\
+  \ POLKIT (/usr/share/polkit-1/rules.d, /etc/polkit-1/rules.d):\n         система сама пишет, какой группе разрешать привилегированные\n         действия — isInGroup(\"wheel\") рядом с polkit.Result.YES;\n\
+  \      2) ПРАВА НА СОКЕТЫ: группа с правом записи в сокет, принадлежащий\n         root, фактически равна root (классика — /run/docker.sock: кто\n         пишет в него, тот запускает контейнер с любыми\
+  \ правами).\n\n    Интерактивность входа — по /etc/shells: система сама перечисляет там\n    оболочки, пригодные для входа.\n    В колонке privilege_source видно, ОТКУДА взялся вывод, — это проверяемо.\n\
+  \    \"\"\"\n    import grp\n    import os\n    import stat\n    from pathlib import Path\n\n    shells = set()\n    try:\n        for ln in Path(\"/etc/shells\").read_text(errors=\"replace\").splitlines():\n\
+  \            ln = ln.strip()\n            if ln and not ln.startswith(\"#\"):\n                shells.add(ln)\n    except OSError:\n        pass\n\n    why = {}\n\n    # 1) polkit: группа считается административной,\
+  \ только если рядом с\n    #    упоминанием стоит разрешающий результат\n    for d in (\"/usr/share/polkit-1/rules.d\", \"/etc/polkit-1/rules.d\"):\n        p = Path(d)\n        if not p.is_dir():\n \
+  \           continue\n        for f in sorted(p.glob(\"*.rules\")):\n            try:\n                lines = f.read_text(errors=\"replace\").splitlines()\n            except OSError:\n             \
+  \   continue\n            for i, ln in enumerate(lines):\n                for m in re.finditer(r'isInGroup\\(\"([^\"]+)\"\\)', ln):\n                    window = \" \".join(lines[i:i + 12])\n        \
+  \            if \"polkit.Result.YES\" in window:\n                        why.setdefault(m.group(1), set()).add(\"polkit:\" + f.name)\n\n    # 2) сокеты root, доступные группе на запись\n    for root\
+  \ in (\"/run\", \"/var/run\"):\n        for dirpath, dirs, files in os.walk(root):\n            if dirpath.count(\"/\") > 4:\n                dirs[:] = []\n            for n in files + dirs:\n       \
+  \         fp = os.path.join(dirpath, n)\n                try:\n                    st = os.lstat(fp)\n                except OSError:\n                    continue\n                if not stat.S_ISSOCK(st.st_mode)\
+  \ or st.st_uid != 0:\n                    continue\n                if not (st.st_mode & stat.S_IWGRP):\n                    continue\n                try:\n                    g = grp.getgrgid(st.st_gid).gr_name\n\
+  \                except KeyError:\n                    continue\n                if g != \"root\":\n                    why.setdefault(g, set()).add(\"socket \" + fp)\n\n    why.setdefault(\"root\", set()).add(\"\
+  superuser\")\n\n    for r in rows:\n        groups = [g.strip() for g in\n                  str(r.get(\"groups\") or \"\").replace(\",\", \" \").split()]\n        adm = sorted(set(g for g in groups if\
+  \ g in why))\n        shell = str(r.get(\"shell\") or \"\")\n        interactive = shell in shells if shells else bool(shell)\n        src = []\n        for g in adm:\n            src.append(g + \" (\"\
+  \ + \"; \".join(sorted(why[g])[:2]) + \")\")\n        r[\"admin_groups\"] = \", \".join(adm)\n        r[\"privilege_source\"] = \" | \".join(src)\n        r[\"can_login\"] = \"yes\" if interactive else\
+  \ \"\"\n        r[\"privilege\"] = (\"admin\" if adm and interactive else\n                          \"service\" if not interactive else \"user\")\n    return rows\n"

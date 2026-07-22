@@ -1,0 +1,6 @@
+name: users
+id: LS-N-5
+type: normalization_rule
+version: 3.0.0
+title: Users
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split(\"\\t\")\n        if len(f) < 5:\n            continue\n        try:\n            uid = int(f[1])\n        except Exception:\n            uid = 0\n        rows.append({\"name\": f[0], \"uid\": uid, \"gecos\": f[2], \"home\": f[3],\n                     \"shell\": f[4],\n                     \"active\": \"yes\" if len(f) > 5 and f[5] == \"yes\" else \"\",\n                     \"groups\": f[6] if len(f) > 6 else \"\"})\n    return rows\n"

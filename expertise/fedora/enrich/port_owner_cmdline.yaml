@@ -1,0 +1,67 @@
+name: port_owner_cmdline
+id: LS-E-23
+type: enrichment
+version: 1.0.0
+title: Recover socket owner from the process command line
+# ss показывает владельца только для своих процессов. Соединение демона под
+# другим пользователем остаётся без владельца. Если удалённый адрес стоит в
+# командной строке процесса отдельным аргументом — это и есть владелец.
+# Признак структурный, никаких имён программ.
+code: |
+  def enrich(rows):
+      """Восстановить владельца сокета, когда ss его не показал.
+
+      ss печатает users:(...) только для СВОИХ процессов. Соединение демона,
+      работающего под другим пользователем (openvpn под nm-openvpn, служба под
+      root), в снимке есть, а владелец пуст — и «кто это соединение открыл»
+      ответа не имело.
+
+      Признак СТРУКТУРНЫЙ, а не список имён: если удалённый адрес соединения
+      встречается в КОМАНДНОЙ СТРОКЕ процесса (клиенту адрес сервера передают
+      аргументом: --remote, -H, host:port), то этот процесс и есть владелец.
+      Работает для любой программы, которой адрес назначения задан явно.
+
+      Догадка помечается: process_source = "matched by command line", чтобы
+      точное совпадение от вероятного отличалось.
+      """
+      import sqlite3
+      from pathlib import Path
+
+      need = [r for r in rows
+              if not str(r.get("process") or "").strip()
+              and str(r.get("remote") or "").strip()
+              and "*" not in str(r.get("remote"))]
+      if not need:
+          return rows
+
+      procs = []
+      try:
+          db = Path.home() / ".local/share/lisin/state.db"
+          con = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
+          procs = [(str(p), str(c or "")) for p, c in
+                   con.execute("SELECT pid, command FROM processes "
+                               "WHERE command NOT LIKE '[%'")]
+          con.close()
+      except Exception:
+          return rows
+
+      for r in need:
+          host = str(r["remote"]).rsplit(":", 1)[0]
+          port = str(r["remote"]).rsplit(":", 1)[-1]
+          if not host or host in ("0.0.0.0", "::", "127.0.0.1"):
+              continue
+          for pid, cmd in procs:
+              # адрес должен стоять в команде как отдельный аргумент,
+              # иначе «192.0.2.1» совпало бы с «192.0.2.10»
+              toks = cmd.replace("=", " ").replace(":", " ").split()
+              if host not in toks:
+                  continue
+              # порт в команде — подтверждение, но не требование
+              name = cmd.split()[0].rsplit("/", 1)[-1]
+              r["process"] = "%s (%s)" % (name, pid)
+              r["owner_cmd"] = cmd[:200]
+              r["pid"] = pid
+              r["process_source"] = ("matched by command line"
+                                     + (" (port confirmed)" if port in toks else ""))
+              break
+      return rows

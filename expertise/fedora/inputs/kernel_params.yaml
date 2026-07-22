@@ -1,0 +1,26 @@
+name: kernel_params
+id: LS-I-40
+type: input
+version: 2.0.0
+title: Kernel parameters vs declared configuration
+# НИКАКИХ СПИСКОВ ОТ МЕНЯ. Раньше здесь был зашит перечень из 15 «важных»
+# параметров и эталон «правильных» значений — и то и другое устаревает и
+# врёт на чужой машине.
+#
+# Теперь сверяем систему С НЕЙ ЖЕ САМОЙ: дистрибутив и админ объявляют
+# нужные значения в /usr/lib/sysctl.d, /run/sysctl.d, /etc/sysctl.d и
+# /etc/sysctl.conf. Мы читаем эти объявления и сравниваем с тем, что
+# реально стоит в ядре. Расхождение = кто-то поменял значение на ходу
+# (sysctl -w, приложение, вредонос) — вот это и есть сигнал, в отличие от
+# мнения о том, какое значение «хорошее».
+command: |
+  echo "===RUNNING==="
+  sysctl -a 2>/dev/null | sed 's/ = /\t/'
+  echo "===DECLARED==="
+  for f in /usr/lib/sysctl.d/*.conf /run/sysctl.d/*.conf /etc/sysctl.d/*.conf /etc/sysctl.conf; do
+    [ -r "$f" ] || continue
+    sed "s|^|$f\t|" "$f"
+  done
+  true
+interval: 3600
+enabled: true

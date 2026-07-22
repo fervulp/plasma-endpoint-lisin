@@ -1,0 +1,8 @@
+name: config_files
+id: LS-I-25
+type: input
+version: 1.0.0
+title: Important config files
+command: "for f in /etc/sudoers /etc/hosts /etc/resolv.conf /etc/fstab \\\n         /etc/ssh/sshd_config /etc/nsswitch.conf /etc/pam.d/sshd \\\n         /etc/sysctl.conf /etc/login.defs /etc/security/limits.conf \\\n         \"$HOME/.ssh/config\" \"$HOME/.ssh/authorized_keys\" \\\n         \"$HOME/.bashrc\" \"$HOME/.profile\"; do\n  [ -r \"$f\" ] || continue\n  echo \"===FILE $f===\"\n  cat \"$f\" 2>/dev/null\ndone\nfor d in /etc/sudoers.d; do\n  [ -d \"$d\" ] || continue\n  for f in \"$d\"/*; do\n    [ -f \"$f\" ] && { echo \"===FILE $f===\"; cat \"$f\"; }\n  done\ndone\ntrue\n"
+interval: 600
+enabled: true

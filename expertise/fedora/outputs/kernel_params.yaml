@@ -1,0 +1,8 @@
+name: db_kernel_params
+id: LS-O-kernel_params
+type: statedb
+version: 1.0.0
+title: Kernel hardening
+table: kernel_params
+key: [param]
+icon: security-high

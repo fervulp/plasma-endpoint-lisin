@@ -1,0 +1,6 @@
+name: containers
+id: LS-N-21
+type: normalization_rule
+version: 3.0.0
+title: Containers
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split(\"|\")\n        if len(f) < 5:\n            continue\n        rows.append({\"engine\": f[0], \"cid\": f[1], \"name\": f[2],\n                     \"image\": f[3], \"status\": f[4]})\n    return rows\n"

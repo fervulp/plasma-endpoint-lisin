@@ -1,0 +1,25 @@
+name: browser_history
+id: LS-N-58
+type: normalization_rule
+version: 1.0.0
+title: Browser history
+# История посещений — из тех же профилей, что и расширения (один обход диска).
+# Колонка host выделена отдельно: по домену удобно и группировать, и
+# сопоставлять с сетевыми соединениями из таблицы сокетов.
+code: |
+  def normalize(text):
+      rows = []
+      for ln in text.splitlines():
+          f = ln.split("\t")
+          if not f or f[0] != "HIST" or len(f) < 7:
+              continue
+          _, browser, profile, url, title, visits, when = f[:7]
+          host = ""
+          m = re.match(r"^[a-z]+://([^/:]+)", url)
+          if m:
+              host = m.group(1)
+          scheme = url.split(":", 1)[0] if ":" in url else ""
+          rows.append({"last_visit": when, "browser": browser,
+                       "profile": profile, "host": host, "title": title,
+                       "visits": visits, "scheme": scheme, "url": url})
+      return rows

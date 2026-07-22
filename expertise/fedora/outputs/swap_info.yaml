@@ -1,0 +1,8 @@
+name: db_swap_info
+id: LS-O-swap_info
+type: statedb
+version: 1.0.0
+title: Swap
+table: swap_info
+key: [name]
+icon: drive-harddisk

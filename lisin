@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Лаунчер LiSin: системный PySide6 + Kirigami, без pip-PySide6 из user site.
+export PYTHONNOUSERSITE=1
+export QT_QUICK_CONTROLS_STYLE=org.kde.desktop
+exec python3 "$(dirname "$(readlink -f "$0")")/lisin_app.py" "$@"

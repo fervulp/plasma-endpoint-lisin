@@ -1,0 +1,9 @@
+name: db_vms
+id: LS-O-vms
+type: statedb
+version: 1.0.0
+title: Virtual machines
+table: vms
+key:
+- name
+icon: computer-symbolic

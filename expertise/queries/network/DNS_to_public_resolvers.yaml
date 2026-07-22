@@ -1,0 +1,8 @@
+name: DNS_to_public_resolvers
+id: LS-Q-DNS_to_public_resolvers
+type: query
+version: 1.0.0
+title: DNS to public resolvers
+description: Outbound DNS leaving the LAN
+target: events
+sql: destination_port = '53' AND destination_as_org <> '(private network)'

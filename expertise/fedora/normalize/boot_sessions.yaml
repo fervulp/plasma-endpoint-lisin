@@ -1,0 +1,92 @@
+name: boot_sessions
+id: LS-N-56
+type: normalization_rule
+version: 1.0.0
+title: System startups
+# Одна строка = один запуск системы: когда включили, когда закончился,
+# сколько проработал. Текущий запуск помечается отдельно.
+code: |
+  import re
+
+  from datetime import datetime, timezone
+
+  def _iso(s, off=""):
+      """Местное время журнала -> UTC, как у событий."""
+      s = (s or "").strip().replace(" ", "T", 1)[:19]
+      if not s:
+          return ""
+      try:
+          d = datetime.fromisoformat(s + (off or ""))
+      except ValueError:
+          return ""
+      if d.tzinfo is None:
+          d = d.replace(tzinfo=timezone.utc)
+      return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+  def normalize(text):
+      rows, section = [], "boot"
+      cur_boot = ""
+      for line in (text or "").splitlines():
+          if line.startswith("===WTMP==="):
+              section = "wtmp"; continue
+          if line.startswith("===NOW==="):
+              section = "now"; continue
+          if not line.strip():
+              continue
+          if section == "now":
+              parts = line.split("\t", 1)
+              if len(parts) == 2 and parts[0] == "current_boot_id":
+                  cur_boot = parts[1].strip().replace("-", "")
+              continue
+          if section == "boot" and line.startswith("boot\t"):
+              # «IDX BOOTID FIRST LAST» с произвольными пробелами
+              body = line.split("\t", 1)[1].strip()
+              if body.startswith("IDX"):        # шапка
+                  continue
+              m = re.match(r"^(-?\d+)\s+([0-9a-f]{32})\s+(.*)$", body)
+              if not m:
+                  continue
+              # в хвосте две метки времени: начало и конец запуска
+              tail = m.group(3)
+              stamps = re.findall(r"\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}", tail)
+              zone = re.search(r"([+-]\d{2}):?(\d{2})?(?!.*[+-]\d{2})", tail)
+              off = ""
+              if zone:
+                  off = zone.group(1) + ":" + (zone.group(2) or "00")
+              rows.append({
+                  "kind": "boot",
+                  "boot_id": m.group(2),
+                  "index": m.group(1),
+                  "started": _iso(stamps[0], off) if stamps else "",
+                  "ended": _iso(stamps[1], off) if len(stamps) > 1 else "",
+                  "source": "journal",
+              })
+              continue
+          if section == "wtmp":
+              # reboot   system boot  6.15.x  2026-07-20T09:12:03+03:00 - ...
+              if line.startswith("wtmp begins") or line.startswith("btmp"):
+                  continue
+              m = re.match(r"^(reboot|shutdown)\s+\S+\s+\S*\s*(\S+)", line)
+              if not m:
+                  continue
+              t = re.search(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?)", line)
+              rows.append({
+                  "kind": "reboot" if m.group(1) == "reboot" else "shutdown",
+                  "boot_id": "",
+                  "index": "",
+                  "started": _iso(t.group(1).replace("T", " ")) if t else "",
+                  "ended": "",
+                  "source": "wtmp",
+              })
+      for r in rows:
+          r["current"] = "yes" if (cur_boot and r.get("boot_id") == cur_boot) else ""
+      return rows
+tests:
+  - name: строка журнала о запуске разбирается
+    input: "boot\t -3 673f81a5e4dd4f2bbd4e50c6e0dbb828 Wed 2026-07-22 11:05:19 +03 Wed 2026-07-22 11:07:16 +03\n"
+    rows: 1
+    row0:
+      kind: boot
+      boot_id: 673f81a5e4dd4f2bbd4e50c6e0dbb828
+      started: 2026-07-22T08:05:19Z
+      ended: 2026-07-22T08:07:16Z

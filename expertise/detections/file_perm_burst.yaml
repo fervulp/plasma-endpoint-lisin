@@ -1,0 +1,20 @@
+name: file_perm_burst
+id: LS-C-3
+type: detection
+version: 1.0.0
+title: Массовое изменение прав на файлах пакетов
+severity: medium
+tactic: defense_evasion
+technique: T1222
+category: file
+enabled: true
+# Единичное расхождение с эталоном пакета бывает после ручной правки конфига.
+# Но сразу несколько за короткое окно — признак скрипта, который меняет
+# права пачкой (в том числе для закрепления).
+where: >-
+  event_module = 'fim'
+  AND event_action IN ('file_permissions_changed', 'file_caps_changed')
+group_by: []
+threshold: 3
+window: 3600
+message: "Права изменены сразу у {count} файлов из пакетов"

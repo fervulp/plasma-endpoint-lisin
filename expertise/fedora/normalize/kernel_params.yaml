@@ -1,0 +1,23 @@
+name: kernel_params
+id: LS-N-40
+type: normalization_rule
+version: 2.0.1
+title: Kernel parameters vs declared configuration
+code: "def normalize(text):\n    \"\"\"Сверка «объявлено в конфигурации» с «реально в ядре».\n\n    Приоритет файлов — по правилам sysctl.d: одинаковое ИМЯ файла в /etc\n    перекрывает /run и /usr/lib;\
+  \ далее файлы применяются в порядке\n    сортировки имён, поэтому более поздний перекрывает более ранний;\n    /etc/sysctl.conf применяется последним.\n    \"\"\"\n    import os\n    running, declared_raw\
+  \ = {}, []\n    sect = \"\"\n    for ln in text.splitlines():\n        s = ln.rstrip()\n        if s.startswith(\"===\") and s.endswith(\"===\"):\n            sect = s.strip(\"=\")\n            continue\n\
+  \        if sect == \"RUNNING\" and \"\\t\" in s:\n            k, _, v = s.partition(\"\\t\")\n            running[k.strip()] = v.strip()\n        elif sect == \"DECLARED\" and \"\\t\" in s:\n       \
+  \     path, _, body = s.partition(\"\\t\")\n            body = body.strip()\n            if not body or body.startswith((\"#\", \";\")):\n                continue\n            if \"=\" not in body:\n\
+  \                continue\n            k, _, v = body.partition(\"=\")\n            declared_raw.append((path, k.strip().lstrip(\"-\"), v.strip()))\n\n    PRIO = {\"/etc/sysctl.d\": 3, \"/run/sysctl.d\"\
+  : 2, \"/usr/lib/sysctl.d\": 1}\n\n    def rank(path):\n        d = os.path.dirname(path)\n        if path == \"/etc/sysctl.conf\":\n            return (2, \"\", 9)       # применяется последним\n    \
+  \    return (1, os.path.basename(path), PRIO.get(d, 0))\n\n    # Для одинакового ИМЕНИ файла оставляем копию из каталога с высшим\n    # приоритетом (/etc > /run > /usr/lib). Внутри же применяем в том\n\
+  \    # порядке, в каком их выдала точка входа: каталоги перечислены по\n    # возрастанию приоритета, а внутри каталога glob сортирует по имени —\n    # то есть последнее объявление побеждает, как и делает\
+  \ сам sysctl.\n    best = {}\n    for path, k, v in declared_raw:\n        stage, base, prio = rank(path)\n        cur = best.get((stage, base))\n        if cur is None or prio >= cur[0]:\n          \
+  \  best[(stage, base)] = (prio, path)\n    winners = {p for _, p in best.values()}\n\n    declared = {}\n    for path, k, v in declared_raw:\n        if path in winners:\n            declared[k] = (v,\
+  \ path)\n\n    # sysctl.d допускает ШАБЛОНЫ (net.ipv4.conf.*.rp_filter) — ядро\n    # разворачивает их по всем интерфейсам. Без разворота такой параметр\n    # выглядел бы «не применён», хотя он применён\
+  \ к каждому интерфейсу.\n    import fnmatch\n    expanded = {}\n    for k, (want, path) in declared.items():\n        if \"*\" not in k:\n            expanded[k] = (want, path)\n            continue\n\
+  \        hits = fnmatch.filter(running.keys(), k)\n        for h in hits:\n            expanded.setdefault(h, (want, path))\n        if not hits:\n            expanded[k] = (want, path)\n    declared\
+  \ = expanded\n\n    rows = []\n    for k in sorted(declared):\n        want, path = declared[k]\n        have = running.get(k, \"\")\n        # значения могут отличаться пробелами/табами (списки в net.*)\n\
+  \        norm_w = \" \".join(want.split())\n        norm_h = \" \".join(have.split())\n        if k not in running:\n            status = \"not applied\"\n        elif norm_w == norm_h:\n            status\
+  \ = \"ok\"\n        else:\n            status = \"differs\"\n        rows.append({\"status\": status, \"param\": k, \"value\": have,\n                     \"declared\": want, \"declared_in\": path})\n\
+  \    return rows\n"

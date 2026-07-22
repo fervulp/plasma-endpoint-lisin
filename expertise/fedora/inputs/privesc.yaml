@@ -1,0 +1,38 @@
+name: privesc
+id: LS-I-39
+type: input
+version: 1.1.0
+title: Privilege escalation surface
+# Векторы повышения привилегий, доступные под пользователем:
+#  - file capabilities (getcap): cap_setuid/cap_dac_override/... = privesc;
+#  - sudo -n -l: права sudo без запроса пароля (NOPASSWD/кэш) — сильный сигнал;
+#  - /etc/sudoers[.d]: строки правил, если файл читаем (обычно root-only —
+#    тогда молча пусто, как hardware/audit).
+#
+# ВРЕМЯ (секция MTIME): аналитику мало знать, ЧТО можно использовать для
+# повышения прав — нужно знать, КОГДА этот вектор появился. Свежий
+# cap_setuid или правило NOPASSWD рядом по времени с инцидентом — зацепка,
+# а такой же вектор двухлетней давности — штатная настройка системы.
+# Берём mtime самого носителя вектора (бинарник с capability, файл sudoers).
+command: |
+  echo "===CAPS==="
+  caps=$(getcap -r /usr /opt "$HOME/.local" 2>/dev/null)
+  printf '%s\n' "$caps"
+  echo "===SUDO==="
+  sudo -n -l 2>/dev/null
+  echo "===SUDOERS==="
+  for f in /etc/sudoers /etc/sudoers.d/*; do
+    [ -r "$f" ] || continue
+    while IFS= read -r line; do
+      case "$line" in ''|\#*) ;; *) printf '%s\t%s\n' "$f" "$line";; esac
+    done < "$f"
+  done
+  echo "===MTIME==="
+  { printf '%s\n' "$caps" | sed 's/ =.*//; s/ [a-z_+,=ep]*$//'
+    ls -1 /etc/sudoers /etc/sudoers.d/* 2>/dev/null; } | sort -u |
+  while IFS= read -r pth; do
+    [ -n "$pth" ] && [ -e "$pth" ] && stat --printf='%y\t%n\n' "$pth" 2>/dev/null
+  done
+  true
+interval: 300
+enabled: true

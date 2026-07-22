@@ -1,0 +1,32 @@
+name: unpackaged_config
+id: LS-N-59
+type: normalization_rule
+version: 1.0.0
+title: Config files not owned by any package
+code: |
+  def normalize(text):
+      import datetime
+      rows = []
+      for ln in text.split("\n"):
+          f = ln.split("\t")
+          if len(f) < 5 or not f[0].startswith("/etc"):
+              continue
+          path, owner, group, mode, mtime = f[0], f[1], f[2], f[3], f[4]
+          when = ""
+          if mtime.isdigit():
+              when = datetime.datetime.fromtimestamp(
+                  int(mtime)).strftime("%Y-%m-%d %H:%M")
+          # ЧЬЯ ЭТО ЗАПИСЬ. Признак структурный, без списков имён: файл в /etc
+          # принадлежит НЕ root — значит писать в него может обычный
+          # пользователь, а читает его служба.
+          try:
+              m = int(mode, 8)
+          except ValueError:
+              m = 0
+          world_writable = "yes" if m & 0o002 else ""
+          user_owned = "yes" if owner not in ("root",) else ""
+          rows.append({"path": path, "owner": owner, "group": group,
+                       "mode": mode, "user_owned": user_owned,
+                       "world_writable": world_writable, "changed": when,
+                       "dir": path.rsplit("/", 1)[0]})
+      return rows

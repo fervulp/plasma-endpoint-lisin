@@ -1,0 +1,6 @@
+name: net_config
+id: LS-N-19
+type: normalization_rule
+version: 3.0.0
+title: Net config
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split(\"\\t\", 1)\n        if len(f) >= 2:\n            rows.append({\"kind\": f[0], \"entry\": f[1].strip()})\n    return rows\n"

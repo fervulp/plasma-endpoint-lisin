@@ -1,0 +1,12 @@
+name: journal_health
+id: LS-I-54
+type: input
+version: 1.0.0
+title: Journal health
+command: |
+  journalctl --disk-usage 2>/dev/null | sed 's/^/usage	/'
+  printf 'boots	%s\n' "$(journalctl --list-boots --no-pager 2>/dev/null | wc -l)"
+  printf 'readable	%s\n' "$(journalctl -n 1 --no-pager >/dev/null 2>&1 && echo yes || echo no)"
+  true
+interval: 1800
+enabled: true

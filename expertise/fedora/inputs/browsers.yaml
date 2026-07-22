@@ -1,0 +1,212 @@
+name: browsers
+id: LS-I-57
+type: input
+version: 1.0.0
+title: Browser profiles, extensions and history
+# БРАУЗЕРЫ ИЩУТСЯ ПО СИСТЕМЕ, А НЕ ПО СПИСКУ ИМЁН.
+#  * что вообще является браузером — решает сама система: desktop-запись,
+#    объявившая себя обработчиком x-scheme-handler/http;
+#  * где профили — по СЛЕДАМ НА ДИСКЕ: каталог с places.sqlite (семейство
+#    Mozilla) либо с History/Secure Preferences (семейство Chromium).
+# Проверено на живой машине: так нашлись профили, которых в любом списке
+# имён не было бы — ~/.zen, ~/.bxd/chromium и Chromium внутри BurpSuite.
+# Профиль без desktop-записи помечается: браузер поставлен мимо системы, и
+# это само по себе повод посмотреть.
+#
+# Базы копируются перед чтением: запущенный браузер держит их заблокированными.
+# Расширения: Mozilla — extensions.json, Chromium — Secure Preferences
+# (там же состояние, признак магазина и дата установки).
+command: |
+  python3 - <<'PYBROWSERS'
+  import json, os, shutil, sqlite3, subprocess, tempfile, time
+  from pathlib import Path
+
+  HOME = Path.home()
+  SKIP = {"node_modules", ".git", ".cache", "Trash", ".local/share/Trash"}
+
+  def desktop_browsers():
+      """Браузеры = desktop-записи, объявившие себя обработчиком http.
+
+      Именно так система сама определяет, что программа — браузер. Список имён
+      («firefox, chrome, ...») устарел бы на первой же незнакомой сборке.
+      """
+      out = {}
+      dirs = ["/usr/share/applications", str(HOME / ".local/share/applications"),
+              "/var/lib/flatpak/exports/share/applications",
+              str(HOME / ".local/share/flatpak/exports/share/applications")]
+      for d in dirs:
+          p = Path(d)
+          if not p.is_dir():
+              continue
+          for f in p.glob("*.desktop"):
+              try:
+                  t = f.read_text(errors="replace")
+              except OSError:
+                  continue
+              if "x-scheme-handler/http" not in t:
+                  continue
+              name, ex = f.stem, ""
+              for ln in t.splitlines():
+                  if ln.startswith("Name=") and name == f.stem:
+                      name = ln[5:].strip()
+                  elif ln.startswith("Exec="):
+                      ex = ln[5:].strip()
+              out[f.stem] = {"name": name, "exec": ex}
+      return out
+
+  def profiles():
+      """Профили ищем по СЛЕДАМ НА ДИСКЕ, а не по именам каталогов."""
+      found = []
+      try:
+          r = subprocess.run(
+              ["find", str(HOME), "-maxdepth", "6", "-type", "d",
+               "-name", "node_modules", "-o", "-name", ".git",
+               "-o", "-name", ".cache", "-prune", "-o",
+               "-name", "places.sqlite", "-print",
+               "-o", "-name", "Secure Preferences", "-print",
+               "-o", "-name", "Preferences", "-print"],
+              capture_output=True, text=True, timeout=60)
+          lines = r.stdout.splitlines()
+      except Exception:
+          lines = []
+      seen = set()
+      for ln in lines:
+          p = Path(ln)
+          d = p.parent
+          if str(d) in seen:
+              continue
+          if p.name == "places.sqlite":
+              seen.add(str(d)); found.append((d, "mozilla"))
+          elif (d / "History").exists() or (d / "Extensions").is_dir():
+              seen.add(str(d)); found.append((d, "chromium"))
+      return found
+
+  def owner(prof: Path, browsers: dict) -> str:
+      """Чей это профиль. Каталог-владелец — РОДИТЕЛЬ профиля: у всех семейств
+      структура <каталог браузера>/<профиль>. Затем пробуем сопоставить его с
+      desktop-записью, чтобы показать человеческое имя. Профиль без записи —
+      сам по себе сигнал: браузер поставлен мимо системы.
+      """
+      tok = prof.parent.name.lstrip(".") or prof.name.lstrip(".")
+      low = tok.lower()
+      for key, b in browsers.items():
+          ex = (b["exec"].split() or [""])[0].rsplit("/", 1)[-1].lower()
+          for cand in (ex, key.lower()):
+              if cand and (low in cand or cand in low):
+                  return b["name"]
+      return tok + " (нет desktop-записи)"
+
+
+  def read_db(path: Path, sql: str, limit_note=""):
+      """Копируем базу перед чтением: живой браузер держит её заблокированной."""
+      if not path.exists():
+          return []
+      tmp = Path(tempfile.mkdtemp()) / path.name
+      try:
+          shutil.copy2(path, tmp)
+          for suf in ("-wal", "-shm"):
+              s = Path(str(path) + suf)
+              if s.exists():
+                  shutil.copy2(s, str(tmp) + suf)
+          con = sqlite3.connect("file:%s?mode=ro" % tmp, uri=True)
+          rows = con.execute(sql).fetchall()
+          con.close()
+          return rows
+      except Exception:
+          return []
+      finally:
+          shutil.rmtree(tmp.parent, ignore_errors=True)
+
+  def tsv(*f):
+      print("\t".join(str(x).replace("\t", " ").replace("\n", " ")[:400] for x in f))
+
+  def moz_ext(prof, bname):
+      f = prof / "extensions.json"
+      try:
+          d = json.loads(f.read_text(errors="replace"))
+      except Exception:
+          return
+      for a in d.get("addons") or []:
+          loc = a.get("defaultLocale") or {}
+          perms = a.get("userPermissions") or {}
+          src = a.get("sourceURI") or ""
+          st = "store" if "addons.mozilla.org" in src else (
+              "system" if str(a.get("location", "")).startswith("app-") else
+              ("sideloaded" if src else "неизвестно"))
+          inst = a.get("installDate") or 0
+          when = time.strftime("%Y-%m-%d", time.localtime(inst / 1000)) if inst else ""
+          tsv("EXT", bname, prof.name, "mozilla", a.get("id", ""),
+              loc.get("name", ""), a.get("version", ""),
+              "" if a.get("userDisabled") else "yes",
+              a.get("type", ""), st, when,
+              ",".join(perms.get("permissions") or []),
+              ",".join(perms.get("origins") or []), src, str(prof))
+
+  def chr_ext(prof, bname):
+      settings = {}
+      for pf in ("Secure Preferences", "Preferences"):
+          try:
+              d = json.loads((prof / pf).read_text(errors="replace"))
+          except Exception:
+              continue
+          for k, v in ((d.get("extensions") or {}).get("settings") or {}).items():
+              settings.setdefault(k, v)
+      for eid, v in settings.items():
+          man = v.get("manifest") or {}
+          name = man.get("name", "")
+          if name.startswith("__MSG_"):
+              key = name[6:-2] if name.endswith("__") else name[6:]
+              for loc in (man.get("default_locale") or "en", "en", "en_US"):
+                  mf = prof / "Extensions" / eid / str(man.get("version", "")) \
+                       / "_locales" / loc / "messages.json"
+                  try:
+                      msgs = json.loads(mf.read_text(errors="replace"))
+                      name = (msgs.get(key) or {}).get("message", name)
+                      break
+                  except Exception:
+                      continue
+          it = v.get("install_time") or v.get("first_install_time") or 0
+          when = ""
+          try:
+              # Chromium хранит время в микросекундах от 1601 года
+              when = time.strftime("%Y-%m-%d", time.localtime(int(it) / 1e6 - 11644473600))
+          except Exception:
+              pass
+          st = "store" if v.get("from_webstore") else (
+              "system" if v.get("was_installed_by_default") else "sideloaded")
+          perms = (man.get("permissions") or []) + (v.get("granted_permissions", {})
+                                                    .get("api") or [])
+          origins = (man.get("host_permissions") or []) + (
+              v.get("granted_permissions", {}).get("explicit_host") or [])
+          tsv("EXT", bname, prof.name, "chromium", eid, name,
+              man.get("version", ""), "yes" if v.get("state") == 1 else "",
+              man.get("manifest_version", ""), st, when,
+              ",".join(str(x) for x in perms), ",".join(str(x) for x in origins),
+              v.get("update_url", ""), str(prof))
+
+  def moz_hist(prof, bname):
+      q = ("SELECT p.url, p.title, p.visit_count, "
+           "datetime(p.last_visit_date/1000000,'unixepoch','localtime') "
+           "FROM moz_places p WHERE p.last_visit_date IS NOT NULL "
+           "ORDER BY p.last_visit_date DESC LIMIT 400")
+      for url, title, vc, when in read_db(prof / "places.sqlite", q):
+          tsv("HIST", bname, prof.name, url or "", title or "", vc or 0, when or "")
+
+  def chr_hist(prof, bname):
+      q = ("SELECT url, title, visit_count, "
+           "datetime(last_visit_time/1000000-11644473600,'unixepoch','localtime') "
+           "FROM urls WHERE last_visit_time > 0 "
+           "ORDER BY last_visit_time DESC LIMIT 400")
+      for url, title, vc, when in read_db(prof / "History", q):
+          tsv("HIST", bname, prof.name, url or "", title or "", vc or 0, when or "")
+
+  br = desktop_browsers()
+  for prof, kind in profiles():
+      bname = owner(prof, br)
+      if kind == "mozilla":
+          moz_ext(prof, bname); moz_hist(prof, bname)
+      else:
+          chr_ext(prof, bname); chr_hist(prof, bname)
+  PYBROWSERS
+interval: 3600
+enabled: true

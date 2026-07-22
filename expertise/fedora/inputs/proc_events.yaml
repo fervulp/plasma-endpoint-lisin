@@ -1,0 +1,14 @@
+name: proc_events
+id: LS-I-42
+type: input
+version: 1.0.0
+title: Process start/stop events (/proc diff)
+# СОБЫТИЯ ЗАПУСКА/ЗАВЕРШЕНИЯ ПРОЦЕССОВ без root и без audit-правил.
+# Аудит ядра отдаёт execve только если настроено правило auditctl (у нас
+# правило есть лишь на сеть, key=sentinel_net), поэтому exec-события мы бы
+# не увидели. Здесь снимок процессов сравнивается с предыдущим — разница и
+# есть события. Точность: процесс, живший меньше интервала, будет пропущен
+# (это принципиальное ограничение поллинга против eBPF/audit).
+command: ps -eo pid=,ppid=,user=,args= 2>/dev/null
+interval: 20
+enabled: true

@@ -1,0 +1,28 @@
+name: app_age
+id: LS-E-9
+type: enrichment
+version: 1.0.0
+title: Package age
+# ВОЗРАСТ УСТАНОВКИ. Пакет, поставленный сегодня, интереснее того, что
+# стоит два года: свежая установка рядом с инцидентом — зацепка.
+# Считаем дни от даты установки, ничего не выдумывая.
+code: |
+  def enrich(rows):
+      import datetime
+      now = datetime.datetime.now()
+      for r in rows:
+          s = str(r.get("installed") or "").strip()
+          r["age_days"] = ""
+          r["recent"] = ""
+          if not s:
+              continue
+          for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+              try:
+                  d = datetime.datetime.strptime(s[:len(fmt) + 2].strip(), fmt)
+              except ValueError:
+                  continue
+              days = (now - d).days
+              r["age_days"] = str(days)
+              r["recent"] = "yes" if days <= 7 else ""
+              break
+      return rows

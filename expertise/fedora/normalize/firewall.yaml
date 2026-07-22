@@ -1,0 +1,29 @@
+name: firewall
+id: LS-N-7
+type: normalization_rule
+version: 3.0.0
+title: Firewall
+code: |
+  def normalize(text):
+      txt = text.split("---POLICIES---")
+      zones = txt[0].split("\n")
+      rest = txt[1] if len(txt) > 1 else ""
+      mp = rest.split("---MISC---")
+      policies = mp[0].split("\n")
+      misc = mp[1] if len(mp) > 1 else ""
+      tagged = [("", ln) for ln in zones] + [("policy:", ln) for ln in policies]
+      rows, cur = [], ""
+      for pfx, ls in tagged:
+          if ls != "" and not ls.startswith(" ") and not ls.startswith("\t"):
+              cur = pfx + ls.split(" ")[0]
+          else:
+              kv = re.match(r'^\s+([a-z_-]+):\s*(.+)$', ls)
+              if kv and cur != "":
+                  rows.append({"zone": cur, "item": kv.group(1),
+                               "value": kv.group(2).strip()})
+      for ln in misc.split("\n"):
+          kv = re.match(r'^([a-z_]+)=(.+)$', ln)
+          if kv:
+              rows.append({"zone": "global", "item": kv.group(1),
+                           "value": kv.group(2).strip()})
+      return rows

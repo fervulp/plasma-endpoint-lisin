@@ -1,0 +1,52 @@
+name: sessions
+id: LS-N-27
+type: normalization_rule
+version: 3.0.0
+title: Active sessions (into logins)
+code: |
+  from datetime import datetime, timezone
+
+  def _utc_from_hm(hm):
+      """`w` печатает время входа как ЧЧ:ММ — достраиваем сегодняшней датой
+      и переводим в UTC, чтобы время сеанса сравнивалось с историей входов."""
+      hm = (hm or "").strip()
+      if not hm or ":" not in hm or len(hm) > 5:
+          return ""
+      try:
+          now = datetime.now()
+          h, m = [int(x) for x in hm.split(":")[:2]]
+          d = now.replace(hour=h, minute=m, second=0, microsecond=0)
+          if d > now:                       # вход был вчера
+              d = d.replace(day=d.day - 1) if d.day > 1 else d
+          return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+      except Exception:
+          return ""
+
+  def normalize(text):
+      sess, order = {}, []
+      for ln in text.split("\n"):
+          f = ln.split("\t")
+          kind = f[0] if f else ""
+          user = tty = ""
+          if kind == "w" and len(f) >= 7:
+              user, tty = f[1], f[2]
+          elif kind == "lc" and len(f) >= 7:
+              user, tty = f[3], f[5]
+          if user == "" or tty in ("", "-"):
+              continue
+          k = user + "@" + tty
+          if k not in sess:
+              # колонки те же, что у истории входов: одна таблица —
+              # «кто входил и кто сейчас в системе»
+              sess[k] = {"user": user, "tty": tty, "from": "", "start": "",
+                         "until": "", "duration": "", "active": "yes",
+                         "idle": "", "what": "", "seat": "", "class": ""}
+              order.append(k)
+          cur = sess[k]
+          if kind == "w":
+              cur["from"] = f[3]
+              cur["start"] = _utc_from_hm(f[4]) or f[4]
+              cur["idle"], cur["what"] = f[5], f[6]
+          else:
+              cur["seat"], cur["class"] = f[4], f[6]
+      return [sess[k] for k in order]

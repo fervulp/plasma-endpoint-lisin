@@ -1,0 +1,15 @@
+name: swap_info
+id: LS-N-53
+type: normalization_rule
+version: 1.0.0
+title: Swap
+code: |
+  def normalize(text):
+      rows = []
+      for ln in text.splitlines():
+          f = ln.split()
+          if len(f) < 4:
+              continue
+          rows.append({"name": f[0], "type": f[1], "size": f[2],
+                       "used": f[3], "priority": f[4] if len(f) > 4 else ""})
+      return rows

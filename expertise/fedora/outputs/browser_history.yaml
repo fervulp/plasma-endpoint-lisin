@@ -1,0 +1,8 @@
+name: db_browser_history
+id: LS-O-browser_history
+type: statedb
+version: 1.0.0
+title: Browser history
+table: browser_history
+key: [browser, profile, url]
+icon: view-history

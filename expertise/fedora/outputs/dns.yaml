@@ -1,0 +1,8 @@
+name: db_dns
+id: LS-O-dns
+type: statedb
+version: 1.0.0
+title: DNS
+table: dns
+key: [kind, name, value]
+icon: network-server

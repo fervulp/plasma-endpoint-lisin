@@ -1,0 +1,6 @@
+name: cron
+id: LS-N-16
+type: normalization_rule
+version: 3.0.0
+title: Scheduled
+code: "def normalize(text):\n    files, order = {}, []\n    for ln in text.splitlines():\n        kv = ln.split(\"|\", 1)\n        if len(kv) != 2:\n            continue\n        src, body = kv[0], kv[1]\n        if src not in files:\n            files[src] = body\n            order.append(src)\n        else:\n            files[src] = files[src] + \"\\n\" + body\n    rows = []\n    for src in order:\n        content = files[src]\n        active = [l for l in content.split(\"\\n\")\n                  if l.strip() and not l.strip().startswith(\"#\")]\n        scope = \"user\" if src == \"user_crontab\" else \"system\"\n        rows.append({\"kind\": \"cron\", \"name\": src.split(\"/\")[-1], \"scope\": scope,\n                     \"detail\": \"%d entries\" % len(active), \"next\": \"\",\n                     \"source\": src, \"content\": content})\n    return rows\n"

@@ -1,0 +1,9 @@
+name: db_storage
+id: LS-O-storage
+type: statedb
+version: 1.0.0
+title: Storage
+table: storage
+key:
+- mount
+icon: drive-harddisk

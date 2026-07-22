@@ -1,0 +1,8 @@
+name: db_polkit_actions
+id: LS-O-polkit_actions
+type: statedb
+version: 1.0.0
+title: Polkit actions
+table: polkit_actions
+key: [action]
+icon: security-high

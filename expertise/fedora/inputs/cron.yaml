@@ -1,0 +1,16 @@
+name: cron
+id: LS-I-16
+type: input
+version: 1.1.0
+title: Cron jobs
+command: |
+  cat /etc/crontab 2>/dev/null | sed 's|^|/etc/crontab\||'
+  for f in /etc/cron.d/* /etc/cron.hourly/* /etc/cron.daily/* /etc/cron.weekly/* /etc/cron.monthly/*; do
+    [ -f "$f" ] && sed "s|^|$f\||" "$f"
+  done 2>/dev/null
+  crontab -l 2>/dev/null | sed 's|^|user_crontab\||'
+  # пользовательские systemd .timer в ~/.config
+  for f in "$HOME"/.config/systemd/user/*.timer; do
+    [ -f "$f" ] && sed "s|^|$f\||" "$f"
+  done 2>/dev/null
+  true

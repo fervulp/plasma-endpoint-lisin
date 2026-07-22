@@ -1,0 +1,8 @@
+name: mounts
+id: LS-I-32
+type: input
+version: 1.0.0
+title: Mounts
+command: findmnt -rno TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null
+interval: 300
+enabled: true

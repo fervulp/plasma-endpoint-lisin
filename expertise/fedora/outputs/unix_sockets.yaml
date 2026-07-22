@@ -1,0 +1,8 @@
+name: db_unix_sockets
+id: LS-O-unix_sockets
+type: statedb
+version: 1.0.0
+title: Unix sockets
+table: unix_sockets
+key: [path]
+icon: network-connect

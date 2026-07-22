@@ -1,0 +1,8 @@
+name: db_boot_perf
+id: LS-O-boot_perf
+type: statedb
+version: 1.0.0
+title: Boot performance
+table: boot_perf
+key: [unit]
+icon: chronometer

@@ -1,0 +1,8 @@
+name: processes
+id: LS-I-14
+type: input
+version: 1.0.0
+title: Processes
+command: ps axo pid=,ppid=,user:20=,pcpu=,pmem=,rss=,stat=,etime=,args= --sort=-pcpu
+interval: 60
+enabled: true

@@ -1,0 +1,22 @@
+name: browser_ext_origin
+id: LS-FN-10
+type: finding
+version: 1.0.0
+title: Расширения браузера с сомнительным происхождением
+severity: high
+source: state
+sql: SELECT browser, name, origin, source_url, permissions, installed FROM browser_extensions WHERE from_temp='yes'
+  OR (all_sites='yes' AND origin NOT IN ('store','system'))
+evidence: '{installed}  {browser}: {name} ({origin}) права: {permissions}  из {source_url}'
+why: 'Расширение выполняется на КАЖДОЙ открытой странице и видит то же, что и вы: содержимое, куки, вводимые
+  пароли. Установка из временного каталога при заявленном системном происхождении — не то, как ставятся
+  штатные дополнения.'
+action: 'Откройте страницу расширений и проверьте каждое: ставили ли вы его сами. Незнакомое — удалите
+  и смените пароли на сайтах, где вы авторизованы.'
+explore_table: browser_extensions
+explore_col: from_temp
+explore_val: 'yes'
+tag: browser
+time_col: installed
+basis: mismatch
+reference: MITRE ATT&CK T1176 Browser Extensions

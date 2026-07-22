@@ -1,0 +1,12 @@
+name: timers
+id: LS-I-15
+type: input
+version: 1.1.0
+title: systemd timers
+command: |
+  systemctl list-timers --all --output=json
+  echo ---USER---
+  systemctl --user list-timers --all --output=json 2>/dev/null
+  echo ---UFILES---
+  ls "$HOME"/.config/systemd/user/*.timer 2>/dev/null
+  true

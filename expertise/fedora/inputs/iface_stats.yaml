@@ -1,0 +1,9 @@
+name: iface_stats
+id: LS-I-50
+type: input
+version: 1.0.0
+title: Interface statistics
+command: |
+  ip -s -j link 2>/dev/null; true
+interval: 60
+enabled: true

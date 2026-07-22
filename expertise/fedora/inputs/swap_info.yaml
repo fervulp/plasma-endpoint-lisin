@@ -1,0 +1,9 @@
+name: swap_info
+id: LS-I-53
+type: input
+version: 1.0.0
+title: Swap
+command: |
+  swapon --show --noheadings 2>/dev/null; true
+interval: 300
+enabled: true

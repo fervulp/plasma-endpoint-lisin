@@ -1,0 +1,10 @@
+name: db_containers
+id: LS-O-containers
+type: statedb
+version: 1.0.0
+title: Containers
+table: containers
+key:
+- engine
+- cid
+icon: docker

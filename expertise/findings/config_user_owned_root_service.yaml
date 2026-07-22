@@ -1,0 +1,23 @@
+name: config_user_owned_root_service
+id: LS-FN-12
+type: finding
+version: 1.0.0
+title: Конфигурация root-службы принадлежит обычному пользователю
+severity: high
+source: state
+basis: mismatch
+reference: 'MITRE ATT&CK T1543 Create or Modify System Process; CIS: конфигурация служб принадлежит root'
+sql: SELECT c.path, c.owner, c.mode, c.changed, p.command, p.user FROM unpackaged_config c JOIN processes
+  p ON p.user='root' AND c.path LIKE '/etc/' ||    replace(replace(p.command,'/usr/bin/',''),'/usr/sbin/','')
+  || '/%' WHERE c.user_owned='yes'
+evidence: '{path} — владелец {owner}, права {mode}, изменён {changed}; читает {command} (от root)'
+why: Файл лежит в /etc, но НЕ принадлежит ни одному пакету и владеет им обычный пользователь, а читает
+  его служба, работающая от root. Значит непривилегированный пользователь задаёт поведение привилегированного
+  процесса. Для демона переназначения клавиш это ещё и полный контроль над тем, что вводится с клавиатуры.
+action: 'Верните владельца root (chown root:root) и права 644, либо уберите файл, если он не нужен. Проверьте
+  его содержимое: оно определяет, что именно делает служба.'
+time_col: changed
+explore_table: unpackaged_config
+explore_col: user_owned
+explore_val: 'yes'
+tag: config

@@ -1,0 +1,112 @@
+name: app_meta
+id: LS-E-4
+type: enrichment
+version: 1.0.0
+title: Application purpose (category / description / site)
+# ЧТО ЭТО ЗА ПРИЛОЖЕНИЕ И ЗАЧЕМ ОНО НУЖНО.
+# Инвентарь отвечал только «имя + версия», по нему нельзя понять, что за пакет
+# и можно ли его трогать. Здесь добавляются:
+#   category — категория (из .desktop Categories для GUI, иначе rpm Group);
+#   purpose  — человеческое описание (Comment из .desktop — оно понятнее,
+#              чем rpm Summary: «New era of messaging» вместо «telegram-desktop»);
+#   url      — сайт проекта, чтобы посмотреть, что это.
+# Всё берётся ДВУМЯ дешёвыми вызовами rpm + чтением .desktop, результат
+# кэшируется по mtime базы rpm (пересчёт только когда менялись пакеты).
+code: |
+  def enrich(rows):
+      import os, subprocess
+      from pathlib import Path
+
+      CACHE = Path.home() / ".local/share/lisin/appmeta.json"
+      RPMDB = "/var/lib/rpm/rpmdb.sqlite"
+
+      def stamp():
+          try:
+              return str(os.path.getmtime(RPMDB))
+          except OSError:
+              return "0"
+
+      meta = None
+      key = stamp()
+      try:
+          c = json.loads(CACHE.read_text())
+          if c.get("_stamp") == key:
+              meta = c.get("meta")
+      except Exception:
+          meta = None
+
+      if meta is None:
+          meta = {}
+          # 1) один вызов rpm: сайт, лицензия, группа для ВСЕХ пакетов
+          try:
+              out = subprocess.run(
+                  ["rpm", "-qa", "--qf",
+                   "%{NAME}\t%{URL}\t%{GROUP}\n"],
+                  capture_output=True, text=True, timeout=60).stdout
+          except Exception:
+              out = ""
+          for ln in out.splitlines():
+              f = ln.split("\t")
+              if len(f) >= 3 and f[0]:
+                  meta[f[0]] = {
+                      "url": "" if f[1] in ("(none)", "none") else f[1],
+                      "category": "" if f[2] in ("(none)", "Unspecified") else f[2],
+                      "purpose": "",
+                  }
+          # 2) .desktop: человеческое описание и категории для GUI-программ.
+          #    Связываем по basename(Exec) и по имени самого .desktop-файла —
+          #    имя пакета с ними часто не совпадает (telegram-desktop/Telegram).
+          dirs = ["/usr/share/applications",
+                  str(Path.home() / ".local/share/applications"),
+                  "/var/lib/flatpak/exports/share/applications"]
+          for d in dirs:
+              try:
+                  names = os.listdir(d)
+              except OSError:
+                  continue
+              for fn in names:
+                  if not fn.endswith(".desktop"):
+                      continue
+                  try:
+                      txt = open(os.path.join(d, fn), errors="replace").read()
+                  except OSError:
+                      continue
+                  g = {}
+                  for line in txt.splitlines():
+                      if line.startswith("[") and not line.startswith("[Desktop Entry"):
+                          break        # только главная секция
+                      for k in ("Comment", "Categories", "Exec", "Name", "GenericName"):
+                          if line.startswith(k + "="):
+                              g.setdefault(k, line.split("=", 1)[1].strip())
+                  if not g:
+                      continue
+                  cat = (g.get("Categories") or "").strip(";").replace(";", ", ")
+                  purpose = g.get("Comment") or g.get("GenericName") or ""
+                  keys = {fn[:-8]}
+                  ex = (g.get("Exec") or "").split()
+                  if ex:
+                      keys.add(os.path.basename(ex[0]))
+                  for k in keys:
+                      if not k:
+                          continue
+                      m = meta.setdefault(k, {"url": "", "category": "",
+                                              "purpose": ""})
+                      if purpose and not m.get("purpose"):
+                          m["purpose"] = purpose
+                      if cat:
+                          m["category"] = cat
+          try:
+              CACHE.parent.mkdir(parents=True, exist_ok=True)
+              CACHE.write_text(json.dumps({"_stamp": key, "meta": meta}))
+          except OSError:
+              pass
+
+      for r in rows:
+          nm = (r.get("name") or "").strip()
+          m = meta.get(nm) or meta.get(nm.lower()) or {}
+          if not m and r.get("path"):
+              m = meta.get(os.path.basename(r["path"])) or {}
+          r["category"] = m.get("category", "")
+          r["purpose"] = m.get("purpose", "")
+          r["url"] = m.get("url", "")
+      return rows

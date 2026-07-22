@@ -1,0 +1,8 @@
+name: db_mounts
+id: LS-O-mounts
+type: statedb
+version: 1.0.0
+title: Mounts
+table: mounts
+key: [target]
+icon: drive-harddisk

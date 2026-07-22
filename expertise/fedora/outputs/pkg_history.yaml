@@ -1,0 +1,8 @@
+name: db_pkg_history
+id: LS-O-pkg_history
+type: statedb
+version: 1.0.0
+title: Package history
+table: pkg_history
+key: [id]
+icon: view-history

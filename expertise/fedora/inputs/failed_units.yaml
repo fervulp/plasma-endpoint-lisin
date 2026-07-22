@@ -1,0 +1,11 @@
+name: failed_units
+id: LS-I-45
+type: input
+version: 1.0.0
+title: Failed units
+command: |
+  systemctl --failed --no-legend --plain 2>/dev/null | sed 's/^/system	/'
+  systemctl --user --failed --no-legend --plain 2>/dev/null | sed 's/^/user	/'
+  true
+interval: 120
+enabled: true

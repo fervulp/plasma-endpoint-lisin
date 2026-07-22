@@ -1,0 +1,27 @@
+name: boot_perf
+id: LS-N-51
+type: normalization_rule
+version: 1.0.0
+title: Boot performance
+code: |
+  def normalize(text):
+      rows = []
+      for ln in text.splitlines():
+          s = ln.strip()
+          if not s:
+              continue
+          f = s.split(None, 1)
+          if len(f) != 2:
+              continue
+          t, sec = f[0], 0.0
+          m = re.match(r"(?:(\d+)min\s*)?([\d.]+)s$", t)
+          if m:
+              sec = (int(m.group(1) or 0) * 60) + float(m.group(2))
+          elif t.endswith("ms"):
+              try:
+                  sec = float(t[:-2]) / 1000.0
+              except ValueError:
+                  sec = 0.0
+          rows.append({"unit": f[1], "time": t, "seconds": str(round(sec, 2)),
+                       "impact": "high" if sec >= 10 else ("medium" if sec >= 3 else "")})
+      return rows

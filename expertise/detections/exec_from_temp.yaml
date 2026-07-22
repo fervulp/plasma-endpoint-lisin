@@ -1,0 +1,22 @@
+name: exec_from_temp
+id: LS-C-1
+type: detection
+version: 1.0.0
+title: Запуск программы из временного каталога
+severity: high
+tactic: execution
+technique: T1059
+category: intrusion_detection
+enabled: true
+# Легитимный софт лежит в /usr, /opt или в домашнем каталоге пользователя.
+# Запуск из /tmp, /var/tmp или /dev/shm — типичное поведение дроппера:
+# файл скачали, выполнили и удалили. Порог 1: даже единичный запуск важен.
+where: >-
+  event_action = 'process_started'
+  AND (process_executable LIKE '/tmp/%'
+       OR process_executable LIKE '/var/tmp/%'
+       OR process_executable LIKE '/dev/shm/%')
+group_by: [subject_name, object_name]
+threshold: 1
+window: 600
+message: "Запуск из временного каталога: {object_name} (пользователь {subject_name})"

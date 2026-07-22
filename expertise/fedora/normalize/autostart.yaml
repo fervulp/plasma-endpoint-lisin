@@ -1,0 +1,27 @@
+name: autostart
+id: LS-N-1
+type: normalization_rule
+version: 3.0.0
+title: Scheduled
+code: |
+  def normalize(text):
+      rows = []
+      for b in text.split("==> "):
+          if b == "":
+              continue
+          nl = b.split("\n", 1)
+          path = nl[0].strip()
+          body = nl[1] if len(nl) > 1 else ""
+          hm = re.search(r'(?m)^Hidden=(.*)$', body)
+          hv = (hm.group(1) if hm else "").lower()
+          if path != "" and hv != "true":
+              nm = re.search(r'(?m)^Name=(.*)$', body)
+              ex = re.search(r'(?m)^Exec=(.*)$', body)
+              scope = "system" if path.startswith("/etc/xdg") else "user"
+              rows.append({
+                  "kind": "autostart",
+                  "name": (nm.group(1) if nm else path).strip(),
+                  "scope": scope,
+                  "detail": (ex.group(1) if ex else "").strip(),
+                  "next": "", "source": path, "content": body.strip()})
+      return rows

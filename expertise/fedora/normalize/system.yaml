@@ -1,0 +1,6 @@
+name: system
+id: LS-N-9
+type: normalization_rule
+version: 3.0.0
+title: Release
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        if \"=\" in line:\n            k, _, v = line.partition(\"=\")\n            rows.append({\"item\": k.strip().lower(),\n                         \"value\": v.strip().replace('\"', \"\")})\n    return rows\n"

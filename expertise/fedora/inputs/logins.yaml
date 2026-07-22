@@ -1,0 +1,8 @@
+name: logins
+id: LS-I-18
+type: input
+version: 1.0.0
+title: Login history
+command: last -n 100 --time-format iso
+interval: 300
+enabled: true

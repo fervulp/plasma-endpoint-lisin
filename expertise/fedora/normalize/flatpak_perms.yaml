@@ -1,0 +1,16 @@
+name: flatpak_perms
+id: LS-N-47
+type: normalization_rule
+version: 1.1.0
+title: Flatpak permissions
+code: |
+  def normalize(text):
+      rows = []
+      for ln in text.splitlines():
+          f = ln.split("\t")
+          if len(f) < 4 or f[0].strip().lower() == "table":
+              continue
+          rows.append({"perm_table": f[0].strip(), "object": f[1].strip(),
+                       "app": f[2].strip(), "granted": f[3].strip(),
+                       "data": f[4].strip() if len(f) > 4 else ""})
+      return rows

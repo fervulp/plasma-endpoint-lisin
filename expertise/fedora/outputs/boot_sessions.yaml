@@ -1,0 +1,10 @@
+name: out_boot_sessions
+id: LS-O-56
+type: statedb
+version: 1.0.0
+title: System startups
+table: boot_sessions
+icon: system-reboot
+key:
+  - kind
+  - started

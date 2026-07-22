@@ -1,0 +1,8 @@
+name: memory
+id: LS-I-11
+type: input
+version: 1.1.0
+title: Memory
+command: free -b
+interval: 30
+enabled: true

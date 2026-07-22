@@ -1,0 +1,51 @@
+name: storage
+id: LS-N-12
+type: normalization_rule
+version: 6.0.0
+title: Storage
+code: |
+  def _num(x):
+      s = "%.1f" % x
+      return s[:-2] if s.endswith(".0") else s
+
+  def normalize(text):
+      devs, order, crypt_of = {}, [], {}
+      for ln in text.split("\n"):
+          if ln == "":
+              continue
+          kv = {m.group(1): m.group(2)
+                for m in re.finditer(r'(\w+)="([^"]*)"', ln)}
+          name = kv.get("NAME", "")
+          if name == "":
+              continue
+          devs[name] = kv
+          order.append(name)
+          if kv.get("TYPE", "") == "crypt" and kv.get("PKNAME", "") != "":
+              crypt_of[kv["PKNAME"]] = name
+      rows = []
+      for n in order:
+          d = devs[n]
+          typ = d.get("TYPE", "")
+          if typ == "crypt":
+              continue
+          model, serial = d.get("MODEL", ""), d.get("SERIAL", "")
+          pk = d.get("PKNAME", "")
+          if pk != "":
+              pd = devs.get(pk, {})
+              model = model or pd.get("MODEL", "")
+              serial = serial or pd.get("SERIAL", "")
+          fstype, mount = d.get("FSTYPE", ""), d.get("MOUNTPOINT", "")
+          cn = crypt_of.get(n)
+          if cn is not None:
+              cd = devs[cn]
+              fstype = "crypt→" + cd.get("FSTYPE", "?")
+              mount = cd.get("MOUNTPOINT", "")
+          try:
+              szb = float(d.get("SIZE", "0") or "0")
+          except Exception:
+              szb = 0.0
+          rows.append({"name": n, "type": typ,
+                       "size_gb": _num(szb / 1073741824.0),
+                       "fstype": fstype, "mount": mount,
+                       "model": model, "serial": serial})
+      return rows

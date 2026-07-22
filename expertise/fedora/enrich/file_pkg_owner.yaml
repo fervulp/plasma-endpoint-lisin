@@ -1,0 +1,45 @@
+name: file_pkg_owner
+id: LS-E-11
+type: enrichment
+version: 1.0.0
+title: File owner package
+# ЧЕЙ ЭТО ФАЙЛ: к событию целостности добавляем пакет, которому файл
+# принадлежит. Без этого «изменён /etc/x» не говорит, что чинить —
+# с пакетом сразу понятно: rpm -V <пакет> и откат.
+code: |
+  def enrich(rows):
+      import os, subprocess
+      from pathlib import Path
+      CACHE = Path.home() / ".local/share/lisin/filepkg.json"
+      try:
+          key = str(os.path.getmtime("/var/lib/rpm/rpmdb.sqlite"))
+      except OSError:
+          key = "0"
+      idx = None
+      try:
+          c = json.loads(CACHE.read_text())
+          if c.get("_stamp") == key:
+              idx = c.get("idx")
+      except Exception:
+          idx = None
+      if idx is None:
+          idx = {}
+          try:
+              out = subprocess.run(["rpm", "-qa", "--qf",
+                                    "[%{FILENAMES}\t%{=NAME}\n]"],
+                                   capture_output=True, text=True, timeout=120).stdout
+          except Exception:
+              out = ""
+          for ln in out.splitlines():
+              f = ln.split("\t", 1)
+              if len(f) == 2 and f[0].startswith(("/etc/", "/usr/", "/opt/", "/var/")):
+                  idx[f[0]] = f[1]
+          try:
+              CACHE.parent.mkdir(parents=True, exist_ok=True)
+              CACHE.write_text(json.dumps({"_stamp": key, "idx": idx}))
+          except OSError:
+              pass
+      for r in rows:
+          p = str(r.get("file_path") or "")
+          r["package_name"] = idx.get(p, "") if p else ""
+      return rows

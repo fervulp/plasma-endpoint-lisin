@@ -1,0 +1,13 @@
+name: db_persistence
+id: LS-O-persistence
+type: statedb
+version: 1.0.0
+title: Persistence surface
+table: persistence
+key: [vector, path]
+icon: system-run
+# ОТСЛЕЖИВАТЬ ПЕРЕХОДЫ: появление/исчезновение/изменение строки порождает
+# событие (event_module=statediff). Включаем только у ИНВЕНТАРНЫХ таблиц —
+# у текучих (процессы, сокеты) есть свои источники событий, и дублировать
+# их изменениями значит утопить ленту.
+track_changes: true

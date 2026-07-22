@@ -1,0 +1,63 @@
+# Sentinel — VRL normalization program.
+#
+# Input:  one systemd-journal entry (as emitted by `journalctl -o json`,
+#         or by Vector's `journald` source).
+# Output: one event in Sentinel's unified, ECS-inspired schema.
+#
+# Run with Vector:
+#     [sources.j]      type = "journald"
+#     [transforms.n]   type = "remap"  inputs = ["j"]  file = "normalize.vrl"
+#     [sinks.out]      type = "file"   inputs = ["n"]  ... (NDJSON) -> loader
+#
+# or standalone with the `vrl` CLI:  vrl --program normalize.vrl < events.json
+#
+# The Python ingester (ingest.py) applies the exact same mapping when the
+# Vector/vrl binary is not installed, so the pipeline runs either way.
+
+# ---- timestamp (journal gives microseconds since epoch) ----
+ts_us = to_int(.[ "_SOURCE_REALTIME_TIMESTAMP" ] ?? ."__REALTIME_TIMESTAMP" ?? 0) ?? 0
+ts = to_float(ts_us) / 1000000.0
+
+ident = to_string(.SYSLOG_IDENTIFIER ?? ._COMM ?? "") ?? ""
+comm  = to_string(._COMM ?? .SYSLOG_IDENTIFIER ?? "") ?? ""
+prio  = to_int(.PRIORITY ?? 6) ?? 6
+
+# ---- classify into an ECS-style category ----
+category = "process"
+action = "log"
+severity = 10
+
+if includes(["sudo", "pkexec", "su", "polkitd"], ident) {
+    category = "privilege"; action = "privileged_command"; severity = 55
+} else if includes(["sshd", "systemd-logind", "login", "gdm", "sddm"], ident) {
+    category = "session"; action = "session_activity"; severity = 15
+} else if includes(["useradd", "userdel", "usermod", "groupadd", "passwd"], ident) {
+    category = "iam"; action = "account_change"; severity = 45
+} else if includes(["NetworkManager", "wpa_supplicant", "systemd-resolved", "dhclient"], ident) {
+    category = "network"; action = "network_activity"; severity = 15
+} else if includes(["dnf", "rpm", "packagekitd", "dnf5"], ident) {
+    category = "package"; action = "package_activity"; severity = 30
+} else if includes(["auditd", "kernel"], ident) && contains(to_string(.MESSAGE ?? ""), "denied") {
+    category = "file"; action = "access_denied"; severity = 50
+}
+
+# error priorities bump severity
+if prio <= 3 { severity = severity + 25 }
+
+# ---- emit the unified record; drop everything else ----
+. = {
+    "ts": ts,
+    "event_category": category,
+    "event_action": action,
+    "event_type": "info",
+    "event_outcome": if prio <= 3 { "failure" } else { "success" },
+    "module": "journal",
+    "severity": severity,
+    "host": to_string(._HOSTNAME ?? "") ?? "",
+    "user_id": to_string(._UID ?? "") ?? "",
+    "user_name": "",
+    "process_name": comm,
+    "process_pid": to_int(._PID ?? 0) ?? 0,
+    "message": to_string(.MESSAGE ?? "") ?? "",
+    "raw": encode_json(.),
+}

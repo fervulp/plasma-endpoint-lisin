@@ -1,0 +1,10 @@
+name: db_firewall
+id: LS-O-firewall
+type: statedb
+version: 1.0.0
+title: Firewall
+table: firewall
+key:
+- zone
+- item
+icon: security-medium

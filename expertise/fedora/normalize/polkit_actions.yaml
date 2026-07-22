@@ -1,0 +1,25 @@
+name: polkit_actions
+id: LS-N-48
+type: normalization_rule
+version: 1.1.0
+title: Polkit actions
+code: |
+  def normalize(text):
+      rows = []
+      parts = text.split("===")
+      for i in range(1, len(parts) - 1, 2):
+          path, body = parts[i], parts[i + 1]
+          for m in re.finditer(r'<action id="([^"]+)">(.*?)</action>', body, re.S):
+              act, inner = m.group(1), m.group(2)
+
+              def pick(tag, _i=inner):
+                  x = re.search("<%s>(.*?)</%s>" % (tag, tag), _i, re.S)
+                  return re.sub(r"\s+", " ", x.group(1)).strip() if x else ""
+
+              active = pick("allow_active")
+              rows.append({"action": act, "title": pick("description")[:90],
+                           "allow_any": pick("allow_any"),
+                           "allow_active": active,
+                           "risk": "high" if active in ("yes", "auth_self") else "",
+                           "source": path.strip().rsplit("/", 1)[-1]})
+      return rows

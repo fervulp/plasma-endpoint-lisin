@@ -1,0 +1,8 @@
+name: db_at_jobs
+id: LS-O-at_jobs
+type: statedb
+version: 1.0.0
+title: Scheduled
+table: scheduled
+key: [kind, name]
+icon: appointment-new

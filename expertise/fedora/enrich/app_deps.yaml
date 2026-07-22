@@ -1,0 +1,19 @@
+name: app_deps
+id: LS-E-3
+type: enrichment
+version: 1.0.1
+title: Application dependency links (deps / required_by)
+code: "def enrich(rows):\n    import sqlite3\n    from pathlib import Path\n    db = Path.home() / \".local/share/lisin/state.db\"\n    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % db, uri=True)\n\
+  \        con.row_factory = sqlite3.Row\n        inv = [dict(r) for r in con.execute(\n            'SELECT name, app_id, depends, recommends FROM applications')]\n        con.close()\n    except Exception:\n\
+  \        inv = []\n\n    # строки текущего потока тоже участвуют (на первом прогоне их ещё нет в БД)\n    seen = set()\n    allrows = []\n    for r in list(inv) + list(rows):\n        nm = (r.get(\"name\"\
+  ) or \"\").strip()\n        if not nm:\n            continue\n        k = (nm, (r.get(\"app_id\") or \"\").strip())\n        if k in seen:\n            continue\n        seen.add(k)\n        allrows.append(r)\n\
+  \n    alias = {}\n    for r in allrows:\n        nm = (r.get(\"name\") or \"\").strip()\n        alias.setdefault(nm, nm)\n        aid = (r.get(\"app_id\") or \"\").strip()\n        if aid:\n        \
+  \    alias.setdefault(aid, nm)\n\n    def tokens(r):\n        # СЛАБЫЕ ЗАВИСИМОСТИ УЧИТЫВАЮТСЯ НАРАВНЕ. Проверено на btop:\n        # `dnf remove btop` уносит и rocm-smi, потому что btop его\n       \
+  \ # РЕКОМЕНДУЕТ и больше он никому не нужен. Считать только strong-\n        # зависимости — значит показывать неполную картину удаления.\n        # Вид связи сохраняется отдельно, чтобы «требует» и «рекомендует»\n\
+  \        # можно было отличить.\n        raw = ((r.get(\"depends\") or \"\") + \" \" + (r.get(\"recommends\") or \"\")\n               ).replace(\",\", \" \")\n        for tok in raw.split():\n      \
+  \      if \"(\" in tok or \")\" in tok:\n                continue      # capability rtld(GNU_HASH) — не пакет\n            tok = tok.strip()\n            if not tok:\n                continue\n      \
+  \      t = alias.get(tok)\n            if t is None and \"/\" in tok:\n                t = alias.get(tok.split(\"/\", 1)[0])\n            if t:\n                yield t\n\n    deps_of, req_by = {}, {}\n\
+  \    for r in allrows:\n        nm = (r.get(\"name\") or \"\").strip()\n        d = set()\n        for t in tokens(r):\n            if t != nm:\n                d.add(t)\n        deps_of[nm] = d\n   \
+  \     for t in d:\n            req_by.setdefault(t, set()).add(nm)\n\n    for r in rows:\n        nm = (r.get(\"name\") or \"\").strip()\n        d = deps_of.get(nm) or set()\n        rb = req_by.get(nm)\
+  \ or set()\n        r[\"deps_count\"] = len(d)\n        r[\"required_by\"] = len(rb)\n        # кому именно нужен пакет — видно прямо в строке (первые 12 имён)\n        r[\"required_by_names\"] = \",\
+  \ \".join(sorted(rb)[:12])\n    return rows\n"

@@ -1,0 +1,9 @@
+name: db_network
+id: LS-O-network
+type: statedb
+version: 1.0.0
+title: Network
+table: network
+key:
+- iface
+icon: network-wired

@@ -1,0 +1,45 @@
+name: applications
+id: LS-I-23
+type: input
+version: 3.0.0
+title: Applications (flatpak/appimage/bin)
+command: |
+  # --- flatpak: приложения + ПОЛНЫЙ набор зависимостей в depends ---
+  # расширения runtime (GL/codecs/ffmpeg…) — компоненты платформы; собираем
+  # их список один раз и включаем в depends каждого приложения.
+  exts=$(flatpak list --runtime --columns=application 2>/dev/null | \
+         grep -E '\.(Platform|Sdk)\..+' | sort -u | tr '\n' ',' | \
+         sed 's/,$//; s/,/, /g')
+  flatpak list --app --columns=name,application,version,description 2>/dev/null | \
+  while IFS=$'\t' read -r nm app ver desc; do
+    [ -n "$app" ] || continue
+    info=$(flatpak info "$app" 2>/dev/null)
+    rt=$(echo "$info" | sed -n 's/.*Runtime: *//p' | head -1)
+    sdk=$(echo "$info" | sed -n 's/.*Sdk: *//p' | head -1)
+    dep="$rt"; [ -n "$sdk" ] && dep="$dep, $sdk"
+    [ -n "$exts" ] && dep="$dep, $exts"
+    printf 'flatpak\t%s\t%s\t%s\t\t%s\t%s\n' "$nm" "$app" "$ver" "$dep" "$desc"
+  done
+  # runtime и расширения — тоже в инвентарь, отдельным kind (это зависимости)
+  flatpak list --runtime --columns=name,application,branch,description 2>/dev/null | \
+  while IFS=$'\t' read -r nm rid br desc; do
+    [ -n "$rid" ] || continue
+    printf 'flatpak-runtime\t%s\t%s\t%s\t\t\t%s\n' "$nm" "$rid" "$br" "$desc"
+  done
+  # --- AppImage ---
+  for d in "$HOME/Applications" "$HOME/Downloads" "$HOME/.local/bin" /opt; do
+    [ -d "$d" ] && find "$d" -maxdepth 2 -iname '*.appimage' \
+      -printf 'appimage\t%f\t\t\t%p\t\n' 2>/dev/null
+  done
+  # --- бинарники не из rpm + зависимости (ldd) ---
+  for d in /opt /usr/local/bin "$HOME/.local/bin" "$HOME/.bin" "$HOME/.config/bin"; do
+    [ -d "$d" ] || continue
+    find "$d" -maxdepth 3 -type f -executable 2>/dev/null | while read -r f; do
+      rpm -qf "$f" >/dev/null 2>&1 && continue
+      libs=$(ldd "$f" 2>/dev/null | awk '{print $1}' | grep -v '=>' | head -6 | tr '\n' ' ')
+      printf 'bin\t%s\t\t\t%s\t%s\n' "$(basename "$f")" "$f" "$libs"
+    done
+  done
+  true
+interval: 300
+enabled: true

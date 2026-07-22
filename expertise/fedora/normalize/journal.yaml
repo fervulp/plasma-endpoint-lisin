@@ -1,0 +1,413 @@
+name: journal
+id: LS-N-40
+type: normalization_rule
+version: 2.1.0
+title: Journal + audit → event taxonomy
+# Глубокий разбор audit/journal + колонка not_normalized: какие поля
+# исходной записи правило НЕ разобрало (видно, что дорабатывать).
+code: |
+  def normalize(text):
+      import datetime, pwd
+
+      SYSCALLS = {"41": "socket", "42": "connect", "43": "accept",
+                  "288": "accept4", "44": "sendto", "45": "recvfrom",
+                  "49": "bind", "50": "listen", "59": "execve",
+                  "322": "execveat", "2": "open", "257": "openat",
+                  "87": "unlink", "263": "unlinkat", "82": "rename",
+                  "105": "setuid", "106": "setgid", "113": "setreuid",
+                  "117": "setresuid", "165": "mount", "166": "umount2",
+                  "101": "ptrace", "321": "bpf", "175": "init_module",
+                  "313": "finit_module", "176": "delete_module"}
+      NET = {"socket", "connect", "accept", "accept4", "sendto",
+             "recvfrom", "bind", "listen"}
+      # номера типов auditd → человекочитаемые имена (journald отдаёт AUDIT1123)
+      ATYPE = {"1100": "USER_AUTH", "1101": "USER_ACCT", "1102": "USER_MGMT",
+               "1103": "CRED_ACQ", "1104": "CRED_DISP", "1105": "USER_START",
+               "1106": "USER_END", "1107": "USER_AVC", "1108": "USER_CHAUTHTOK",
+               "1110": "USER_CMD", "1111": "USER_TTY", "1112": "USER_LOGIN",
+               "1113": "USER_LOGOUT", "1123": "USER_CMD", "1126": "USER_ROLE_CHANGE",
+               "1130": "SERVICE_START", "1131": "SERVICE_STOP",
+               "1132": "GRP_AUTH", "2405": "CRYPTO_KEY_USER"}
+
+      def s(e, k, d=""):
+          v = e.get(k, d)
+          if isinstance(v, list):
+              v = v[0] if v else d
+          return "" if v is None else str(v)
+
+      def iso(us):
+          try:
+              return datetime.datetime.fromtimestamp(
+                  int(us) / 1000000.0, datetime.timezone.utc
+              ).strftime("%Y-%m-%dT%H:%M:%SZ")
+          except Exception:
+              return ""
+
+      _uc = {}
+
+      def uname(uid):
+          if not uid or uid in ("4294967295", "-1", "unset"):
+              return ""
+          if uid not in _uc:
+              try:
+                  _uc[uid] = pwd.getpwuid(int(uid)).pw_name
+              except Exception:
+                  _uc[uid] = ""
+          return _uc[uid]
+
+      KV = re.compile(r"""(\w+)=("([^"]*)"|'([^']*)'|\S+)""")
+
+      def kv(txt):
+          """key=value / key="value" / key='value' → dict. Так из MESSAGE
+          достаётся ВСЁ, что audit положил в текст (uid/euid/comm/exe/key/ses…),
+          а не только те поля, что journald вынес в _AUDIT_FIELD_*."""
+          out = {}
+          for m in KV.finditer(txt or ""):
+              v = m.group(3)
+              if v is None:
+                  v = m.group(4)
+              if v is None:
+                  v = m.group(2)
+              out.setdefault(m.group(1), v)
+          return out
+
+      def unhex(v):
+          """auditd отдаёт cmd/proctitle в hex, если есть спецсимволы."""
+          if v and len(v) % 2 == 0 and re.fullmatch(r"[0-9A-Fa-f]+", v):
+              try:
+                  return bytes.fromhex(v).replace(b"\x00", b" ").decode(
+                      "utf-8", "replace").strip()
+              except Exception:
+                  return v
+          return v
+
+      def saddr(h):
+          try:
+              b = bytes.fromhex(h)
+          except Exception:
+              return {}
+          if len(b) < 4:
+              return {}
+          fam = b[0] | (b[1] << 8)
+          if fam == 2 and len(b) >= 8:
+              return {"ip": ".".join(str(x) for x in b[4:8]),
+                      "port": (b[2] << 8) | b[3]}
+          if fam == 10 and len(b) >= 24:
+              p = ["%x" % ((b[8 + i] << 8) | b[9 + i]) for i in range(0, 16, 2)]
+              return {"ip": ":".join(p), "port": (b[2] << 8) | b[3]}
+          if fam == 1:
+              return {"unix": b[2:].split(b"\x00")[0].decode("utf-8", "replace")}
+          return {}
+
+      recs = []
+      for ln in text.splitlines():
+          ln = ln.strip()
+          if not ln or ln[0] != "{":
+              continue
+          try:
+              recs.append(json.loads(ln, strict=False))
+          except Exception:
+              continue
+
+      groups, order, singles = {}, [], []
+      for e in recs:
+          if e.get("_TRANSPORT") == "audit" and e.get("_AUDIT_ID"):
+              k = s(e, "_BOOT_ID") + ":" + s(e, "_AUDIT_ID")
+              if k not in groups:
+                  groups[k] = []
+                  order.append(k)
+              groups[k].append(e)
+          else:
+              singles.append(e)
+
+      rows = []
+      for k in order:
+          grp = groups[k]
+          by, fields = {}, {}
+          for r in grp:
+              tname = s(r, "_AUDIT_TYPE_NAME") or ATYPE.get(s(r, "_AUDIT_TYPE"), "") \
+                      or ("AUDIT" + s(r, "_AUDIT_TYPE"))
+              by.setdefault(tname, r)
+              # 1) поля, вынесенные journald
+              for kk, vv in r.items():
+                  if kk.startswith("_AUDIT_FIELD_"):
+                      fields.setdefault(kk[13:].lower(), s(r, kk))
+              # 2) ВСЁ остальное из текста MESSAGE (тут полей заметно больше)
+              msg = s(r, "MESSAGE")
+              body = msg.split(" ", 1)[1] if " " in msg else msg
+              parsed = kv(body)
+              inner = parsed.pop("msg", "")
+              for kk, vv in parsed.items():
+                  fields.setdefault(kk.lower(), vv)
+              if inner:                      # вложенный msg='op=... res=...'
+                  for kk, vv in kv(inner).items():
+                      fields.setdefault(kk.lower(), vv)
+
+          main = by.get("SYSCALL") or grp[0]
+          boot, aid = k.split(":", 1)
+          sysnum = fields.get("syscall", "")
+          sysname = SYSCALLS.get(sysnum, sysnum)
+          uid = fields.get("uid") or s(main, "_UID")
+          auid = fields.get("auid") or s(main, "_AUDIT_LOGINUID")
+          res = (fields.get("res") or fields.get("success") or "").lower()
+          outcome = ("success" if res in ("success", "yes")
+                     else "failure" if res in ("failed", "no") else "unknown")
+          atypes = set(x for x in by if x)
+
+          row = {
+              "ts": iso(s(main, "_SOURCE_REALTIME_TIMESTAMP")
+                        or s(main, "__REALTIME_TIMESTAMP")),
+              "event_id": "audit:" + boot + ":" + aid,
+              "event_kind": "event",
+              "event_module": "audit",
+              "event_dataset": "journal.audit",
+              "event_provider": s(main, "SYSLOG_IDENTIFIER") or s(main, "_COMM"),
+              "event_outcome": outcome,
+              "audit_type": ",".join(sorted(atypes)),
+              "audit_id": aid,
+              "audit_key": (fields.get("key") or "").strip('"'),
+              "audit_session": fields.get("ses") or s(main, "_AUDIT_SESSION"),
+              "syscall": sysname,
+              "host_name": s(main, "_HOSTNAME"),
+              "host_id": s(main, "_MACHINE_ID"),
+              "host_boot_id": boot,
+              "user_id": uid,
+              "user_name": uname(uid) or (fields.get("acct") or "").strip('"'),
+              "user_group": fields.get("gid") or s(main, "_GID"),
+              "user_effective_id": fields.get("euid") or fields.get("suid", ""),
+              "user_audit_id": auid,
+              "process_pid": fields.get("pid") or s(main, "_PID"),
+              "process_name": (fields.get("comm") or s(main, "_COMM")).strip('"'),
+              "process_executable": (fields.get("exe") or s(main, "_EXE")).strip('"'),
+              "process_tty": (fields.get("terminal") or fields.get("tty")
+                              or s(main, "_TTY")),
+              "process_exit_code": fields.get("exit", ""),
+              "process_working_directory": (fields.get("cwd") or "").strip('"'),
+              "parent_pid": fields.get("ppid", ""),
+              "selinux_context": fields.get("subj") or s(main, "_SELINUX_CONTEXT"),
+              "service_name": (fields.get("unit") or "").strip('"')
+                              or s(main, "_SYSTEMD_UNIT") or s(main, "_SYSTEMD_USER_UNIT"),
+              "message": " | ".join(s(r, "MESSAGE") for r in grp
+                                    if s(r, "MESSAGE"))[:2000],
+              "raw": json.dumps(grp, ensure_ascii=False)[:20000],
+              "related_user": uname(uid),
+          }
+          # команда: PROCTITLE (hex/строка) или USER_CMD cmd=<hex>
+          cmdline = unhex((fields.get("cmd") or "").strip('"'))
+          if not cmdline:
+              cmdline = unhex((fields.get("proctitle") or "").strip('"'))
+          row["process_command_line"] = cmdline or s(main, "_CMDLINE")
+          # что НЕ разобрали — сразу видно в колонке not_normalized
+          USED = {"syscall", "uid", "auid", "gid", "euid", "suid", "ses", "pid",
+                  "ppid", "comm", "exe", "key", "exit", "success", "res", "cwd",
+                  "terminal", "tty", "subj", "saddr", "addr", "hostname", "name",
+                  "mode", "ouid", "cmd", "proctitle", "unit", "acct", "op",
+                  "arch", "items", "fsuid", "fsgid", "egid", "sgid",
+                  "a0", "a1", "a2", "a3", "msg"}
+          row["not_normalized"] = ", ".join(
+              sorted(x for x in fields if x not in USED)[:25])
+
+          # сеть: SOCKADDR или addr= у USER_* (откуда логинились)
+          sa = by.get("SOCKADDR")
+          if sa:
+              d = saddr(fields.get("saddr", "") or s(sa, "_AUDIT_FIELD_SADDR"))
+              if d.get("ip"):
+                  row["destination_ip"] = d["ip"]
+                  row["destination_port"] = d.get("port")
+                  row["related_ip"] = d["ip"]
+                  row["network_transport"] = "tcp" if sysname in (
+                      "connect", "accept", "accept4", "listen", "bind") else "udp"
+                  row["network_direction"] = "outbound"
+                  if d.get("port") == 53:
+                      row["network_protocol"] = "dns"
+              elif d.get("unix"):
+                  row["file_path"] = d["unix"]
+          addr = (fields.get("addr") or "").strip('"')
+          if addr and addr not in ("?", "unset"):
+              row["source_ip"] = addr
+              row.setdefault("related_ip", addr)
+              row["network_direction"] = "inbound"
+          host = (fields.get("hostname") or "").strip('"')
+          if host and host not in ("?", "unset"):
+              row["source_domain"] = host
+
+          # файл: PATH-запись или name=
+          nm = (fields.get("name") or "").strip('"')
+          if nm and nm not in ("?",):
+              row["file_path"] = nm
+              row["file_name"] = nm.rsplit("/", 1)[-1]
+              if "/" in nm:
+                  row["file_directory"] = nm.rsplit("/", 1)[0]
+              if "." in row["file_name"]:
+                  row["file_extension"] = row["file_name"].rsplit(".", 1)[-1]
+          if fields.get("mode"):
+              row["file_mode"] = fields["mode"]
+          if fields.get("ouid"):
+              row["file_owner"] = uname(fields["ouid"]) or fields["ouid"]
+
+          # классификация
+          cat, typ, act, sev = "process", "info", "audit", 20
+          op = (fields.get("op") or "").strip('"')
+          if "USER_CMD" in atypes:
+              cat, typ, act, sev = "process", "start", "user_command", 55
+          elif atypes & {"USER_AUTH", "USER_LOGIN", "CRED_ACQ", "USER_ACCT",
+                         "USER_START", "USER_END", "USER_LOGOUT", "CRED_DISP",
+                         "USER_CHAUTHTOK", "GRP_AUTH"}:
+              cat, sev = "authentication", 45
+              typ = "end" if atypes & {"USER_LOGOUT", "USER_END", "CRED_DISP"} else "start"
+              act = op or ("user_logout" if typ == "end" else "user_auth")
+          elif "USER_MGMT" in atypes or "USER_ROLE_CHANGE" in atypes:
+              cat, typ, act, sev = "iam", "change", op or "account_change", 60
+          elif sysname in NET or "SOCKADDR" in atypes:
+              cat, typ, act, sev = "network", "connection", sysname or "connect", 30
+          elif sysname in ("execve", "execveat"):
+              cat, typ, act, sev = "process", "start", "executed", 40
+          elif "SERVICE_START" in atypes or "SERVICE_STOP" in atypes:
+              started = "SERVICE_START" in atypes
+              cat, typ = "process", "start" if started else "end"
+              act = "service_start" if started else "service_stop"
+              sev = 25
+          elif sysname in ("setuid", "setgid", "setreuid", "setresuid"):
+              cat, typ, act, sev = "process", "change", "privilege_change", 60
+          elif sysname in ("init_module", "finit_module", "delete_module") or "BPF" in atypes:
+              cat, typ, act, sev = "driver", "change", "kernel_module", 70
+          elif "USER_AVC" in atypes or "AVC" in atypes or any(
+                  x.startswith("ANOM") for x in atypes):
+              cat, typ, act, sev = "intrusion_detection", "denied", "selinux_denied", 65
+          elif "NETFILTER_CFG" in atypes:
+              cat, typ, act, sev = "configuration", "change", "firewall_change", 35
+          elif sysname in ("open", "openat", "unlink", "unlinkat", "rename"):
+              cat, typ, act, sev = "file", "access", sysname, 25
+          if outcome == "failure":
+              sev += 15
+          # root-действие заметнее
+          if uid == "0" and cat in ("process", "iam", "authentication"):
+              sev += 5
+          row["event_category"], row["event_type"], row["event_action"] = cat, typ, act
+          row["event_severity"] = min(100, sev)
+          rows.append(row)
+
+      # ---------------- НЕ-audit записи журнала ----------------
+      UNIT_RE = re.compile(
+          r"^(Started|Starting|Stopped|Stopping|Reloading|Failed to start|"
+          r"Deactivated successfully|Succeeded)\b(.*)$")
+      for e in singles:
+          ident = s(e, "SYSLOG_IDENTIFIER") or s(e, "_COMM")
+          msg = s(e, "MESSAGE")
+          try:
+              prio = int(s(e, "PRIORITY") or "6")
+          except Exception:
+              prio = 6
+          unit = s(e, "_SYSTEMD_UNIT") or s(e, "_SYSTEMD_USER_UNIT")
+          cat, typ, act, sev = "process", "info", "log", 10
+
+          if ident in ("sudo", "pkexec", "su", "polkitd"):
+              cat, typ, act, sev = "authentication", "info", "privileged_command", 55
+          elif ident in ("sshd", "systemd-logind", "login", "gdm", "sddm"):
+              cat, typ, act, sev = "session", "info", "session_activity", 25
+          elif ident in ("useradd", "userdel", "usermod", "groupadd", "passwd", "chage"):
+              cat, typ, act, sev = "iam", "change", "account_change", 50
+          elif ident in ("NetworkManager", "wpa_supplicant", "systemd-resolved",
+                         "dhclient", "dnsmasq"):
+              cat, typ, act, sev = "network", "info", "network_activity", 15
+          elif ident in ("dnf", "dnf5", "rpm", "packagekitd"):
+              cat, typ, act, sev = "package", "change", "package_activity", 35
+          elif ident == "kernel":
+              cat, typ, act, sev = "driver", "info", "kernel_message", 15
+
+          # systemd: «Started foo.service - Desc.» → юнит + действие
+          m = UNIT_RE.match(msg.strip())
+          if m and ident in ("systemd", "systemd-user") or (m and unit):
+              verb = m.group(1)
+              rest = m.group(2).strip()
+              um = re.search(r"([\w@.\\-]+\.(service|timer|socket|target|scope|mount|path))",
+                             rest) or re.search(
+                  r"([\w@.\\-]+\.(service|timer|socket|target|scope|mount|path))", msg)
+              if um:
+                  unit = um.group(1)
+              cat = "process"
+              if verb in ("Started", "Starting"):
+                  typ, act, sev = "start", "service_start", 20
+              elif verb in ("Stopped", "Stopping", "Deactivated successfully", "Succeeded"):
+                  typ, act, sev = "end", "service_stop", 15
+              elif verb.startswith("Failed"):
+                  typ, act, sev, prio = "info", "service_failed", 55, min(prio, 3)
+          if prio <= 3:
+              sev += 25
+
+          uid = s(e, "_UID")
+          row = {
+              "ts": iso(s(e, "_SOURCE_REALTIME_TIMESTAMP")
+                        or s(e, "__REALTIME_TIMESTAMP")),
+              "event_id": s(e, "__CURSOR"),
+              "event_kind": "event",
+              "event_category": cat, "event_type": typ, "event_action": act,
+              "event_outcome": "failure" if prio <= 3 else "success",
+              "event_severity": min(100, sev),
+              "event_module": "journal",
+              "event_dataset": "journal." + (s(e, "_TRANSPORT") or "syslog"),
+              "event_provider": ident,
+              "host_name": s(e, "_HOSTNAME"), "host_id": s(e, "_MACHINE_ID"),
+              "host_boot_id": s(e, "_BOOT_ID"),
+              "user_id": uid, "user_name": uname(uid), "user_group": s(e, "_GID"),
+              "related_user": uname(uid),
+              "process_pid": s(e, "_PID"), "process_name": s(e, "_COMM"),
+              "process_executable": s(e, "_EXE"),
+              "process_command_line": s(e, "_CMDLINE"),
+              "process_tty": s(e, "_TTY"),
+              "selinux_context": s(e, "_SELINUX_CONTEXT"),
+              "service_name": unit,
+              "message": msg[:2000],
+              "raw": json.dumps(e, ensure_ascii=False)[:20000],
+          }
+          JUSED = {"MESSAGE", "PRIORITY", "SYSLOG_IDENTIFIER", "SYSLOG_FACILITY",
+                   "SYSLOG_PID", "SYSLOG_TIMESTAMP", "SYSLOG_RAW",
+                   "_HOSTNAME", "_MACHINE_ID", "_BOOT_ID", "_UID", "_GID",
+                   "_PID", "_COMM", "_EXE", "_CMDLINE", "_TTY", "_TRANSPORT",
+                   "_SELINUX_CONTEXT", "_SYSTEMD_UNIT", "_SYSTEMD_USER_UNIT",
+                   "_SOURCE_REALTIME_TIMESTAMP", "__REALTIME_TIMESTAMP",
+                   "__MONOTONIC_TIMESTAMP", "_SOURCE_MONOTONIC_TIMESTAMP",
+                   "__CURSOR", "__SEQNUM", "__SEQNUM_ID", "_RUNTIME_SCOPE",
+                   "_SYSTEMD_CGROUP", "_SYSTEMD_SLICE", "_SYSTEMD_INVOCATION_ID",
+                   "_SYSTEMD_USER_SLICE", "_SYSTEMD_OWNER_UID", "_CAP_EFFECTIVE",
+                   "_AUDIT_SESSION", "_AUDIT_LOGINUID", "_STREAM_ID",
+                   "_LINE_BREAK", "_SYSTEMD_SESSION", "TID", "_FSUID", "_FSGID"}
+          row["not_normalized"] = ", ".join(
+              sorted(x for x in e if x not in JUSED)[:25])
+
+          # IP прямо в тексте (sshd «from 1.2.3.4», NetworkManager и т.п.)
+          ip = re.search(r"\b(?:from|addr=|peer )\s*((?:\d{1,3}\.){3}\d{1,3})", msg)
+          if ip:
+              row["source_ip"] = ip.group(1)
+              row["related_ip"] = ip.group(1)
+          rows.append(row)
+      # --- КТО → НАД ЧЕМ (единая ось для чтения события) ---
+      for r in rows:
+          if r.get("subject_type"):
+              continue
+          cat = r.get("event_category", "")
+          if r.get("user_name"):
+              r["subject_type"], r["subject_name"] = "user", r["user_name"]
+          elif r.get("service_name"):
+              r["subject_type"], r["subject_name"] = "service", r["service_name"]
+          elif r.get("process_name"):
+              r["subject_type"], r["subject_name"] = "process", r["process_name"]
+          else:
+              r["subject_type"], r["subject_name"] = "system", r.get("host_name", "")
+          if r.get("file_path"):
+              r["object_type"], r["object_name"] = "file", r["file_path"]
+          elif r.get("destination_ip"):
+              r["object_type"] = "socket"
+              r["object_name"] = "%s:%s" % (r["destination_ip"], r.get("destination_port") or "")
+          elif r.get("package_name"):
+              r["object_type"], r["object_name"] = "package", r["package_name"]
+          elif cat == "process" and r.get("process_executable"):
+              r["object_type"], r["object_name"] = "process", r["process_executable"]
+          elif cat in ("authentication", "iam"):
+              r["object_type"] = "account"
+              r["object_name"] = r.get("user_target_name") or r.get("user_name", "")
+          elif r.get("service_name"):
+              r["object_type"], r["object_name"] = "service", r["service_name"]
+          else:
+              r["object_type"], r["object_name"] = "", ""
+      return rows

@@ -1,0 +1,20 @@
+name: vulnerabilities_open
+id: LS-FN-8
+type: finding
+version: 1.0.0
+title: Уязвимости с доступным патчем
+severity: high
+source: state
+sql: SELECT advisory, packages, severity, cvss_score, cvss_rating, issued, action FROM vulnerabilities
+  WHERE status='open' ORDER BY CAST(cvss_score AS REAL) DESC
+evidence: '{issued}  CVSS {cvss_score} {cvss_rating}  {packages}  ({advisory})'
+why: 'Для этих пакетов уже вышло исправление. Неустановленный патч — самый дешёвый способ входа: эксплойт
+  публичный, окно между бюллетенем и атакой короткое.'
+action: 'Установите обновления: dnf upgrade --security (или точечно по бюллетеню).'
+explore_table: vulnerabilities
+explore_col: status
+explore_val: открыта
+tag: patch
+time_col: issued
+basis: methodology
+reference: Бюллетени безопасности Fedora + CVSS 3.1 (FIRST)

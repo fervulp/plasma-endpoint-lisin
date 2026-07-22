@@ -1,0 +1,8 @@
+name: db_sessions
+id: LS-O-sessions
+type: statedb
+version: 2.0.0
+title: Logins and sessions
+table: logins
+key: [user, tty, start]
+icon: system-users

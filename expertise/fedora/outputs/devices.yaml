@@ -1,0 +1,10 @@
+name: db_devices
+id: LS-O-devices
+type: statedb
+version: 1.0.0
+title: Devices
+table: devices
+key:
+- kind
+- slot
+icon: drive-removable-media

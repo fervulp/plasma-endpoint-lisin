@@ -1,0 +1,91 @@
+name: privesc
+id: LS-N-39
+type: normalization_rule
+version: 1.1.0
+title: Privilege escalation surface
+code: |
+  def normalize(text):
+      # Опасные capabilities: дают эффективный root-примитив.
+      RISKY = ("cap_setuid", "cap_setgid", "cap_dac_override",
+               "cap_dac_read_search", "cap_sys_admin", "cap_sys_ptrace",
+               "cap_sys_module", "cap_sys_rawio", "cap_net_admin", "cap_bpf",
+               "cap_perfmon", "cap_setfcap", "cap_chown", "cap_fowner")
+      # КОГДА вектор появился: mtime носителя (бинарник с capability, файл
+      # sudoers). Без времени нельзя отличить свежий вектор, поставленный
+      # атакующим, от штатной настройки, лежащей тут годами.
+      import datetime
+      mt = {}
+      sect = ""
+      for ln in text.split("\n"):
+          t = ln.strip()
+          if t.startswith("===") and t.endswith("==="):
+              sect = t.strip("=")
+              continue
+          if sect == "MTIME" and "\t" in ln:
+              when, _, pth = ln.partition("\t")
+              mt[pth.strip()] = when.strip()[:19]
+      newest_sudoers = ""
+      for pth, when in mt.items():
+          if pth.startswith("/etc/sudoers") and when > newest_sudoers:
+              newest_sudoers = when
+
+      def age(when):
+          if not when:
+              return ""
+          try:
+              d = datetime.datetime.strptime(when[:19], "%Y-%m-%d %H:%M:%S")
+          except ValueError:
+              return ""
+          return str((datetime.datetime.now() - d).days)
+
+      rows = []
+      section = ""
+      for ln in text.split("\n"):
+          s = ln.strip()
+          if s in ("===CAPS===", "===SUDO===", "===SUDOERS===",
+                       "===MTIME==="):
+              section = s.strip("=")
+              continue
+          if s == "":
+              continue
+          if section == "CAPS":
+              # "path capabilities" — напр. "/usr/bin/ping cap_net_raw=ep"
+              parts = s.rsplit(" ", 1)
+              path = parts[0]
+              caps = parts[1] if len(parts) == 2 else ""
+              risky = any(c in caps for c in RISKY)
+              rows.append({"kind": "capability", "name": path, "detail": caps,
+                           "risk": "high" if risky else "info",
+                           "nopasswd": "", "source": "getcap",
+                           "changed": mt.get(path, ""),
+                           "age_days": age(mt.get(path, ""))})
+          elif section == "SUDO":
+              # строки-правила: "(runas) [NOPASSWD:] команда"
+              m = re.search(r'\(([^)]*)\)\s*(.+)$', s)
+              if not m:
+                  continue
+              runas, rest = m.group(1), m.group(2)
+              nopass = "yes" if "NOPASSWD" in rest else ""
+              cmd = re.sub(r'^\s*(NOPASSWD|PASSWD|SETENV|NOEXEC|EXEC)\s*:\s*',
+                           "", rest).strip()
+              # правило пришло из живого запроса sudo -l; носитель — файлы
+              # sudoers, поэтому время берём по самому свежему из них
+              rows.append({"kind": "sudo", "name": cmd,
+                           "detail": "runas " + runas,
+                           "risk": "high" if nopass else "info",
+                           "nopasswd": nopass, "source": "sudo -l",
+                           "changed": newest_sudoers,
+                           "age_days": age(newest_sudoers)})
+          elif section == "SUDOERS":
+              # "<файл>\t<строка правила>"
+              f = s.split("\t", 1)
+              if len(f) != 2:
+                  continue
+              src, rule = f[0], f[1].strip()
+              nopass = "yes" if "NOPASSWD" in rule else ""
+              rows.append({"kind": "sudoers", "name": rule, "detail": "",
+                           "risk": "high" if nopass else "info",
+                           "nopasswd": nopass, "source": src,
+                           "changed": mt.get(src, ""),
+                           "age_days": age(mt.get(src, ""))})
+      return rows

@@ -1,0 +1,9 @@
+name: boot_perf
+id: LS-I-51
+type: input
+version: 1.0.0
+title: Boot performance
+command: |
+  systemd-analyze blame --no-pager 2>/dev/null | head -40; true
+interval: 3600
+enabled: true

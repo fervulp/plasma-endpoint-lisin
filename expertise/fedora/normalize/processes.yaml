@@ -1,0 +1,6 @@
+name: processes
+id: LS-N-14
+type: normalization_rule
+version: 3.0.0
+title: Processes
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.strip().split(None, 8)\n        if len(f) >= 8 and f[0].isdigit():\n            try:\n                rss = \"%g\" % round(float(f[5]) / 1024.0, 1)\n            except Exception:\n                rss = \"0\"\n            rows.append({\"pid\": f[0], \"ppid\": f[1], \"user\": f[2], \"cpu\": f[3],\n                         \"mem\": f[4], \"rss_mb\": rss, \"stat\": f[6],\n                         \"elapsed\": f[7], \"command\": f[8] if len(f) > 8 else \"\"})\n    return rows\n"

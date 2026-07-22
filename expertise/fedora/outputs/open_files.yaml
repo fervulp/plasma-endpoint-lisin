@@ -1,0 +1,9 @@
+name: db_open_files
+id: LS-O-open_files
+type: statedb
+version: 1.0.0
+title: Open files
+table: open_files
+# ключ — конкретный дескриптор конкретного процесса
+key: [pid, fd, path]
+icon: document-open

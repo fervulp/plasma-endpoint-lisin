@@ -1,0 +1,49 @@
+name: unpackaged_config
+id: LS-I-59
+type: input
+version: 1.0.0
+title: Config files not owned by any package
+# Обход /etc и сверка с базой rpm: какие файлы конфигурации добавлены МИМО
+# пакетного менеджера. Такой файл никто не сверяет с эталоном и не обновляет,
+# а если он ещё и принадлежит обычному пользователю, то влияет на поведение
+# службы, которая его читает.
+command: |
+  python3 - <<'PYCONF'
+  import os, subprocess
+  # ФАЙЛЫ КОНФИГУРАЦИИ, КОТОРЫХ НЕТ НИ В ОДНОМ ПАКЕТЕ.
+  # Пакетный менеджер знает каждый свой файл. Всё, что лежит в /etc и пакету
+  # НЕ принадлежит, добавлено вручную — и именно такие файлы интересны:
+  # их никто не проверяет на целостность и не обновляет.
+  # Плюс права: конфиг СЛУЖБЫ, доступный на запись обычному пользователю, —
+  # это возможность влиять на то, что служба делает.
+  owned = set()
+  try:
+      out = subprocess.run(["rpm", "-qa", "--qf", "[%{FILENAMES}\n]"],
+                           capture_output=True, text=True, timeout=180).stdout
+      owned = set(out.splitlines())
+  except Exception:
+      pass
+
+  for root, dirs, files in os.walk("/etc"):
+      dirs[:] = [d for d in dirs if d not in ("ssl", "pki", "ca-certificates")]
+      if root.count("/") > 4:
+          dirs[:] = []
+      for n in files:
+          p = os.path.join(root, n)
+          if p in owned:
+              continue
+          try:
+              st = os.stat(p)
+          except OSError:
+              continue
+          try:
+              import pwd, grp
+              u = pwd.getpwuid(st.st_uid).pw_name
+              g = grp.getgrgid(st.st_gid).gr_name
+          except (KeyError, ImportError):
+              u, g = str(st.st_uid), str(st.st_gid)
+          mode = oct(st.st_mode & 0o777)[2:]
+          print("\t".join([p, u, g, mode, str(int(st.st_mtime))]))
+  PYCONF
+interval: 3600
+enabled: true

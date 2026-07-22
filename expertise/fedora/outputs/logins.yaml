@@ -1,0 +1,11 @@
+name: db_logins
+id: LS-O-logins
+type: statedb
+version: 1.0.0
+title: Logins
+table: logins
+key:
+- user
+- tty
+- start
+icon: system-users

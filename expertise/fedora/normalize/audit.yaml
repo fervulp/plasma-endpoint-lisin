@@ -1,0 +1,6 @@
+name: audit
+id: LS-N-33
+type: normalization_rule
+version: 3.0.0
+title: Audit
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split(\"\\t\", 2)\n        if len(f) < 3 or not f[2].strip():\n            continue\n        rows.append({\"kind\": f[0], \"name\": f[1], \"detail\": f[2].strip()})\n    return rows\n"

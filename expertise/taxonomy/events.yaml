@@ -1,0 +1,573 @@
+name: events
+id: LS-T-1
+type: taxonomy
+version: 1.0.0
+title: Event taxonomy (ECS-like)
+description: 'Единая таксономия событий LiSin. По образцу ECS (Elastic Common Schema), плоские имена колонок
+  (точка ECS → подчёркивание в SQL). Именно ПОД ЭТИ ПОЛЯ пишутся правила нормализации (normalize) и корреляции
+  (detection) — как sigma-правила пишутся под свою таксономию. Схема таблицы events СТРОИТСЯ ИЗ ЭТОГО
+  ФАЙЛА: добавил поле сюда → колонка появится в БД. Ничего не удаляется автоматически (колонки только
+  добавляются).'
+key: event_id
+table: events
+fields:
+- name: ts
+  ecs: '@timestamp'
+  type: text
+  index: true
+  group: event
+  desc: Время события (ISO-8601, UTC)
+- name: ingested
+  ecs: event.ingested
+  type: text
+  group: event
+  desc: Когда событие попало в базу
+- name: event_id
+  ecs: event.id
+  type: text
+  index: true
+  group: event
+  desc: Уникальный id события (журнальный курсор) — ключ дедупликации
+- name: event_kind
+  ecs: event.kind
+  type: text
+  index: true
+  group: event
+  desc: event | alert | metric | state
+- name: event_category
+  ecs: event.category
+  type: text
+  index: true
+  group: event
+  desc: process | network | file | authentication | iam | session | package | driver | configuration |
+    intrusion_detection
+- name: event_type
+  ecs: event.type
+  type: text
+  index: true
+  group: event
+  desc: start | end | access | creation | deletion | change | connection | info | denied
+- name: event_action
+  ecs: event.action
+  type: text
+  index: true
+  group: event
+  desc: Конкретное действие (executed, connected, logged-in…)
+- name: event_outcome
+  ecs: event.outcome
+  type: text
+  index: true
+  group: event
+  desc: success | failure | unknown
+- name: event_severity
+  ecs: event.severity
+  type: int
+  index: true
+  group: event
+  desc: 0–100, нормализованная критичность
+- name: event_module
+  ecs: event.module
+  type: text
+  index: true
+  group: event
+  desc: 'Источник-модуль: journal | audit | network | …'
+- name: event_dataset
+  ecs: event.dataset
+  type: text
+  index: true
+  group: event
+  desc: Подпоток модуля (journal.audit, journal.syslog…)
+- name: event_provider
+  ecs: event.provider
+  type: text
+  group: event
+  desc: Кто сгенерировал (SYSLOG_IDENTIFIER, unit)
+- name: event_reason
+  ecs: event.reason
+  type: text
+  group: event
+  desc: Пояснение к outcome
+- name: message
+  ecs: message
+  type: text
+  group: event
+  desc: Человекочитаемое сообщение
+- name: tags
+  ecs: tags
+  type: text
+  group: event
+  desc: Метки через запятую
+- name: raw
+  ecs: event.original
+  type: json
+  group: event
+  desc: Исходная запись целиком (JSON) — ничего не теряем
+- name: subject_type
+  ecs: null
+  type: text
+  index: true
+  group: event
+  desc: 'Кто действовал: user | process | service | system'
+- name: subject_name
+  ecs: null
+  type: text
+  index: true
+  group: event
+  desc: Имя субъекта (local, sshd, systemd)
+- name: object_type
+  ecs: null
+  type: text
+  index: true
+  group: event
+  desc: 'Над чем: file | socket | process | package | account | service | module'
+- name: object_name
+  ecs: null
+  type: text
+  index: true
+  group: event
+  desc: Имя объекта (/etc/passwd, 8.8.8.8:443, firefox)
+- name: not_normalized
+  ecs: null
+  type: text
+  index: true
+  group: event
+  desc: Поля исходной записи, которые правило НЕ разобрало (сразу видно, что ещё нормализовать)
+- name: host_name
+  ecs: host.name
+  type: text
+  index: true
+  group: host
+  desc: Имя хоста
+- name: host_id
+  ecs: host.id
+  type: text
+  group: host
+  desc: machine-id
+- name: host_ip
+  ecs: host.ip
+  type: text
+  group: host
+  desc: IP хоста
+- name: host_os
+  ecs: host.os.name
+  type: text
+  group: host
+  desc: ОС
+- name: host_boot_id
+  ecs: host.boot.id
+  type: text
+  group: host
+  desc: boot-id (перезагрузка = новая сессия)
+- name: user_name
+  ecs: user.name
+  type: text
+  index: true
+  group: user
+  desc: Пользователь события
+- name: user_id
+  ecs: user.id
+  type: text
+  index: true
+  group: user
+  desc: UID
+- name: user_group
+  ecs: user.group.name
+  type: text
+  group: user
+  desc: Группа (GID)
+- name: user_effective_id
+  ecs: user.effective.id
+  type: text
+  group: user
+  desc: EUID/FSUID — эскалация видна тут
+- name: user_target_name
+  ecs: user.target.name
+  type: text
+  group: user
+  desc: Целевой пользователь (su/sudo -u)
+- name: user_audit_id
+  ecs: user.audit.id
+  type: text
+  group: user
+  desc: loginuid — КТО реально вошёл (не меняется при su)
+- name: process_pid
+  ecs: process.pid
+  type: int
+  index: true
+  group: process
+  desc: PID
+- name: process_name
+  ecs: process.name
+  type: text
+  index: true
+  group: process
+  desc: comm
+- name: process_executable
+  ecs: process.executable
+  type: text
+  index: true
+  group: process
+  desc: Полный путь exe
+- name: process_command_line
+  ecs: process.command_line
+  type: text
+  group: process
+  desc: Полная командная строка
+- name: process_args
+  ecs: process.args
+  type: text
+  group: process
+  desc: Аргументы
+- name: process_working_directory
+  ecs: process.working_directory
+  type: text
+  group: process
+  desc: cwd
+- name: process_exit_code
+  ecs: process.exit_code
+  type: text
+  group: process
+  desc: Код возврата / exit syscall
+- name: process_tty
+  ecs: process.tty
+  type: text
+  group: process
+  desc: Терминал
+- name: process_thread_id
+  ecs: process.thread.id
+  type: text
+  group: process
+  desc: TID
+- name: process_source
+  ecs: process.source
+  type: text
+  group: process
+  desc: Как определён процесс-владелец
+- name: change_table
+  ecs: change.table
+  type: text
+  index: true
+  group: change
+  desc: Таблица состояния, где произошёл переход
+- name: change_row
+  ecs: change.row
+  type: text
+  index: true
+  group: change
+  desc: Ключ строки состояния
+- name: change_field
+  ecs: change.field
+  type: text
+  index: true
+  group: change
+  desc: Какое поле изменилось
+- name: change_old
+  ecs: change.old
+  type: text
+  group: change
+  desc: Значение до
+- name: change_new
+  ecs: change.new
+  type: text
+  group: change
+  desc: Значение после
+- name: parent_pid
+  ecs: process.parent.pid
+  type: int
+  index: true
+  group: process
+  desc: PPID
+- name: parent_name
+  ecs: process.parent.name
+  type: text
+  group: process
+  desc: Имя родителя
+- name: parent_executable
+  ecs: process.parent.executable
+  type: text
+  group: process
+  desc: Путь родителя
+- name: parent_command_line
+  ecs: process.parent.command_line
+  type: text
+  group: process
+  desc: Командная строка родителя
+- name: file_path
+  ecs: file.path
+  type: text
+  index: true
+  group: file
+  desc: Полный путь
+- name: file_name
+  ecs: file.name
+  type: text
+  group: file
+  desc: Имя файла
+- name: file_directory
+  ecs: file.directory
+  type: text
+  group: file
+  desc: Каталог
+- name: file_extension
+  ecs: file.extension
+  type: text
+  group: file
+  desc: Расширение
+- name: file_mode
+  ecs: file.mode
+  type: text
+  group: file
+  desc: Права (0644)
+- name: file_owner
+  ecs: file.owner
+  type: text
+  group: file
+  desc: Владелец
+- name: file_size
+  ecs: file.size
+  type: int
+  group: file
+  desc: Размер
+- name: file_hash_sha256
+  ecs: file.hash.sha256
+  type: text
+  index: true
+  group: file
+  desc: SHA-256
+- name: file_target_path
+  ecs: file.target_path
+  type: text
+  group: file
+  desc: Цель symlink/переименования
+- name: network_transport
+  ecs: network.transport
+  type: text
+  index: true
+  group: network
+  desc: tcp | udp | icmp
+- name: network_protocol
+  ecs: network.protocol
+  type: text
+  index: true
+  group: network
+  desc: Прикладной протокол (dns, http, tls)
+- name: network_direction
+  ecs: network.direction
+  type: text
+  group: network
+  desc: inbound | outbound | internal
+- name: network_bytes
+  ecs: network.bytes
+  type: int
+  group: network
+  desc: Байт
+- name: network_packets
+  ecs: network.packets
+  type: int
+  group: network
+  desc: Пакетов
+- name: source_ip
+  ecs: source.ip
+  type: text
+  index: true
+  group: network
+  desc: IP источника
+- name: source_port
+  ecs: source.port
+  type: int
+  group: network
+  desc: Порт источника
+- name: source_domain
+  ecs: source.domain
+  type: text
+  group: network
+  desc: Домен источника
+- name: destination_ip
+  ecs: destination.ip
+  type: text
+  index: true
+  group: network
+  desc: IP назначения
+- name: destination_port
+  ecs: destination.port
+  type: int
+  index: true
+  group: network
+  desc: Порт назначения
+- name: destination_domain
+  ecs: destination.domain
+  type: text
+  group: network
+  desc: Домен назначения
+- name: dns_question_name
+  ecs: dns.question.name
+  type: text
+  index: true
+  group: network
+  desc: Запрошенное имя
+- name: dns_resolved_ip
+  ecs: dns.resolved_ip
+  type: text
+  group: network
+  desc: Ответные адреса
+- name: url_full
+  ecs: url.full
+  type: text
+  group: network
+  desc: URL
+- name: url_domain
+  ecs: url.domain
+  type: text
+  group: network
+  desc: Домен URL
+- name: destination_as_org
+  ecs: destination.as.organization.name
+  type: text
+  group: intel
+  desc: Владелец сети назначения (WHOIS/ASN)
+- name: destination_as_number
+  ecs: destination.as.number
+  type: text
+  group: intel
+  desc: ASN назначения
+- name: destination_geo_country
+  ecs: destination.geo.country_name
+  type: text
+  group: intel
+  desc: Страна назначения
+- name: threat_indicator
+  ecs: threat.indicator.type
+  type: text
+  group: intel
+  desc: Тип индикатора, если совпал с фидом
+- name: audit_type
+  ecs: null
+  type: text
+  index: true
+  group: linux
+  desc: Тип записи auditd (SYSCALL, EXECVE, SOCKADDR…)
+- name: audit_id
+  ecs: null
+  type: text
+  index: true
+  group: linux
+  desc: Серийный номер audit-события (склейка записей)
+- name: audit_key
+  ecs: null
+  type: text
+  group: linux
+  desc: Ключ audit-правила (-k)
+- name: audit_session
+  ecs: null
+  type: text
+  group: linux
+  desc: Сессия audit
+- name: syscall
+  ecs: null
+  type: text
+  index: true
+  group: linux
+  desc: Имя/номер системного вызова
+- name: selinux_context
+  ecs: null
+  type: text
+  group: linux
+  desc: Контекст SELinux
+- name: service_name
+  ecs: service.name
+  type: text
+  index: true
+  group: linux
+  desc: systemd-юнит
+- name: service_state
+  ecs: service.state
+  type: text
+  group: linux
+  desc: Состояние сервиса
+- name: session_id
+  ecs: null
+  type: text
+  group: linux
+  desc: Сессия входа
+- name: package_name
+  ecs: package.name
+  type: text
+  index: true
+  group: linux
+  desc: Пакет (установка/удаление)
+- name: package_version
+  ecs: package.version
+  type: text
+  group: linux
+  desc: Версия пакета
+- name: rule_id
+  ecs: rule.id
+  type: text
+  index: true
+  group: detection
+  desc: ID сработавшего правила
+- name: rule_name
+  ecs: rule.name
+  type: text
+  group: detection
+  desc: Название детекта
+- name: rule_tactic
+  ecs: threat.tactic.name
+  type: text
+  index: true
+  group: detection
+  desc: Тактика MITRE ATT&CK
+- name: rule_technique
+  ecs: threat.technique.id
+  type: text
+  group: detection
+  desc: Техника MITRE (T1059…)
+- name: risk_score
+  ecs: event.risk_score
+  type: int
+  group: detection
+  desc: Итоговый риск 0–100
+- name: related_ip
+  ecs: related.ip
+  type: text
+  index: true
+  group: related
+  desc: Все IP события — для быстрого пивота
+- name: related_user
+  ecs: related.user
+  type: text
+  index: true
+  group: related
+  desc: Все пользователи события
+- name: related_hash
+  ecs: related.hash
+  type: text
+  group: related
+  desc: Все хэши события
+- name: boot_id
+  type: text
+  group: host
+  desc: Идентификатор запуска системы, в котором произошло событие
+  index: true
+- name: boot_at
+  type: text
+  group: host
+  desc: Когда систему включили (начало этого запуска)
+- name: session_user
+  type: text
+  group: user
+  desc: Кто был в системе в это время (вход по wtmp)
+  index: true
+- name: session_from
+  type: text
+  group: user
+  desc: Откуда открыт сеанс
+- name: session_started
+  type: text
+  group: user
+  desc: Когда начался сеанс
+- name: process_alive
+  type: text
+  group: process
+  index: true
+  desc: Жив ли процесс события на момент связывания (yes/no)

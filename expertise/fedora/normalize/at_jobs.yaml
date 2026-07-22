@@ -1,0 +1,6 @@
+name: at_jobs
+id: LS-N-34
+type: normalization_rule
+version: 3.0.0
+title: at jobs
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split(\"\\t\", 2)\n        if len(f) < 2:\n            continue\n        meta = f[1].strip()\n        rows.append({\"kind\": \"at\", \"name\": f[0], \"scope\": \"user\", \"detail\": meta,\n                     \"next\": meta, \"source\": \"at\",\n                     \"content\": f[2] if len(f) > 2 else \"\"})\n    return rows\n"

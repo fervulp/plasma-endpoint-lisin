@@ -1,0 +1,15 @@
+name: dns
+id: LS-I-37
+type: input
+version: 1.0.0
+title: DNS
+# Целостность DNS: resolv.conf + per-link (resolvectl) + /etc/hosts + dnssec.
+command: |
+  grep -E '^(nameserver|search|domain)' /etc/resolv.conf 2>/dev/null | sed 's/^/resolv\t/'
+  resolvectl dns 2>/dev/null | sed -n 's/^Link [0-9]* (\([^)]*\)): \(.*\)/link-dns\t\1\t\2/p'
+  resolvectl domain 2>/dev/null | sed -n 's/^Link [0-9]* (\([^)]*\)): \(.*\)/link-domain\t\1\t\2/p'
+  resolvectl status 2>/dev/null | sed -n 's/.*DNSSEC=\([^ ]*\).*/global\tdnssec\t\1/p' | head -1
+  grep -vE '^\s*#|^\s*$' /etc/hosts 2>/dev/null | sed 's/^/hosts\t/'
+  true
+interval: 300
+enabled: true

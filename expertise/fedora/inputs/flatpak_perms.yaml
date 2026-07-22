@@ -1,0 +1,9 @@
+name: flatpak_perms
+id: LS-I-47
+type: input
+version: 1.0.0
+title: Flatpak permissions
+command: |
+  flatpak permissions 2>/dev/null; true
+interval: 900
+enabled: true

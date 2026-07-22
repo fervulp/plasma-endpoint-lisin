@@ -1,0 +1,9 @@
+name: db_kernel_modules
+id: LS-O-kernel_modules
+type: statedb
+version: 1.0.0
+title: Kernel modules
+table: kernel_modules
+key:
+- name
+icon: cpu

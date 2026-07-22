@@ -1,0 +1,16 @@
+name: persistence
+id: LS-N-38
+type: normalization_rule
+version: 1.0.0
+title: Persistence surface
+# vector<TAB>path<TAB>detail → строка. Python-плагин.
+code: |
+  def normalize(text):
+      rows = []
+      for line in text.splitlines():
+          f = line.split("\t")
+          if len(f) < 2 or not f[1]:
+              continue
+          rows.append({"vector": f[0], "path": f[1],
+                       "detail": f[2] if len(f) > 2 else ""})
+      return rows

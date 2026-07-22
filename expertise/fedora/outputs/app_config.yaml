@@ -1,0 +1,8 @@
+name: db_app_config
+id: LS-O-app_config
+type: statedb
+version: 1.0.0
+title: Application configs
+table: app_config
+key: [path]
+icon: document-properties

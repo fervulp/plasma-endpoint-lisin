@@ -1,0 +1,16 @@
+name: net_config
+id: LS-I-19
+type: input
+version: 2.0.0
+title: Routes / ARP / DNS
+command: 'ip -o route 2>/dev/null | sed ''s/^/route\t/''
+
+  ip -o neigh 2>/dev/null | sed ''s/^/neighbor\t/''
+
+  ip -o rule 2>/dev/null | sed ''s/^/rule\t/''
+
+  true
+
+  '
+interval: 120
+enabled: true

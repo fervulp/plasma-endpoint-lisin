@@ -1,0 +1,27 @@
+name: kmod_signed
+id: LS-E-13
+type: enrichment
+version: 1.0.0
+title: Kernel module signature
+# ПОДПИСАН ЛИ МОДУЛЬ ЯДРА. Неподписанный модуль в системе с Secure Boot —
+# аномалия: либо собран локально, либо загружен извне. modinfo спрашиваем
+# только по тем модулям, что реально загружены.
+code: |
+  def enrich(rows):
+      import subprocess
+      names = [str(r.get("name") or "") for r in rows if r.get("name")]
+      sig = {}
+      if names:
+          try:
+              out = subprocess.run(["modinfo", "-F", "signer"] + names[:400],
+                                   capture_output=True, text=True, timeout=60).stdout
+              lines = out.splitlines()
+              for i, nm in enumerate(names[:400]):
+                  sig[nm] = lines[i].strip() if i < len(lines) else ""
+          except Exception:
+              pass
+      for r in rows:
+          s = sig.get(str(r.get("name") or ""), "")
+          r["signer"] = s
+          r["signed"] = "yes" if s else "no"
+      return rows

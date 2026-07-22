@@ -1,0 +1,22 @@
+name: firewall
+id: LS-I-7
+type: input
+version: 1.2.0
+title: firewalld rules
+# Только АКТИВНЫЕ зоны (+ дефолтная) — не вываливаем ~15 предопределённых
+# неиспользуемых зон (минимум мусора). Формат вывода тот же (зона без
+# отступа → заголовок, «  ключ: значение» → строки).
+command: |
+  def=$(firewall-cmd --get-default-zone 2>/dev/null)
+  act=$(firewall-cmd --get-active-zones 2>/dev/null | awk '!/^ /{print $1}')
+  for z in $(printf '%s\n%s\n' "$def" "$act" | awk 'NF && !seen[$0]++'); do
+    firewall-cmd --list-all --zone="$z" 2>/dev/null
+  done
+  echo ---POLICIES---
+  firewall-cmd --list-all-policies 2>/dev/null
+  echo ---MISC---
+  echo default_zone=$def
+  echo log_denied=$(firewall-cmd --get-log-denied 2>/dev/null)
+  echo state=$(firewall-cmd --state 2>/dev/null)
+interval: 300
+enabled: true

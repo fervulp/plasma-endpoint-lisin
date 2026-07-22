@@ -1,0 +1,8 @@
+name: vms
+id: LS-I-22
+type: input
+version: 1.1.0
+title: Virtual machines
+command: "virsh list --all 2>/dev/null\nfor n in $(virsh list --all --name 2>/dev/null); do\n  echo \"===VM $n===\"\n  virsh dumpxml \"$n\" 2>/dev/null\ndone\ntrue\n"
+interval: 300
+enabled: true

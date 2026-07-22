@@ -1,0 +1,32 @@
+name: services
+id: LS-I-4
+type: input
+version: 1.2.0
+title: systemd services
+command: 'systemctl --no-pager --plain --no-legend list-units --type=service --state=running
+
+  echo ---USER---
+
+  systemctl --user --no-pager --plain --no-legend list-units --type=service --state=running
+
+  echo ---FILES---
+
+  systemctl --no-pager --plain --no-legend list-unit-files --type=service
+
+  echo ---UFILES---
+
+  systemctl --user --no-pager --plain --no-legend list-unit-files --type=service
+
+  echo ---CAT---
+
+  systemctl cat --no-pager -- $(systemctl --no-pager --plain --no-legend list-units --type=service --state=running | awk ''{print $1}'') 2>/dev/null
+
+  echo ---UCAT---
+
+  systemctl --user cat --no-pager -- $(systemctl --user --no-pager --plain --no-legend list-units --type=service --state=running | awk ''{print $1}'') 2>/dev/null
+
+  true
+
+  '
+interval: 120
+enabled: true

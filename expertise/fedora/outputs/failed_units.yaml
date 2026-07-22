@@ -1,0 +1,8 @@
+name: db_failed_units
+id: LS-O-failed_units
+type: statedb
+version: 1.0.0
+title: Failed units
+table: failed_units
+key: [scope, unit]
+icon: dialog-error

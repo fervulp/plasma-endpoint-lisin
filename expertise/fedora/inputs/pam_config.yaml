@@ -1,0 +1,14 @@
+name: pam_config
+id: LS-I-49
+type: input
+version: 1.0.0
+title: PAM configuration
+command: |
+  for f in /etc/pam.d/*; do
+    [ -r "$f" ] || continue
+    printf '===%s===\n' "$(basename $f)"
+    cat "$f"
+  done 2>/dev/null
+  true
+interval: 1800
+enabled: true

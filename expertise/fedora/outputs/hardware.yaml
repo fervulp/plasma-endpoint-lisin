@@ -1,0 +1,8 @@
+name: db_hardware
+id: LS-O-hardware
+type: statedb
+version: 1.0.0
+title: Hardware / BIOS
+table: hardware
+key: [item]
+icon: computer

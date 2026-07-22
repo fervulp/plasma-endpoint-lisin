@@ -1,0 +1,24 @@
+name: pkg_history
+id: LS-N-46
+type: normalization_rule
+version: 1.1.0
+title: Package history
+code: |
+  def normalize(text):
+      rows = []
+      for ln in text.splitlines():
+          s = ln.strip()
+          if not s or s.startswith("-") or not s.split()[0].isdigit():
+              continue
+          # «321 dnf install btop   2026-07-18 15:30:49   2»
+          m = re.match(r"^(\d+)\s+(.*?)\s{2,}(\d{4}-\d\d-\d\d[^\s]*(?:\s+[\d:]+)?)\s*(.*)$", s)
+          if not m:
+              f = s.split(None, 1)
+              rows.append({"id": f[0], "command": f[1][:120] if len(f) > 1 else "",
+                           "date": "", "altered": ""})
+              continue
+          cmd = m.group(2).strip()
+          rows.append({"id": m.group(1), "command": cmd[:120],
+                       "action": cmd.split()[1] if len(cmd.split()) > 1 else "",
+                       "date": m.group(3).strip(), "altered": m.group(4).strip()})
+      return rows

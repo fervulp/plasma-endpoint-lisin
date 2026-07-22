@@ -1,0 +1,6 @@
+name: boot
+id: LS-N-31
+type: normalization_rule
+version: 3.0.0
+title: Boot & mitigations
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split(\"\\t\", 1)\n        if len(f) < 2 or not f[1].strip():\n            continue\n        rows.append({\"item\": f[0], \"value\": f[1].strip()})\n    return rows\n"

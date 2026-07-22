@@ -1,0 +1,20 @@
+name: risky_shell_history
+id: LS-FN-9
+type: finding
+version: 1.0.0
+title: Опасные команды в истории
+severity: medium
+source: state
+sql: SELECT user, shell, command FROM shell_history WHERE command LIKE '%curl%|%sh%' OR command LIKE '%wget%|%sh%'
+  OR command LIKE '%chmod 777%' OR command LIKE '%curl%|%bash%'
+evidence: '{user}: {command}'
+why: Скачивание скрипта сразу в интерпретатор (curl | sh) выполняет чужой код без проверки, а chmod 777
+  открывает файл всем на запись.
+action: Проверьте, что именно выполнялось и осталось ли оно в системе.
+explore_table: shell_history
+explore_col: ''
+explore_val: ''
+tag: activity
+time_col: ''
+basis: methodology
+reference: MITRE ATT&CK T1105 Ingress Tool Transfer + T1059 Command and Scripting Interpreter

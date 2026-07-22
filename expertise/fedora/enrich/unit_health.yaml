@@ -1,0 +1,24 @@
+name: unit_health
+id: LS-E-10
+type: enrichment
+version: 1.0.0
+title: Service health link
+# СВЯЗЬ СЕРВИСА С ЕГО СОСТОЯНИЕМ: помечаем юниты, которые сейчас в failed.
+# Таблица services говорит «enabled», но не говорит «упал» — теперь говорит.
+code: |
+  def enrich(rows):
+      import sqlite3
+      from pathlib import Path
+      failed = set()
+      try:
+          con = sqlite3.connect("file:%s?mode=ro" % (Path.home() /
+                                ".local/share/lisin/state.db"), uri=True)
+          for u, in con.execute("SELECT unit FROM failed_units"):
+              failed.add(u)
+          con.close()
+      except Exception:
+          pass
+      for r in rows:
+          u = str(r.get("unit") or "")
+          r["health"] = "failed" if u in failed else ("running" if r.get("scope") else "")
+      return rows

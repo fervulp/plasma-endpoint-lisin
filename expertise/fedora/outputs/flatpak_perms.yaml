@@ -1,0 +1,8 @@
+name: db_flatpak_perms
+id: LS-O-flatpak_perms
+type: statedb
+version: 1.0.0
+title: Flatpak permissions
+table: flatpak_perms
+key: [app, perm_table, object]
+icon: security-medium

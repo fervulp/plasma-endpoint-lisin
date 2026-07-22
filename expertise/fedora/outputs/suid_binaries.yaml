@@ -1,0 +1,9 @@
+name: db_suid_binaries
+id: LS-O-suid_binaries
+type: statedb
+version: 1.0.0
+title: SUID binaries
+table: suid_binaries
+key:
+- path
+icon: security-low

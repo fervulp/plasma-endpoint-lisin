@@ -1,0 +1,17 @@
+name: hardware
+id: LS-I-35
+type: input
+version: 1.0.0
+title: Hardware / BIOS
+# dmidecode требует root → sudo -n (без пароля). Нет прав → пусто, без ошибки.
+command: |
+  for s in bios-vendor bios-version bios-release-date \
+           system-manufacturer system-product-name system-version \
+           system-serial-number system-uuid \
+           baseboard-manufacturer baseboard-product-name baseboard-serial-number \
+           processor-version; do
+    v=$(sudo -n dmidecode -s "$s" 2>/dev/null | grep -v '^#' | head -1)
+    [ -n "$v" ] && printf '%s\t%s\n' "$s" "$v"
+  done
+interval: 3600
+enabled: true

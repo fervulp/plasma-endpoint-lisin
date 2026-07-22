@@ -1,0 +1,20 @@
+name: open_ports
+id: LS-FN-1
+type: finding
+version: 1.0.0
+title: Порты доступны из сети
+severity: high
+source: state
+sql: SELECT local, proto, process, service, service_purpose FROM ports WHERE exposure LIKE 'OPEN%' AND
+  remote=''
+evidence: '{local} {proto}  {process} {service}'
+why: 'Открытый наружу порт — точка входа. Каждый должен быть обоснован: если служба нужна только локально,
+  наружу её выставлять нельзя.'
+action: Проверьте, нужен ли доступ извне. Если нет — закройте в firewalld или привяжите службу к 127.0.0.1.
+explore_table: ports
+explore_col: exposure
+explore_val: OPEN (exposed)
+tag: network
+time_col: ''
+basis: methodology
+reference: 'CIS Benchmark: службы не должны слушать 0.0.0.0 без необходимости'

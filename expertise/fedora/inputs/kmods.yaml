@@ -1,0 +1,13 @@
+name: kmods
+id: LS-I-8
+type: input
+version: 2.0.0
+title: Kernel modules
+command: |
+  lsmod | tail -n +2 | while read -r name size ref used; do
+    desc=$(modinfo -d "$name" 2>/dev/null | head -1 | tr '\n' ' ')
+    printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$size" "$ref" "$used" "$desc"
+  done
+  true
+interval: 600
+enabled: true

@@ -1,0 +1,8 @@
+name: system
+id: LS-I-9
+type: input
+version: 1.0.0
+title: System release
+command: cat /etc/os-release; echo kernel=$(uname -r); echo arch=$(uname -m); echo host=$(uname -n); echo uptime=$(uptime -p)
+interval: 120
+enabled: true

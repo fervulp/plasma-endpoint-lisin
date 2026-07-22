@@ -1,0 +1,42 @@
+name: applications
+id: LS-N-23
+type: normalization_rule
+version: 3.0.0
+title: Applications
+code: |
+  def normalize(text):
+      rows = []
+      for line in text.splitlines():
+          f = line.split("\t")
+          n = len(f)
+          if n < 2:
+              continue
+          rows.append({
+              "kind": f[0],
+              "name": f[1],
+              "app_id": f[2] if n > 2 else "",
+              "version": f[3] if n > 3 else "",
+              "path": f[4] if n > 4 else "",
+              "depends": f[5].strip() if n > 5 else "",
+              "description": f[6].strip() if n > 6 else "",
+          })
+      return rows
+# Тесты лежат РЯДОМ с правилом (приём из R-Vision SIEM): вход + ожидание.
+# Кнопка «Tests» в разделе «Экспертиза» прогоняет их и показывает pass/fail —
+# правило можно написать и проверить, не заглядывая в код приложения.
+tests:
+  - name: строка rpm со всеми полями
+    input: "rpm\tbash\t\t5.2.15\t/usr/bin/bash\tglibc\tGNU Bourne-Again Shell"
+    expect:
+      rows: 1
+      contains: {kind: rpm, name: bash, version: 5.2.15}
+      row0: {path: /usr/bin/bash, depends: glibc}
+  - name: короткая строка отбрасывается
+    input: "rpm"
+    expect:
+      rows: 0
+  - name: две строки разных видов
+    input: "rpm\tbash\t\t5.2\nflatpak\tAlpaca\tcom.jeffser.Alpaca\t9.2.4"
+    expect:
+      rows: 2
+      contains: {kind: flatpak, name: Alpaca}

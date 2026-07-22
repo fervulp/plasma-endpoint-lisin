@@ -1,0 +1,12 @@
+name: devices
+id: LS-I-6
+type: input
+version: 2.0.0
+title: Connected devices
+command: |
+  lsusb 2>/dev/null | sed 's/^/usb\t/'
+  lspci 2>/dev/null | sed 's/^/pci\t/'
+  lsblk -rno NAME,SIZE,TYPE,MODEL 2>/dev/null | sed 's/^/blk\t/'
+  true
+interval: 60
+enabled: true

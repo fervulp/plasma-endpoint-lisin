@@ -1,0 +1,103 @@
+name: event_process_link
+id: LS-E-23
+type: enrichment
+version: 1.0.0
+title: Link the event to a process
+# СВЯЗЬ СОБЫТИЯ С ПРОЦЕССОМ ДЕЛАЕТСЯ ПРИ ПОСТУПЛЕНИИ, а не при показе.
+# Раньше интерфейс сверял pid события с живыми процессами каждый раз, когда
+# показывал ленту: это работа на каждый просмотр и только для тех процессов,
+# которые ЕЩЁ живы. Здесь связь записывается в само событие один раз:
+#   * есть pid — дополняем имя, путь и пользователя из состояния;
+#   * pid нет — ищем его по имени процесса, по пути бинарника или по сокету
+#     (адрес:порт из события против таблицы сокетов), и если нашли ОДИН
+#     кандидат, записываем; способ фиксируем в process_source, чтобы
+#     догадка не выдавалась за факт.
+code: |
+  import sqlite3
+  from pathlib import Path
+
+  def _load():
+      by_pid, by_name, by_sock = {}, {}, {}
+      try:
+          con = sqlite3.connect("file:%s?mode=ro" % (Path.home() /
+                                ".local/share/lisin/state.db"), uri=True)
+          con.row_factory = sqlite3.Row
+          try:
+              for r in con.execute("SELECT pid, command, user, package FROM processes"):
+                  pid = str(r["pid"] or "").strip()
+                  cmd = str(r["command"] or "")
+                  if not pid:
+                      continue
+                  by_pid[pid] = {"command": cmd, "user": str(r["user"] or ""),
+                                 "package": str(r["package"] or "")}
+                  exe = cmd.split(" ")[0]
+                  base = exe.rsplit("/", 1)[-1]
+                  for key in (exe, base):
+                      if key:
+                          by_name.setdefault(key, set()).add(pid)
+          except sqlite3.Error:
+              pass
+          try:
+              # сокет -> процесс: у события есть адрес и порт назначения
+              for r in con.execute("SELECT remote, local, pid FROM ports"):
+                  pid = str(r["pid"] or "").strip()
+                  if not pid:
+                      continue
+                  for a in (str(r["remote"] or ""), str(r["local"] or "")):
+                      if a:
+                          by_sock.setdefault(a, set()).add(pid)
+          except sqlite3.Error:
+              pass
+          con.close()
+      except Exception:
+          pass
+      return by_pid, by_name, by_sock
+
+  def enrich(rows):
+      by_pid, by_name, by_sock = _load()
+
+      def one(pids):
+          """Связь принимаем, только если кандидат ОДИН: иначе это догадка."""
+          return next(iter(pids)) if pids and len(pids) == 1 else ""
+
+      for r in rows:
+          pid = str(r.get("process_pid") or "").strip()
+          if not pid:
+              # ищем по имени/пути процесса из самого события
+              for f in ("process_executable", "process_name", "object_name"):
+                  v = str(r.get(f) or "").strip()
+                  if not v:
+                      continue
+                  cand = one(by_name.get(v) or by_name.get(v.rsplit("/", 1)[-1]))
+                  if cand:
+                      pid = cand
+                      r["process_pid"] = pid
+                      r["process_source"] = "matched by name"
+                      break
+          if not pid:
+              # ищем по сокету события
+              dst = str(r.get("destination_ip") or "")
+              dpt = str(r.get("destination_port") or "")
+              key = "%s:%s" % (dst, dpt) if dst and dpt else ""
+              cand = one(by_sock.get(key)) if key else ""
+              if cand:
+                  pid = cand
+                  r["process_pid"] = pid
+                  r["process_source"] = "matched by socket"
+          if not pid:
+              continue
+          info = by_pid.get(pid)
+          # ЖИВ ЛИ ПРОЦЕСС — записываем сразу: интерфейсу не придётся
+          # сверяться со снимком на каждый показ ленты
+          r["process_alive"] = "yes" if info else "no"
+          if not info:
+              continue
+          if not str(r.get("process_executable") or "").strip():
+              r["process_executable"] = info["command"].split(" ")[0]
+          if not str(r.get("process_name") or "").strip():
+              r["process_name"] = info["command"].split(" ")[0].rsplit("/", 1)[-1]
+          if not str(r.get("user_name") or "").strip() and info["user"]:
+              r["user_name"] = info["user"]
+          if not str(r.get("package_name") or "").strip() and info["package"]:
+              r["package_name"] = info["package"]
+      return rows

@@ -1,0 +1,25 @@
+name: iface_stats
+id: LS-N-50
+type: normalization_rule
+version: 1.0.0
+title: Interface statistics
+code: |
+  def normalize(text):
+      try:
+          data = json.loads(text or "[]")
+      except Exception:
+          return []
+      rows = []
+      for d in data:
+          st = d.get("stats64") or {}
+          rx, tx = st.get("rx") or {}, st.get("tx") or {}
+          err = int(rx.get("errors", 0)) + int(tx.get("errors", 0))
+          drop = int(rx.get("dropped", 0)) + int(tx.get("dropped", 0))
+          rows.append({"iface": d.get("ifname", ""),
+                       "state": d.get("operstate", ""),
+                       "mtu": str(d.get("mtu", "")),
+                       "rx_mb": str(round(int(rx.get("bytes", 0)) / 1048576.0, 1)),
+                       "tx_mb": str(round(int(tx.get("bytes", 0)) / 1048576.0, 1)),
+                       "errors": str(err), "dropped": str(drop),
+                       "health": "errors" if err else ("drops" if drop else "ok")})
+      return rows

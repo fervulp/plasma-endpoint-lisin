@@ -1,0 +1,14 @@
+name: polkit_actions
+id: LS-I-48
+type: input
+version: 1.0.0
+title: Polkit actions
+command: |
+  for f in /usr/share/polkit-1/actions/*.policy; do
+    [ -r "$f" ] || continue
+    printf '===%s===\n' "$f"
+    cat "$f"
+  done 2>/dev/null
+  true
+interval: 1800
+enabled: true

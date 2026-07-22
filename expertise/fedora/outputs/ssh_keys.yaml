@@ -1,0 +1,8 @@
+name: db_ssh_keys
+id: LS-O-ssh_keys
+type: statedb
+version: 1.0.0
+title: SSH keys
+table: ssh_keys
+key: [path]
+icon: password-copy

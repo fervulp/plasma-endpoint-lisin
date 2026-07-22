@@ -1,0 +1,128 @@
+name: file_integrity
+id: LS-N-43
+type: normalization_rule
+version: 1.1.0
+title: File integrity → event taxonomy
+# Разбирает флаги rpm -V (S размер, 5 контрольная сумма, M права, U/G
+# владелец, T время, P capabilities) в события категории file.
+# Фактические права/владелец дочитываются из ФС.
+code: |
+  def normalize(text):
+      import datetime, os, socket
+      host = socket.gethostname()
+      ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+      # позиции флагов rpm -V: S размер, M права, 5 контрольная сумма, D устройство,
+      # L symlink, U владелец, G группа, T время, P capabilities
+      FLAG = [("S", "size"), ("M", "mode"), ("5", "checksum"), ("D", "device"),
+              ("L", "symlink"), ("U", "owner"), ("G", "group"), ("T", "mtime"),
+              ("P", "caps")]
+      rows = []
+      for ln in text.splitlines():
+          ln = ln.rstrip()
+          if not ln.strip():
+              continue
+          note = ""
+          if "(Permission denied)" in ln:
+              note = "no access"
+              ln = ln.replace(" (Permission denied)", "")
+          missing = ln.startswith("missing")
+          if missing:
+              rest = ln[len("missing"):].strip()
+              flags = ""
+          else:
+              flags, rest = ln[:9], ln[9:].strip()
+              if len(ln) < 10:
+                  continue
+          # необязательная пометка типа файла: c (config), d (doc), g (ghost)...
+          ftype = ""
+          if len(rest) > 2 and rest[1] == " " and rest[0] in "cdglrs":
+              ftype, rest = rest[0], rest[2:].strip()
+          path = rest
+          if not path.startswith("/"):
+              continue
+          changed = [name for ch, name in FLAG if ch in flags]
+          if missing:
+              action, sev = "file_missing", 60
+          elif "checksum" in changed or "size" in changed:
+              action, sev = "file_modified", 55
+          elif "mode" in changed or "owner" in changed or "group" in changed:
+              action, sev = "file_permissions_changed", 65
+          elif "caps" in changed:
+              action, sev = "file_caps_changed", 75
+          elif changed:
+              action, sev = "file_touched", 25
+          else:
+              action, sev = "file_unverified", 15
+          if note:
+              sev = 15                      # не смогли прочитать — это не находка
+          # фактические права/владелец — из самой ФС (rpm говорит лишь «отличается»)
+          mode = owner = ""
+          try:
+              import pwd as _pwd
+              st = os.stat(path)
+              mode = oct(st.st_mode & 0o7777)[2:].rjust(4, "0")
+              try:
+                  owner = _pwd.getpwuid(st.st_uid).pw_name
+              except KeyError:
+                  owner = str(st.st_uid)
+          except OSError:
+              pass
+          name = path.rsplit("/", 1)[-1]
+          rows.append({
+              "ts": ts,
+              # пока набор расхождений тот же — событие одно (дедуп по event_id)
+              "event_id": "fim:%s:%s:%s" % (path, flags or "missing", note),
+              "event_kind": "event",
+              "event_category": "file",
+              "event_type": "change",
+              "event_action": action,
+              "event_outcome": "success" if not note else "unknown",
+              "event_severity": sev,
+              "event_module": "fim",
+              "event_dataset": "rpm.verify",
+              "event_provider": "rpm",
+              "host_name": host,
+              "file_path": path,
+              "file_name": name,
+              "file_directory": path.rsplit("/", 1)[0] if "/" in path else "",
+              "file_extension": name.rsplit(".", 1)[-1] if "." in name else "",
+              "file_mode": mode,
+              "file_owner": owner,
+              "message": ("config " if ftype == "c" else "") +
+                         (("missing: " + path) if missing
+                          else ("changed [" + ", ".join(changed) + "]: " + path
+                                if changed else "not verified: " + path))
+                         + ((" (" + note + ")") if note else ""),
+              "not_normalized": "",
+          })
+      # --- КТО → НАД ЧЕМ (единая ось для чтения события) ---
+      for r in rows:
+          if r.get("subject_type"):
+              continue
+          cat = r.get("event_category", "")
+          if r.get("user_name"):
+              r["subject_type"], r["subject_name"] = "user", r["user_name"]
+          elif r.get("service_name"):
+              r["subject_type"], r["subject_name"] = "service", r["service_name"]
+          elif r.get("process_name"):
+              r["subject_type"], r["subject_name"] = "process", r["process_name"]
+          else:
+              r["subject_type"], r["subject_name"] = "system", r.get("host_name", "")
+          if r.get("file_path"):
+              r["object_type"], r["object_name"] = "file", r["file_path"]
+          elif r.get("destination_ip"):
+              r["object_type"] = "socket"
+              r["object_name"] = "%s:%s" % (r["destination_ip"], r.get("destination_port") or "")
+          elif r.get("package_name"):
+              r["object_type"], r["object_name"] = "package", r["package_name"]
+          elif cat == "process" and r.get("process_executable"):
+              r["object_type"], r["object_name"] = "process", r["process_executable"]
+          elif cat in ("authentication", "iam"):
+              r["object_type"] = "account"
+              r["object_name"] = r.get("user_target_name") or r.get("user_name", "")
+          elif r.get("service_name"):
+              r["object_type"], r["object_name"] = "service", r["service_name"]
+          else:
+              r["object_type"], r["object_name"] = "", ""
+      return rows

@@ -1,0 +1,9 @@
+name: pkg_history
+id: LS-I-46
+type: input
+version: 1.0.0
+title: Package history
+command: |
+  dnf history list 2>/dev/null | tail -n +3 | head -200
+interval: 1800
+enabled: true

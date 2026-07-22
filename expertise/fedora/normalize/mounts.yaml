@@ -1,0 +1,6 @@
+name: mounts
+id: LS-N-32
+type: normalization_rule
+version: 3.0.0
+title: Mounts
+code: "def normalize(text):\n    skip = {\"cgroup\", \"cgroup2\", \"pstore\", \"bpf\", \"tracefs\", \"debugfs\",\n            \"securityfs\", \"mqueue\", \"hugetlbfs\", \"configfs\", \"fusectl\",\n            \"devpts\", \"proc\", \"sysfs\", \"ramfs\", \"autofs\", \"binfmt_misc\",\n            \"efivarfs\", \"none\"}\n    rows = []\n    for line in text.splitlines():\n        f = line.split(None, 3)\n        if len(f) < 4:\n            continue\n        fstype = f[2]\n        if fstype in skip:\n            continue\n        opts = f[3]\n        flags = [x for x in (\"nosuid\", \"nodev\", \"noexec\") if x in opts]\n        rows.append({\"target\": f[0], \"source\": f[1], \"fstype\": fstype,\n                     \"hardening\": \",\".join(flags) or \"(none)\", \"options\": opts})\n    return rows\n"

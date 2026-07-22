@@ -1,0 +1,8 @@
+name: db_unpackaged_config
+id: LS-O-unpackaged_config
+type: statedb
+version: 1.0.0
+title: Config outside packages
+table: unpackaged_config
+key: [path]
+icon: document-properties

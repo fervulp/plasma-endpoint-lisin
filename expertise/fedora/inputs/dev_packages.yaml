@@ -1,0 +1,44 @@
+name: dev_packages
+id: LS-I-28
+type: input
+version: 2.0.0
+title: Language packages
+# Пакеты языковых экосистем → applications, kind = менеджер, + description.
+# Формат: kind<TAB>name<TAB>version<TAB>description.
+command: |
+  # приложение под PYTHONNOUSERSITE=1 — снимаем, иначе pip скроет user-site
+  unset PYTHONNOUSERSITE
+  if command -v pip >/dev/null 2>&1; then
+    names=$(pip list --format=freeze 2>/dev/null | cut -d= -f1 | tr '\n' ' ')
+    pip show $names 2>/dev/null | awk '
+      function flush(){ if(n!=""){ if(s=="UNKNOWN")s=""; printf "pip\t%s\t%s\t%s\n",n,v,s } n="";v="";s="" }
+      /^Name: /{ flush(); n=substr($0,7) }
+      /^Version: /{ v=substr($0,10) }
+      /^Summary: /{ s=substr($0,10) }
+      END{ flush() }'
+  fi
+  if command -v pipx >/dev/null 2>&1; then
+    pipx list --short 2>/dev/null | awk 'NF{printf "pipx\t%s\t%s\t\n",$1,$2}'
+  fi
+  if command -v cargo >/dev/null 2>&1; then
+    cargo install --list 2>/dev/null | \
+      awk '/^[^ ].*:$/{gsub(/:$/,"");printf "cargo\t%s\t%s\t\n",$1,$2}'
+  fi
+  if command -v npm >/dev/null 2>&1; then
+    npm ls -g --depth=0 --json --long 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); [print("npm\t%s\t%s\t%s"%(n,i.get("version",""),(i.get("description") or "").replace(chr(9)," ").replace(chr(10)," "))) for n,i in (d.get("dependencies") or {}).items()]' 2>/dev/null
+  fi
+  if command -v gem >/dev/null 2>&1; then
+    gem list --local 2>/dev/null | \
+      sed -E 's/^([^ ]+) \(([^,)]+).*/gem\t\1\t\2\t/'
+  fi
+  if command -v go >/dev/null 2>&1; then
+    gb="$(go env GOPATH 2>/dev/null)/bin"
+    [ -d "$gb" ] && for f in "$gb"/*; do
+      [ -x "$f" ] || continue
+      v=$(go version -m "$f" 2>/dev/null | awk '/^\tmod\t/{print $4; exit}')
+      printf 'go\t%s\t%s\t\n' "$(basename "$f")" "$v"
+    done
+  fi
+  true
+interval: 600
+enabled: true

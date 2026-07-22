@@ -1,0 +1,9 @@
+name: db_system
+id: LS-O-system
+type: statedb
+version: 1.0.0
+title: Release
+table: system
+key:
+- item
+icon: computer

@@ -1,0 +1,64 @@
+name: ports
+id: LS-N-3
+type: normalization_rule
+version: 4.0.0
+title: Network sockets
+code: |
+  def normalize(text):
+      parts = text.split("---FWPORTS---")
+      lines = parts[0].split("\n")
+      fw = parts[1] if len(parts) > 1 else ""
+      fwsingle, fwranges = {}, []
+      for tok in re.split(r'\s+', fw):
+          m = re.match(r'^(\d+)(-(\d+))?/(tcp|udp)$', tok)
+          if not m:
+              continue
+          if m.group(3):
+              fwranges.append({"lo": int(m.group(1)), "hi": int(m.group(3)),
+                               "proto": m.group(4)})
+          else:
+              fwsingle[m.group(1) + "/" + m.group(4)] = True
+      rows = []
+      for ln in lines:
+          f = re.split(r'\s+', ln.strip())
+          if len(f) < 6:
+              continue
+          proto, state, local, peer = f[0], f[1], f[4], f[5]
+          pm = re.search(r'"([^"]+)",pid=(\d+)', ln)
+          proc = (pm.group(1) + " (" + pm.group(2) + ")") if pm else ""
+          proto3 = proto.replace("tcp6", "tcp").replace("udp6", "udp")[:3]
+          is_listen = state == "LISTEN" or peer.endswith(":*") or peer == "*:*"
+          remote, exposure = "", ""
+          if is_listen:
+              li = local.split(":")
+              port = li[-1]
+              addr = ":".join(li[:-1])
+              external = addr in ("0.0.0.0", "*", "::", "[::]")
+              if not external:
+                  external = (not addr.startswith("127.")
+                              and not addr.startswith("[::1]")
+                              and addr != "" and addr != "::1")
+              exposure = "local-only"
+              if external:
+                  try:
+                      pn = int(port)
+                  except Exception:
+                      pn = -1
+                  allowed = fwsingle.get(port + "/" + proto3, False) is True
+                  if not allowed:
+                      for rg in fwranges:
+                          if rg["lo"] <= pn <= rg["hi"] and rg["proto"] == proto3:
+                              allowed = True
+                  exposure = "OPEN (exposed)" if allowed else "filtered (firewall)"
+          else:
+              remote = peer
+              exposure = "established"
+          # Адрес и ПОРТ отдельными колонками: по номеру порта группируют и
+          # фильтруют постоянно («кто ещё слушает 8080»), а из строки
+          # «0.0.0.0:21027» это делать нечем. Колонки в таблице были, но
+          # пустовали — заполняем их разбором, а не отдельным источником.
+          _a, _, _p = local.rpartition(":")
+          rows.append({"proto": proto, "state": state, "local": local,
+                       "addr": _a, "port": _p,
+                       "remote": remote, "process": proc, "exposure": exposure})
+      return rows

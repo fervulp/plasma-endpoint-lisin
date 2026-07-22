@@ -1,0 +1,8 @@
+name: security
+id: LS-I-20
+type: input
+version: 1.0.0
+title: Security status
+command: echo selinux_mode=$(getenforce 2>/dev/null); sestatus 2>/dev/null; echo firewalld=$(systemctl is-active firewalld 2>/dev/null); echo sshd=$(systemctl is-active sshd 2>/dev/null)
+interval: 300
+enabled: true

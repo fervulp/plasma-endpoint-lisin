@@ -1,0 +1,9 @@
+name: db_cpu
+id: LS-O-cpu
+type: statedb
+version: 1.0.0
+title: CPU
+table: cpu
+key:
+- item
+icon: cpu

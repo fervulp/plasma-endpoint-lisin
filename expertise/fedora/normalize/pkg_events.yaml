@@ -1,0 +1,69 @@
+name: pkg_events
+id: LS-N-41
+type: normalization_rule
+version: 1.0.0
+title: Package events → event taxonomy
+# Пишет в ТУ ЖЕ таксономию, что и journal — поэтому попадает в то же окно.
+code: |
+  def normalize(text):
+      import datetime, socket
+      host = socket.gethostname()
+      rows = []
+      for ln in text.splitlines():
+          f = ln.split("\t")
+          if len(f) < 3:
+              continue
+          try:
+              ts = datetime.datetime.fromtimestamp(
+                  int(f[0]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+          except Exception:
+              continue
+          name, ver = f[1], f[2]
+          rows.append({
+              "ts": ts,
+              # стабильный id: пакет+версия+время установки не меняются
+              "event_id": "rpm:" + name + ":" + ver + ":" + f[0],
+              "event_kind": "event",
+              "event_category": "package",
+              "event_type": "installation",
+              "event_action": "package_installed",
+              "event_outcome": "success",
+              "event_severity": 20,
+              "event_module": "rpmdb",
+              "event_dataset": "rpm.installed",
+              "event_provider": "rpm",
+              "host_name": host,
+              "package_name": name,
+              "package_version": ver,
+              "message": "installed " + name + " " + ver,
+          })
+      # --- КТО → НАД ЧЕМ (единая ось для чтения события) ---
+      for r in rows:
+          if r.get("subject_type"):
+              continue
+          cat = r.get("event_category", "")
+          if r.get("user_name"):
+              r["subject_type"], r["subject_name"] = "user", r["user_name"]
+          elif r.get("service_name"):
+              r["subject_type"], r["subject_name"] = "service", r["service_name"]
+          elif r.get("process_name"):
+              r["subject_type"], r["subject_name"] = "process", r["process_name"]
+          else:
+              r["subject_type"], r["subject_name"] = "system", r.get("host_name", "")
+          if r.get("file_path"):
+              r["object_type"], r["object_name"] = "file", r["file_path"]
+          elif r.get("destination_ip"):
+              r["object_type"] = "socket"
+              r["object_name"] = "%s:%s" % (r["destination_ip"], r.get("destination_port") or "")
+          elif r.get("package_name"):
+              r["object_type"], r["object_name"] = "package", r["package_name"]
+          elif cat == "process" and r.get("process_executable"):
+              r["object_type"], r["object_name"] = "process", r["process_executable"]
+          elif cat in ("authentication", "iam"):
+              r["object_type"] = "account"
+              r["object_name"] = r.get("user_target_name") or r.get("user_name", "")
+          elif r.get("service_name"):
+              r["object_type"], r["object_name"] = "service", r["service_name"]
+          else:
+              r["object_type"], r["object_name"] = "", ""
+      return rows

@@ -1,0 +1,63 @@
+name: vulnerabilities
+id: LS-N-55
+type: normalization_rule
+version: 3.1.1
+title: Security advisories
+code: "def normalize(text):\n    SEC = {}\n    cur = None\n    for ln in text.splitlines():\n        if ln.startswith(\"===\") and ln.endswith(\"===\"):\n            cur = ln.strip(\"=\")\n            SEC[cur]\
+  \ = []\n            continue\n        if cur:\n            SEC[cur].append(ln)\n    if \"\\n\".join(SEC.get(\"STATUS\", [])).strip() != \"ok\":\n        raise RuntimeError(\n            \"dnf не отдал\
+  \ сведения об уязвимостях (нет сети или кэша). \"\n            \"Таблица не перезаписана, чтобы сбой не выглядел как «чисто».\")\n\n    ARCH = r\"\\.(x86_64|noarch|i686|aarch64|armv7hl|src)$\"\n\n   \
+  \ # ---- ОЦЕНКИ CVE (секция CVSS от точки входа) ----\n    # Балл считается ОФИЦИАЛЬНОЙ ФОРМУЛОЙ CVSS 3.1 (спецификация, разд. 8.1)\n    # из вектора; готовый балл источника (NVD его присылает) имеет\
+  \ приоритет.\n    # Формула живёт в правиле, а не в коде приложения: её видно и можно\n    # поправить, не открывая исходники.\n    AV = {\"N\": 0.85, \"A\": 0.62, \"L\": 0.55, \"P\": 0.2}\n    AC = {\"\
+  L\": 0.77, \"H\": 0.44}\n    PR_U = {\"N\": 0.85, \"L\": 0.62, \"H\": 0.27}\n    PR_C = {\"N\": 0.85, \"L\": 0.68, \"H\": 0.50}\n    UI = {\"N\": 0.85, \"R\": 0.62}\n    CIA = {\"H\": 0.56, \"L\": 0.22,\
+  \ \"N\": 0.0}\n\n    def _roundup(x):\n        i = int(round(x * 100000))\n        if i % 10000 == 0:\n            return i / 100000.0\n        return (i // 10000 + 1) / 10.0\n\n    def score_from_vector(vec):\n\
+  \        if not vec or \"CVSS:3\" not in vec:\n            return 0.0\n        m = {}\n        for part in vec.split(\"/\")[1:]:\n            k, _, v = part.partition(\":\")\n            m[k] = v\n  \
+  \      try:\n            changed = m[\"S\"] == \"C\"\n            av, ac = AV[m[\"AV\"]], AC[m[\"AC\"]]\n            pr = (PR_C if changed else PR_U)[m[\"PR\"]]\n            ui = UI[m[\"UI\"]]\n     \
+  \       c_, i_, a_ = CIA[m[\"C\"]], CIA[m[\"I\"]], CIA[m[\"A\"]]\n        except KeyError:\n            return 0.0\n        iss = 1 - ((1 - c_) * (1 - i_) * (1 - a_))\n        impact = (7.52 * (iss -\
+  \ 0.029) - 3.25 * (iss - 0.02) ** 15) if changed \\\n            else 6.42 * iss\n        if impact <= 0:\n            return 0.0\n        expl = 8.22 * av * ac * pr * ui\n        raw = min(1.08 * (impact\
+  \ + expl), 10) if changed \\\n            else min(impact + expl, 10)\n        return _roundup(raw)\n\n    def rating(s):\n        if s >= 9.0:\n            return \"Critical\"\n        if s >= 7.0:\n\
+  \            return \"High\"\n        if s >= 4.0:\n            return \"Medium\"\n        if s > 0:\n            return \"Low\"\n        return \"\"\n\n    scores = {}\n    for ln in SEC.get(\"CVSS\"\
+  , []):\n        f = ln.split(\"\\t\")\n        if len(f) < 4 or not f[0].startswith(\"CVE-\"):\n            continue\n        cve_, src_, vec_, raw_ = f[0], f[1], f[2], f[3]\n        pub_ = f[4] if len(f)\
+  \ > 4 else \"\"\n        try:\n            sc_ = float(raw_) if raw_ else 0.0\n        except ValueError:\n            sc_ = 0.0\n        if not sc_:\n            sc_ = score_from_vector(vec_)\n     \
+  \   scores[cve_] = {\"score\": sc_, \"vector\": vec_, \"src\": src_, \"pub\": pub_}\n\n    def pkg_name(nevra):\n        s = re.sub(ARCH, \"\", nevra)\n        return re.sub(r\"-[^-]+-[^-]+$\", \"\",\
+  \ s)\n\n    def pkg_evr(nevra):\n        s = re.sub(ARCH, \"\", nevra)\n        m = re.search(r\"-([^-]+-[^-]+)$\", s)\n        return m.group(1) if m else \"\"\n\n    # что реально установлено — источник\
+  \ правды про «стоит версия X»\n    installed = {}\n    for ln in SEC.get(\"RPM\", []):\n        f = ln.split(\"\\t\")\n        if len(f) == 2:\n            installed[f[0]] = f[1]\n\n    def parse_info(lines,\
+  \ status):\n        recs, cur, field = [], None, \"\"\n        for ln in lines:\n            if not ln.strip():\n                continue\n            m3 = re.match(r\"^\\s+:\\s?(.*)$\", ln)\n       \
+  \     if m3:\n                v = m3.group(1).strip()\n                if cur is not None and v:\n                    if field == \"Description\":\n                        cur[\"description\"] += \" \"\
+  \ + v\n                    elif field == \"Packages\":\n                        cur[\"pkgs\"].append(v)\n                continue\n            if not ln.startswith(\" \"):\n                m = re.match(r\"\
+  ^(\\S[^:]*?)\\s*:\\s?(.*)$\", ln)\n                if not m:\n                    continue\n                k, v = m.group(1).strip(), m.group(2).strip()\n                field = k\n                if\
+  \ k == \"Name\":\n                    cur = {\"advisory\": v, \"status\": status, \"description\": \"\",\n                           \"pkgs\": [], \"refs\": [], \"severity\": \"\",\n                 \
+  \          \"issued\": \"\", \"title\": \"\", \"state\": \"\"}\n                    recs.append(cur)\n                elif cur is not None:\n                    if k == \"Description\":\n            \
+  \            cur[\"description\"] = v\n                    elif k == \"Severity\":\n                        cur[\"severity\"] = v\n                    elif k == \"Issued\":\n                        cur[\"\
+  issued\"] = v\n                    elif k == \"Title\":\n                        cur[\"title\"] = v\n                    elif k == \"Status\":\n                        cur[\"state\"] = v\n           \
+  \     continue\n            m2 = re.match(r\"^\\s+(\\S[^:]*?)\\s*:\\s?(.*)$\", ln)\n            if m2 and cur is not None:\n                field = m2.group(1).strip()\n                v = m2.group(2).strip()\n\
+  \                if field == \"Packages\" and v:\n                    cur[\"pkgs\"].append(v)\n                # Секция Reference: у 13 из 77 бюллетеней номер CVE есть\n                # ТОЛЬКО здесь\
+  \ — в заголовке ссылки на bugzilla, а не в\n                # описании. Без разбора ссылок эти CVE терялись молча.\n                elif field == \"Title\" and v:\n                    cur[\"refs\"].append({\"\
+  title\": v, \"url\": \"\"})\n                elif field == \"Url\" and v and cur[\"refs\"]:\n                    cur[\"refs\"][-1][\"url\"] = v\n        return recs\n\n    recs = (parse_info(SEC.get(\"\
+  INFO_OPEN\", []), \"open\")\n            + parse_info(SEC.get(\"INFO_FIXED\", []), \"closed\"))\n\n    rows = []\n    seen = set()\n    for a in recs:\n        if a[\"advisory\"] in seen:\n          \
+  \  continue\n        seen.add(a[\"advisory\"])\n        # оставляем только пакеты, которые ДЕЙСТВИТЕЛЬНО стоят в системе:\n        # бюллетень перечисляет и debuginfo, и src — они машину не касаются\n\
+  \        hit = []\n        for p in a[\"pkgs\"]:\n            n = pkg_name(p)\n            if n in installed and n not in [h[0] for h in hit]:\n                hit.append((n, pkg_evr(p)))\n        if\
+  \ not hit:\n            continue\n        # базовый пакет вперёд: у него имя короче (kernel < kernel-headers),\n        # иначе «стоит версия» показывалась бы от случайного подпакета\n        hit.sort(key=lambda\
+  \ h: (len(h[0]), h[0]))\n        names = [h[0] for h in hit]\n        blob = \" \".join([a[\"title\"], a[\"description\"]]\n                        + [r[\"title\"] for r in a[\"refs\"]])\n        cves\
+  \ = sorted(set(re.findall(r\"CVE-\\d{4}-\\d{4,7}\", blob)))\n        openq = a[\"status\"] == \"open\"\n        # у бюллетеня несколько CVE — берём ХУДШУЮ: она определяет срочность\n        best, best_vec,\
+  \ best_src, best_pub, got = 0.0, \"\", \"\", \"\", 0\n        for c_ in cves:\n            d_ = scores.get(c_)\n            if not d_ or not d_[\"score\"]:\n                continue\n            got +=\
+  \ 1\n            if d_[\"score\"] > best:\n                best, best_vec = d_[\"score\"], d_[\"vector\"]\n                best_src, best_pub = d_[\"src\"], d_[\"pub\"]\n        rows.append({\n      \
+  \      \"status\": a[\"status\"],\n            \"severity\": a[\"severity\"],\n            # cvss_* считаются здесь же из секции CVSS точки входа\n            \"cvss_score\": (\"%.1f\" % best) if best\
+  \ else \"\",\n            \"cvss_rating\": rating(best),\n            \"advisory\": a[\"advisory\"],\n            \"packages\": \", \".join(names[:8]),\n            \"packages_count\": str(len(names)),\n\
+  \            \"installed_version\": installed.get(names[0], \"\"),\n            \"fixed_version\": hit[0][1],\n            \"cve\": \", \".join(cves),\n            \"cve_count\": str(len(cves)),\n   \
+  \         \"issued\": a[\"issued\"],\n            \"title\": a[\"title\"][:160],\n            \"action\": (\"dnf upgrade --advisory=\" + a[\"advisory\"]) if openq\n                      else \"patch installed,\
+  \ no action needed\",\n            \"risk\": \"high\" if (openq and a[\"severity\"] in (\"Critical\", \"Important\"))\n                    else (\"medium\" if openq else \"none\"),\n            \"cvss_vector\"\
+  : best_vec,\n            \"cvss_source\": best_src,\n            \"cvss_covered\": (\"%d/%d\" % (got, len(cves))) if cves else \"\",\n            \"cve_published\": best_pub,\n            \"source\":\
+  \ \"Fedora updateinfo (repository metadata)\",\n            \"references\": \" \".join(r[\"url\"] for r in a[\"refs\"] if r[\"url\"]),\n            \"description\": a[\"description\"][:800],\n       \
+  \ })\n    return rows\n"
+tests:
+- name: балл CVSS считается из вектора, берётся худший CVE бюллетеня
+  input: "===STATUS===\nok\n===INFO_FIXED===\nName        : FEDORA-TEST-1\nTitle       : openssl-3.0\nSeverity    : Moderate\nIssued      : 2026-01-01 00:00:00\nDescription : fixes CVE-2024-0001 and CVE-2024-0002\n\
+    Collection  : \n  Packages  : openssl-3.0-1.fc44.x86_64\n===RPM===\nopenssl\t3.0-1.fc44\n===CVSS===\nCVE-2024-0001\tNVD\tCVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N\t5.3\t2024-01-01\nCVE-2024-0002\t\
+    OSV.dev\tCVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H\t\t2024-01-02\n"
+  expect:
+    rows: 1
+    row0:
+      cvss_score: '9.8'
+      cvss_rating: Critical
+      cvss_covered: 2/2
+      packages: openssl

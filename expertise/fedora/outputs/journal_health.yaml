@@ -1,0 +1,8 @@
+name: db_journal_health
+id: LS-O-journal_health
+type: statedb
+version: 1.0.0
+title: Journal health
+table: journal_health
+key: [item]
+icon: view-list-details

@@ -1,0 +1,8 @@
+name: db_boot
+id: LS-O-boot
+type: statedb
+version: 1.0.0
+title: Boot & mitigations
+table: boot
+key: [item]
+icon: system-reboot

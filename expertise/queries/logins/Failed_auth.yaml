@@ -1,0 +1,8 @@
+name: Failed_auth
+id: LS-Q-Failed_auth
+type: query
+version: 1.0.0
+title: Failed auth
+description: ''
+target: events
+sql: event_category = 'authentication' AND event_outcome = 'failure'

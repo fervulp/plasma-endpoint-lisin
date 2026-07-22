@@ -1,0 +1,8 @@
+name: db_pam_config
+id: LS-O-pam_config
+type: statedb
+version: 1.0.0
+title: PAM configuration
+table: pam_config
+key: [service, line_no]
+icon: dialog-password

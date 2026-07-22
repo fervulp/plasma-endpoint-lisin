@@ -1,0 +1,8 @@
+name: db_audit
+id: LS-O-audit
+type: statedb
+version: 1.0.0
+title: Audit
+table: audit
+key: [kind, name]
+icon: emblem-checked

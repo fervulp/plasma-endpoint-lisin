@@ -1,0 +1,12 @@
+name: containers
+id: LS-I-21
+type: input
+version: 1.1.0
+title: Containers
+command: |
+  docker ps -a --format 'docker|{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null
+  podman ps -a --format 'podman|{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}' 2>/dev/null
+  command -v kubectl >/dev/null && kubectl get pods -A --no-headers 2>/dev/null | awk '{print "k8s|"$2"|"$2"|"$1"|"$4}'
+  true
+interval: 120
+enabled: true

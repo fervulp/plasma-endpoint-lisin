@@ -1,0 +1,19 @@
+name: failed_units
+id: LS-N-45
+type: normalization_rule
+version: 1.0.0
+title: Failed units
+code: |
+  def normalize(text):
+      rows = []
+      for ln in text.splitlines():
+          f = ln.split("\t", 1)
+          if len(f) != 2 or not f[1].strip():
+              continue
+          p = f[1].split(None, 4)
+          if len(p) < 4:
+              continue
+          rows.append({"scope": f[0], "unit": p[0], "load": p[1],
+                       "active": p[2], "sub": p[3],
+                       "description": p[4] if len(p) > 4 else ""})
+      return rows

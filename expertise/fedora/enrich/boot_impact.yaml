@@ -1,0 +1,22 @@
+name: boot_impact
+id: LS-E-16
+type: enrichment
+version: 1.0.0
+title: Boot slowdown share
+# ДОЛЯ ЮНИТА В ЗАГРУЗКЕ: абсолютные секунды мало что говорят, пока не
+# видно, какую часть общего времени занял юнит. Считаем процент от суммы.
+code: |
+  def enrich(rows):
+      total = 0.0
+      for r in rows:
+          try:
+              total += float(r.get("seconds") or 0)
+          except (TypeError, ValueError):
+              pass
+      for r in rows:
+          try:
+              s = float(r.get("seconds") or 0)
+          except (TypeError, ValueError):
+              s = 0.0
+          r["share_pct"] = str(round(s * 100.0 / total, 1)) if total else "0"
+      return rows

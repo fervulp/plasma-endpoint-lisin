@@ -1,0 +1,42 @@
+name: open_files
+id: LS-I-58
+type: input
+version: 1.0.0
+title: Files open right now
+# ЧТО ПРОЦЕССЫ ИСПОЛЬЗУЮТ ПРЯМО СЕЙЧАС — снимок /proc/<pid>/fd.
+# Работает БЕЗ root для процессов своего пользователя: 3500 дескрипторов у
+# 98 процессов читаются за 1 секунду.
+#
+# ЧЕСТНОЕ ОГРАНИЧЕНИЕ: это СНИМОК открытого, а не журнал обращений.
+# Программа, которая открыла файл, прочитала и закрыла (так работает btop с
+# /proc), между снимками не проявится. Чтобы видеть сами обращения, нужны
+# правила аудита ядра — а это root (packaging/lisin-grant-access).
+command: |
+  python3 - <<'PYFD'
+  import os
+  # ЧТО ПРОЦЕССЫ ДЕРЖАТ ОТКРЫТЫМ ПРЯМО СЕЙЧАС. Читается из /proc/<pid>/fd,
+  # без root — видно всё, что принадлежит нашему пользователю.
+  # readlink, а не разбор `ls -l`: в путях бывают пробелы и скобки
+  # ("y4chksvz.Default (release)/places.sqlite"), и разбор по полям их ломал.
+  for pid in sorted(os.listdir("/proc")):
+      if not pid.isdigit():
+          continue
+      d = "/proc/%s/fd" % pid
+      try:
+          names = os.listdir(d)
+      except OSError:
+          continue
+      try:
+          with open("/proc/%s/comm" % pid) as f:
+              comm = f.read().strip()
+      except OSError:
+          comm = ""
+      for n in names:
+          try:
+              t = os.readlink(os.path.join(d, n))
+          except OSError:
+              continue
+          print("\t".join([pid, comm, n, t.replace("\t", " ")]))
+  PYFD
+interval: 60
+enabled: true

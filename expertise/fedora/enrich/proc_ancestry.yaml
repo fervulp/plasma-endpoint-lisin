@@ -1,0 +1,24 @@
+name: proc_ancestry
+id: LS-E-7
+type: enrichment
+version: 1.0.0
+title: Process launch chain
+# ЦЕПОЧКА ЗАПУСКА прямо в строке процесса: кто кого породил, вплоть до init.
+# Без неё в таблице видно «python3», но не видно, что его запустил cron.
+# Родители берутся из этого же набора строк — лишних вызовов нет.
+code: |
+  def enrich(rows):
+      by = {}
+      for r in rows:
+          if r.get("pid"):
+              by[str(r["pid"])] = r
+      for r in rows:
+          chain, cur, guard = [], str(r.get("ppid") or ""), 0
+          while cur and cur in by and guard < 12:
+              p = by[cur]
+              nm = (p.get("command") or "").strip().split(None, 1)[0].rsplit("/", 1)[-1]
+              chain.append(nm[:24] or cur)
+              cur, guard = str(p.get("ppid") or ""), guard + 1
+          r["launched_by"] = " ← ".join(chain[:6])
+          r["depth"] = str(len(chain))
+      return rows

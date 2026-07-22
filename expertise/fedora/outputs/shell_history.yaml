@@ -1,0 +1,8 @@
+name: db_shell_history
+id: LS-O-shell_history
+type: statedb
+version: 1.0.0
+title: Shell history
+table: shell_history
+key: [user, shell, n]
+icon: utilities-terminal

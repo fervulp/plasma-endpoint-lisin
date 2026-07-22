@@ -1,0 +1,10 @@
+name: db_services
+id: LS-O-services
+type: statedb
+version: 1.0.0
+title: Services
+table: services
+key:
+- unit
+- scope
+icon: system-run

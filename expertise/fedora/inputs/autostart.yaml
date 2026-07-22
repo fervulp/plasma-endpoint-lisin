@@ -1,0 +1,9 @@
+name: autostart
+id: LS-I-1
+type: input
+version: 1.0.0
+title: XDG autostart
+command: for f in "$HOME"/.config/autostart/*.desktop /etc/xdg/autostart/*.desktop; do [ -e "$f" ] || continue; echo "==> $f"; cat "$f"; done
+interval: 300
+normalize: autostart
+enabled: true

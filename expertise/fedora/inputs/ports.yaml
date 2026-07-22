@@ -1,0 +1,20 @@
+name: ports
+id: LS-I-3
+type: input
+version: 3.0.0
+title: Network sockets
+# ВСЕ сокеты (listen + established) одним ss — ports и connections это одно
+# и то же. + секция firewall для exposure слушателей.
+command: |
+  ss -H -tunapn
+  echo ---FWPORTS---
+  for z in $(firewall-cmd --get-active-zones 2>/dev/null | grep -v '^ '); do
+    echo "zone=$z"
+    firewall-cmd --zone="$z" --list-ports 2>/dev/null
+    for s in $(firewall-cmd --zone="$z" --list-services 2>/dev/null); do
+      firewall-cmd --info-service="$s" 2>/dev/null | sed -n 's/.*ports: //p'
+    done
+  done
+  true
+interval: 30
+enabled: true

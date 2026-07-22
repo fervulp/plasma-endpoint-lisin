@@ -1,0 +1,6 @@
+name: config_files
+id: LS-N-25
+type: normalization_rule
+version: 3.0.0
+title: Config files
+code: "def normalize(text):\n    rows = []\n    for b in text.split(\"===FILE \"):\n        if not b:\n            continue\n        parts = b.split(\"===\", 1)\n        if len(parts) != 2:\n            continue\n        path = parts[0].strip()\n        body = parts[1]\n        if body.startswith(\"\\n\"):\n            body = body[1:]\n        cat = \"system\"\n        if path.startswith(\"/etc/sudoers\"):\n            cat = \"sudo\"\n        if \"ssh\" in path:\n            cat = \"ssh\"\n        if path.startswith(\"/home\"):\n            cat = \"user\"\n        active = [ln for ln in body.split(\"\\n\")\n                  if ln.strip() and not ln.strip().startswith(\"#\")]\n        rows.append({\"path\": path, \"category\": cat,\n                     \"lines\": len(active), \"content\": body})\n    return rows\n"

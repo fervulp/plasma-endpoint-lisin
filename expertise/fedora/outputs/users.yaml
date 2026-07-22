@@ -1,0 +1,9 @@
+name: db_users
+id: LS-O-users
+type: statedb
+version: 1.0.0
+title: Users
+table: users
+key:
+- name
+icon: user

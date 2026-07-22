@@ -1,0 +1,48 @@
+name: packages
+id: LS-N-2
+type: normalization_rule
+version: 2.2.1
+title: Applications
+code: "\ndef normalize(text):\n    \"\"\"Пакеты rpm с НАСТОЯЩИМИ зависимостями.\n\n    Раньше в depends попадал сырой REQUIRENAME — это ВОЗМОЖНОСТИ\n    (`libc.so.6()(64bit)`, `rtld(GNU_HASH)`), а не пакеты,\
+  \ и читать их было\n    невозможно. Теперь:\n\n      * каждая возможность резолвится в ПАКЕТ по индексу provides\n        (`rpm -qa --qf '[%{PROVIDENAME}\\t%{=NAME}\\n]'`, 47 тыс. строк за 0.7 с\n   \
+  \     — целиком локально, без сети и без dnf);\n      * добавлены СЛАБЫЕ зависимости (Recommends/Suggests). Именно их не\n        хватало: btop не требует rocm-smi, а РЕКОМЕНДУЕТ — поэтому dnf ставит\n\
+  \        его вместе с btop и при удалении зовёт «неиспользуемой зависимостью»,\n        а в инвентаре его не было видно;\n      * колонка install_reason: поставлен пользователем или подтянут как\n   \
+  \     зависимость (`dnf repoquery --userinstalled`). Это отвечает на вопрос\n        «что я ставил сам, а что приехало прицепом».\n    \"\"\"\n    SEC, cur = {}, None\n    for ln in text.split(\"\\n\"\
+  ):\n        s = ln.strip()\n        if s.startswith(\"===\") and s.endswith(\"===\"):\n            cur = s.strip(\"=\")\n            SEC[cur] = []\n            continue\n        if cur:\n            SEC[cur].append(ln)\n\
+  \n    provides = {}\n    for ln in SEC.get(\"PROVIDES\", []):\n        f = ln.split(\"\\t\")\n        if len(f) == 2 and f[0] and f[1]:\n            provides.setdefault(f[0].strip(), f[1].strip())\n\n\
+  \    user_installed = set()\n    for ln in SEC.get(\"USERINSTALLED\", []):\n        s = ln.strip()\n        if not s:\n            continue\n        # строка вида \"name-0:version.arch\" — имя до первого\
+  \ \"-<цифра>\"\n        m = re.match(r\"^(.+?)-\\d[^-]*:\", s) or re.match(r\"^(.+?)-\\d\", s)\n        user_installed.add(m.group(1) if m else s)\n\n    def resolve(caps, self_name):\n        \"\"\"\
+  Возможности -> пакеты. rpmlib(...) — служебные требования самого\n        rpm, к инвентарю отношения не имеют.\"\"\"\n        # rpm умеет БУЛЕВЫ зависимости: \"(pkg-a or pkg-b)\". В плоском выводе\n \
+  \       # они распадаются на токены \"(pkg-a\", \"or\", \"pkg-b)\" — операторы надо\n        # выбросить, а скобки снять, иначе в списке появляется «or».\n        BOOL = {\"or\", \"and\", \"if\", \"else\"\
+  , \"unless\", \"with\", \"without\"}\n        out = []\n        for raw in caps:\n            c = raw.strip()\n            if not c or c.strip(\"()\") in BOOL:\n                continue\n            if\
+  \ c.startswith(\"rpmlib(\") or c.startswith(\"config(\"):\n                continue\n            # ВАЖНО: сначала пробуем возможность КАК ЕСТЬ — у неё скобки\n            # значащие (\"libc.so.6()(64bit)\"\
+  ). Снятие скобок применимо только\n            # к обломкам булевых выражений, поэтому это второй заход.\n            pkg = provides.get(c) or provides.get(c.strip(\"()\"))\n            if pkg is None:\n\
+  \                c = c.strip(\"()\")\n            if pkg is None:\n                # возможность не предоставлена ничем установленным —\n                # обычно это имя пакета, которого нет; сохраняем\
+  \ как есть,\n                # но только если похоже на имя, а не наソ-файл или версию\n                if re.match(r\"^[A-Za-z][\\w.+-]*$\", c):\n                    pkg = c\n            if pkg and pkg\
+  \ != self_name and pkg not in out:\n                out.append(pkg)\n        return out\n\n    rows = []\n    for ln in SEC.get(\"PKG\", []):\n        f = ln.split(\"\\t\")\n        if len(f) < 7 or not\
+  \ f[0].strip():\n            continue\n        name, ver, itime, arch, vendor, summary = [x.strip() for x in f[:6]]\n        req = f[6].split() if len(f) > 6 else []\n        rec = f[7].split() if len(f)\
+  \ > 7 else []\n        sug = f[8].split() if len(f) > 8 else []\n        hard = resolve(req, name)\n        weak = resolve(rec + sug, name)\n        when = \"\"\n        if itime.isdigit():\n        \
+  \    import datetime\n            when = datetime.datetime.fromtimestamp(\n                int(itime)).strftime(\"%Y-%m-%d %H:%M\")\n        rows.append({\n            \"kind\": \"rpm\", \"name\": name,\
+  \ \"version\": ver,\n            \"installed\": when, \"vendor\": vendor, \"description\": summary,\n            \"install_reason\": (\"user\" if name in user_installed\n                             \
+  \  else \"dependency\"),\n            # depends — только НАСТОЯЩИЕ пакеты; слабые вынесены отдельно,\n            # потому что их можно удалить без поломки программы\n            \"depends\": \" \".join(hard),\n\
+  \            \"recommends\": \" \".join(weak),\n            \"arch\": arch, \"app_id\": \"\", \"path\": \"\"})\n    return rows\n"
+tests:
+- name: возможности резолвятся в пакеты, слабые зависимости видны
+  input: "===PKG===\nbtop\t1.4.7-1.fc44\t1750000000\tx86_64\tFedora\tResource monitor\tlibc.so.6()(64bit) hicolor-icon-theme rpmlib(FileDigests) \trocm-smi \t \nrocm-smi\t7.1.1-3.fc44\t1750000000\tx86_64\t\
+    Fedora\tGPU tool\tlibc.so.6()(64bit) \t \t \n===PROVIDES===\nlibc.so.6()(64bit)\tglibc\nhicolor-icon-theme\thicolor-icon-theme\nrocm-smi\trocm-smi\n===USERINSTALLED===\nbtop-0:1.4.7-1.fc44.x86_64\n"
+  expect:
+    rows: 2
+    row0:
+      name: btop
+      install_reason: пользователь
+      recommends: rocm-smi
+    row1:
+      name: rocm-smi
+      install_reason: зависимость
+- name: булев оператор не попадает в список, скобки возможности не ломаются
+  input: "===PKG===\nx\t1-1\t0\tnoarch\tv\ts\tlibc.so.6()(64bit) \t(a or b) \t \n===PROVIDES===\nlibc.so.6()(64bit)\tglibc\na\ta\nb\tb\n===USERINSTALLED===\n"
+  expect:
+    rows: 1
+    row0:
+      depends: glibc
+      recommends: a b

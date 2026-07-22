@@ -1,0 +1,8 @@
+name: db_browser_extensions
+id: LS-O-browser_extensions
+type: statedb
+version: 1.0.0
+title: Browser extensions
+table: browser_extensions
+key: [browser, profile, ext_id]
+icon: extension-symbolic

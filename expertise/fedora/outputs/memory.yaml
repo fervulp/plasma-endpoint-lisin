@@ -1,0 +1,9 @@
+name: db_memory
+id: LS-O-memory
+type: statedb
+version: 1.0.0
+title: Memory
+table: memory
+key:
+- kind
+icon: memory-symbolic

@@ -1,0 +1,22 @@
+name: packages
+id: LS-I-2
+type: input
+version: 2.0.0
+title: rpm packages
+command: 'echo "===PKG==="
+
+  rpm -qa --qf "%{NAME}\t%{VERSION}-%{RELEASE}\t%{INSTALLTIME}\t%{ARCH}\t%{VENDOR}\t%{SUMMARY}\t[%{REQUIRENAME} ]\t[%{RECOMMENDNAME} ]\t[%{SUGGESTNAME} ]\n" 2>/dev/null
+
+  echo "===PROVIDES==="
+
+  rpm -qa --qf "[%{PROVIDENAME}\t%{=NAME}\n]" 2>/dev/null
+
+  echo "===USERINSTALLED==="
+
+  timeout 25 dnf -q -C repoquery --userinstalled 2>/dev/null
+
+  true
+
+  '
+interval: 600
+enabled: true

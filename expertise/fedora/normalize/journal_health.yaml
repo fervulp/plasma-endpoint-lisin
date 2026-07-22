@@ -1,0 +1,14 @@
+name: journal_health
+id: LS-N-54
+type: normalization_rule
+version: 1.0.0
+title: Journal health
+code: |
+  def normalize(text):
+      rows = []
+      for ln in text.splitlines():
+          f = ln.split("\t", 1)
+          if len(f) != 2:
+              continue
+          rows.append({"item": f[0].strip(), "value": f[1].strip()})
+      return rows

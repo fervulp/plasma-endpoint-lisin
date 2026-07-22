@@ -1,0 +1,8 @@
+name: storage
+id: LS-I-12
+type: input
+version: 4.0.0
+title: Storage
+command: 'lsblk -bo NAME,PKNAME,TYPE,SIZE,FSTYPE,MOUNTPOINT,MODEL,SERIAL -P 2>/dev/null'
+interval: 120
+enabled: true

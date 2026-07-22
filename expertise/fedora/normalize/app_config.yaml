@@ -1,0 +1,12 @@
+name: app_config
+id: LS-N-60
+type: normalization_rule
+version: 1.0.1
+title: Where application configs live
+code: "def normalize(text):\n    import datetime\n    SEC, cur = {}, None\n    for ln in text.split(\"\\n\"):\n        s = ln.strip()\n        if s.startswith(\"===\") and s.endswith(\"===\"):\n       \
+  \     cur = s.strip(\"=\")\n            SEC[cur] = []\n            continue\n        if cur:\n            SEC[cur].append(ln)\n\n    rows = []\n    for ln in SEC.get(\"RPM\", []):\n        f = ln.split(\"\
+  \\t\")\n        if len(f) < 2 or not f[1].startswith(\"/\"):\n            continue\n        rows.append({\"app\": f[0], \"path\": f[1], \"scope\": \"system\",\n                     \"kind\": \"file\"\
+  , \"entries\": \"1\",\n                     \"origin\": \"rpm %config\", \"changed\": \"\"})\n    for ln in SEC.get(\"USER\", []):\n        f = ln.split(\"\\t\")\n        if len(f) < 6:\n            continue\n\
+  \        app, path, kind, n, origin, mtime = f[:6]\n        when = \"\"\n        if mtime.isdigit():\n            when = datetime.datetime.fromtimestamp(\n                int(mtime)).strftime(\"%Y-%m-%d\
+  \ %H:%M\")\n        rows.append({\"app\": app, \"path\": path, \"scope\": \"user\",\n                     \"kind\": kind, \"entries\": n, \"origin\": origin,\n                     \"changed\": when})\n\
+  \    return rows\n"

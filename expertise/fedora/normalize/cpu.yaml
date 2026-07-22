@@ -1,0 +1,6 @@
+name: cpu
+id: LS-N-10
+type: normalization_rule
+version: 3.0.0
+title: CPU
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        if \":\" in line:\n            k, _, v = line.partition(\":\")\n            k, v = k.strip(), v.strip()\n            if k and v:\n                rows.append({\"item\": k, \"value\": v})\n    return rows\n"

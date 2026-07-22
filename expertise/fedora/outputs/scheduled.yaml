@@ -1,0 +1,10 @@
+name: db_scheduled
+id: LS-O-scheduled
+type: statedb
+version: 1.0.0
+title: Scheduled
+table: scheduled
+key:
+- kind
+- name
+icon: chronometer

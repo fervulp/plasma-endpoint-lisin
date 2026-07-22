@@ -1,0 +1,9 @@
+name: db_processes
+id: LS-O-processes
+type: statedb
+version: 1.0.0
+title: Processes
+table: processes
+key:
+- pid
+icon: system-run

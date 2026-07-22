@@ -1,0 +1,54 @@
+name: browser_extensions
+id: LS-N-57
+type: normalization_rule
+version: 1.1.0
+title: Browser extensions
+# Расширение браузера — код, который выполняется на КАЖДОЙ открытой странице
+# и видит то же, что и пользователь. Поэтому здесь важны не имена, а факты:
+# какие права запрошены, ко всем ли сайтам есть доступ, из чего установлено.
+code: |
+  def normalize(text):
+      # ОДИН ext_id в профиле может встретиться НЕСКОЛЬКО раз (копия в профиле и
+      # копия в системном каталоге, разные версии). Раньше побеждала последняя
+      # запись и затирала предыдущую — вместе с уликами: у одной копии
+      # sourceURI был file:///tmp/..., у другой пустой, и признак терялся.
+      # Поэтому копии СЛИВАЮТСЯ: непустое значение не затирается пустым.
+      acc = {}
+      order = []
+      for ln in text.splitlines():
+          f = ln.split("\t")
+          if not f or f[0] != "EXT" or len(f) < 15:
+              continue
+          (_, browser, profile, family, ext_id, name, version, enabled,
+           kind, origin, installed, perms, origins, source_url, path) = f[:15]
+          # ФАКТЫ, а не приговор: расширение видит все страницы, если у него
+          # есть доступ ко всем доменам; «откуда» — из чего оно поставлено.
+          all_sites = "yes" if ("<all_urls>" in origins or "*://*/*" in origins
+                                or "http://*/*" in origins) else ""
+          # тревожный признак — не список «плохих имён», а НЕСООТВЕТСТВИЕ:
+          # расширение объявлено системным, но приехало из временного каталога
+          temp_src = "yes" if source_url.startswith(("file:///tmp",
+                                                     "file:///var/tmp",
+                                                     "file:///dev/shm")) else ""
+          row = {"browser": browser, "profile": profile, "name": name,
+                 "enabled": enabled, "origin": origin, "all_sites": all_sites,
+                 "from_temp": temp_src, "permissions": perms,
+                 "host_permissions": origins, "version": version,
+                 "installed": installed, "copies": "1", "ext_id": ext_id,
+                 "family": family, "kind": kind, "source_url": source_url,
+                 "path": path}
+          k = (browser, profile, ext_id)
+          old = acc.get(k)
+          if old is None:
+              acc[k] = row
+              order.append(k)
+              continue
+          old["copies"] = str(int(old["copies"]) + 1)
+          for col, val in row.items():
+              if col == "copies":
+                  continue
+              if not str(old.get(col) or "").strip() and str(val).strip():
+                  old[col] = val
+              elif col == "version" and val and val not in old["version"]:
+                  old["version"] = old["version"] + ", " + val
+      return [acc[k] for k in order]

@@ -1,0 +1,14 @@
+name: network
+id: LS-I-13
+type: input
+version: 2.0.0
+title: Network interfaces
+command: 'ip -o -d link 2>/dev/null | sed ''s/^/link\t/''
+
+  ip -o addr 2>/dev/null | sed ''s/^/addr\t/''
+
+  true
+
+  '
+interval: 60
+enabled: true

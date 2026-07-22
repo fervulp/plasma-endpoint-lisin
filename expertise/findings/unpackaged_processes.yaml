@@ -1,0 +1,20 @@
+name: unpackaged_processes
+id: LS-FN-5
+type: finding
+version: 1.0.0
+title: Процессы вне пакетов
+severity: medium
+source: state
+sql: SELECT command, user, rss_mb FROM processes WHERE COALESCE(purpose,'')='' AND command NOT LIKE '[%'
+  AND command NOT LIKE '(%' AND command <> ''
+evidence: '{command}  ({user}, {rss_mb} МБ)'
+why: 'Пакетный менеджер не знает этих бинарников — значит их никто не обновляет и не проверяет целостность.
+  Здесь же прячется вредоносное ПО: оно почти никогда не приходит из репозитория.'
+action: 'Для каждого решите: это ваш софт (задокументируйте) или лишнее — удалите.'
+explore_table: processes
+explore_col: purpose
+explore_val: ''
+tag: software
+time_col: ''
+basis: mismatch
+reference: MITRE ATT&CK T1036 Masquerading — исполняемое вне пакетного менеджера

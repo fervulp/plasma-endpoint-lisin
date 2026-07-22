@@ -1,0 +1,29 @@
+name: event_process_alive
+id: LS-E-15
+type: enrichment
+version: 1.0.0
+title: Is the process still running
+# ЖИВ ЛИ ЕЩЁ ПРОЦЕСС из события. Расследуя вчерашнее событие, аналитик
+# первым делом спрашивает: он ещё в системе? Сверяем pid события с текущим
+# снимком процессов.
+code: |
+  def enrich(rows):
+      import sqlite3
+      from pathlib import Path
+      alive = {}
+      try:
+          con = sqlite3.connect("file:%s?mode=ro" % (Path.home() /
+                                ".local/share/lisin/state.db"), uri=True)
+          for pid, cmd in con.execute("SELECT pid, command FROM processes"):
+              alive[str(pid)] = cmd or ""
+          con.close()
+      except Exception:
+          pass
+      for r in rows:
+          pid = str(r.get("process_pid") or "")
+          if not pid:
+              r["process_alive"] = ""
+              continue
+          cur = alive.get(pid)
+          r["process_alive"] = "yes" if cur is not None else "no"
+      return rows

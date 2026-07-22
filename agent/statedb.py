@@ -1,0 +1,297 @@
+"""База состояния: SQLite, вкладка = таблица.
+
+Таблицы наполняет конвейер (agent/pipeline.py) через ensure_table/upsert:
+upsert по ключу правила, пользовательские колонки не трогаются,
+исчезнувшие строки удаляются. Пользовательские вкладки/колонки создаются
+из UI. Имена санитизируются до [a-zа-яё0-9_], значения — только через
+параметры, имена таблиц сверяются с реестром _tabs.
+"""
+import re
+import sqlite3
+import time
+from pathlib import Path
+
+from . import state as coll
+
+DB_PATH = Path.home() / ".local/share/lisin/state.db"
+
+
+def _san(name: str, prefix: str) -> str:
+    s = re.sub(r"[^a-zа-яё0-9_]", "_", name.strip().lower())
+    s = re.sub(r"_+", "_", s).strip("_")
+    if not s or s[0].isdigit() or s == "_id":
+        s = f"{prefix}_{s}"
+    return s[:40]
+
+
+def _txt(v) -> str:
+    if isinstance(v, bool):
+        return "yes" if v else ""
+    return "" if v is None else str(v)
+
+
+class StateDB:
+    def __init__(self, path: Path = DB_PATH):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._con() as c:
+            # WAL: один писатель (агент) + параллельные читатели (UI) без
+            # блокировок и без затирания. Ставится один раз (хранится в файле).
+            c.execute("PRAGMA journal_mode=WAL")
+            c.execute("CREATE TABLE IF NOT EXISTS _tabs("
+                      "name TEXT PRIMARY KEY, title TEXT, icon TEXT,"
+                      "builtin INTEGER, keys TEXT)")
+            try:
+                c.execute("ALTER TABLE _tabs ADD COLUMN colcfg TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass    # колонка уже есть
+
+    def _con(self):
+        # timeout=busy_timeout: короткая блокировка записи ретраится, не падает
+        con = sqlite3.connect(self.path, timeout=5.0)
+        con.row_factory = sqlite3.Row
+        return con
+
+    def _valid(self, c, tab: str) -> bool:
+        return bool(c.execute("SELECT 1 FROM _tabs WHERE name=?",
+                              (tab,)).fetchone())
+
+    def _columns(self, c, tab: str) -> list[str]:
+        return [r["name"] for r in c.execute(f'PRAGMA table_info("{tab}")')
+                if r["name"] not in ("_id", "_src")]
+
+    # -------- вызывается конвейером --------
+    def _ensure_collected_col(self, c):
+        """колонка со временем сбора: добавляется на месте, старым базам тоже"""
+        have = [r[1] for r in c.execute('PRAGMA table_info("_tabs")')]
+        if "collected_at" not in have:
+            c.execute('ALTER TABLE "_tabs" ADD COLUMN collected_at TEXT')
+
+    def mark_collected(self, name: str):
+        """отметить, что таблицу только что наполнил конвейер"""
+        ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        with self._con() as c:
+            self._ensure_collected_col(c)
+            c.execute('UPDATE "_tabs" SET collected_at = ? WHERE name = ?', (ts, name))
+
+    def ensure_table(self, name: str, title: str, icon: str, cols: list[str]):
+        name = _san(name, "t")
+        with self._con() as c:
+            coldef = ",".join(f'"{_san(x, "c")}" TEXT' for x in cols)
+            c.execute(f'CREATE TABLE IF NOT EXISTS "{name}"'
+                      f'(_id INTEGER PRIMARY KEY,{coldef})')
+            c.execute("INSERT OR IGNORE INTO _tabs(name,title,icon,builtin,keys)"
+                      " VALUES(?,?,?,1,'')", (name, title, icon))
+            # правило нормализации — источник истины для заголовка/иконки
+            c.execute("UPDATE _tabs SET title=?, icon=? WHERE name=?",
+                      (title, icon, name))
+            # _src: тег писателя (точки выхода) для staleness. При ПЕРВОМ
+            # добавлении чистим доисторические строки без тега — так уходят
+            # мёртвые процессы и прочий мусор, накопленный до этого механизма.
+            info = [r["name"] for r in c.execute(f'PRAGMA table_info("{name}")')]
+            if "_src" not in info:
+                c.execute(f'ALTER TABLE "{name}" ADD COLUMN "_src" TEXT DEFAULT \'\'')
+                c.execute(f'DELETE FROM "{name}"')
+            have = self._columns(c, name)
+            for x in cols:
+                x = _san(x, "c")
+                if x not in have:
+                    c.execute(f'ALTER TABLE "{name}" ADD COLUMN "{x}" TEXT')
+
+    def clear_src(self, name: str, src: str):
+        """Убрать все строки одного писателя: источник опустел.
+
+        Нужно там, где пустой результат — это ответ, а не сбой: уязвимость
+        закрыта патчем, контейнер остановлен. Без этого таблица показывала бы
+        то, чего в системе уже нет.
+        """
+        name = _san(name, "t")
+        with self._con() as c:
+            if not self._valid(c, name):
+                return
+            if "_src" not in [r["name"] for r in
+                              c.execute(f'PRAGMA table_info("{name}")')]:
+                return
+            c.execute(f'DELETE FROM "{name}" WHERE "_src"=?', (src,))
+
+    def upsert(self, name: str, keys: list[str], cols: list[str],
+               rows: list[dict], src: str = "") -> dict:
+        """Записать строки и ВЕРНУТЬ разницу с прошлым состоянием.
+
+        Разницу upsert вычислял и раньше (какие ключи новые, какие исчезли),
+        но выбрасывал. А переход — самое ценное, что у нас есть: «программа
+        появилась» несравнимо информативнее, чем «программа есть». Поэтому
+        теперь возвращаем {added, removed, changed, was_empty}, а решение,
+        порождать ли из этого события, принимает конвейер (см. _walk).
+
+        was_empty важно отдельно: если таблица была пуста, это ПЕРВИЧНАЯ
+        ИНВЕНТАРИЗАЦИЯ, а не изменение. Машина существовала до нас, и
+        выдавать 3000 «установок» за события мы не имеем права.
+        """
+        name = _san(name, "t")
+        diff = {"added": [], "removed": [], "changed": [], "was_empty": False,
+                "table": name}
+        with self._con() as c:
+            if not self._valid(c, name):
+                return diff
+            # первое вхождение ключа — каноническое; повторы (наследие старого
+            # кода, напр. построчные ssh-ключи) удаляем, чтобы ключ был уникален
+            have = {}
+            prev = {}          # прошлые значения — чтобы увидеть, ЧТО изменилось
+            dup_ids = []
+            for r in c.execute(f'SELECT * FROM "{name}"'):
+                k = tuple(r[kk] for kk in keys)
+                if k in have:
+                    dup_ids.append(r["_id"])
+                else:
+                    have[k] = r["_id"]
+                    prev[k] = {kk: r[kk] for kk in r.keys()
+                               if not kk.startswith("_")}
+            # пустая таблица = первый сбор, а не изменение
+            diff["was_empty"] = not have
+            if dup_ids:
+                c.executemany(f'DELETE FROM "{name}" WHERE _id=?',
+                              [(i,) for i in dup_ids])
+            alive = set()
+            for row in rows:
+                vals = {k: _txt(row.get(k)) for k in cols}
+                key = tuple(vals[k] for k in keys)
+                alive.add(key)
+                if key in have:
+                    old = prev.get(key, {})
+                    ch = {k: [str(old.get(k, "")), vals[k]] for k in cols
+                          if str(old.get(k, "")) != vals[k]}
+                    if ch:
+                        diff["changed"].append({"key": list(key), "fields": ch})
+                    sets = ",".join(f'"{k}"=?' for k in cols)
+                    c.execute(f'UPDATE "{name}" SET {sets},"_src"=? WHERE _id=?',
+                              [*vals.values(), src, have[key]])
+                else:
+                    diff["added"].append({"key": list(key), "row": dict(vals)})
+                    names = ",".join(f'"{k}"' for k in cols) + ',"_src"'
+                    ph = ",".join("?" * (len(cols) + 1))
+                    c.execute(f'INSERT INTO "{name}"({names}) VALUES({ph})',
+                              [*vals.values(), src])
+            # staleness по ПИСАТЕЛЮ (_src): удаляем строки ЭТОЙ точки выхода,
+            # которых больше нет в живом наборе (мёртвые процессы, закрытые
+            # сокеты). Другие правила пишут в ту же таблицу под своим _src —
+            # их строки не трогаем.
+            keycols = ",".join(f'"{k}"' for k in keys)
+            stale = []
+            for r in c.execute(
+                    f'SELECT _id,{keycols} FROM "{name}" WHERE "_src"=?', (src,)):
+                if tuple(r[kk] for kk in keys) not in alive:
+                    stale.append(r["_id"])
+            if stale:
+                for r in c.execute(
+                        f'SELECT _id,{keycols} FROM "{name}" WHERE "_src"=?',
+                        (src,)):
+                    if r["_id"] in stale:
+                        diff["removed"].append(
+                            {"key": [r[kk] for kk in keys],
+                             "row": prev.get(tuple(r[kk] for kk in keys), {})})
+                c.executemany(f'DELETE FROM "{name}" WHERE _id=?',
+                              [(i,) for i in stale])
+        return diff
+
+    def prune(self, keep: set):
+        """Удаляет служебные (builtin) таблицы, которых больше нет среди
+        активных точек выхода — напр. осиротевший `connections` после слияния
+        в `ports`. Пользовательские таблицы (u_*, builtin=0) не трогаются."""
+        keep = {_san(k, "t") for k in keep}
+        with self._con() as c:
+            for r in c.execute("SELECT name FROM _tabs WHERE builtin=1").fetchall():
+                n = r["name"]
+                if n not in keep:
+                    c.execute(f'DROP TABLE IF EXISTS "{n}"')
+                    c.execute("DELETE FROM _tabs WHERE name=?", (n,))
+
+    # -------- чтение всего для UI --------
+    def snapshot(self) -> dict:
+        import json
+        tabs = []
+        with self._con() as c:
+            for t in c.execute("SELECT * FROM _tabs"):
+                cols = self._columns(c, t["name"])
+                rows = [dict(r) for r in c.execute(f'SELECT * FROM "{t["name"]}"')]
+                try:
+                    colcfg = json.loads(t["colcfg"]) if t["colcfg"] else None
+                except Exception:
+                    colcfg = None
+                tabs.append({"name": t["name"], "title": t["title"],
+                             "icon": t["icon"], "builtin": bool(t["builtin"]),
+                             "columns": cols, "rows": rows, "colcfg": colcfg,
+                             # КОГДА ЭТУ ТАБЛИЦУ НАПОЛНЯЛИ В ПОСЛЕДНИЙ РАЗ:
+                             # без этого «пусто» не отличить от «давно не
+                             # собиралось»
+                             "collected_at": (t["collected_at"]
+                                              if "collected_at" in t.keys() else "")})
+        return {"os": coll.os_info(), "tabs": tabs,
+                "collected_at": time.strftime("%H:%M:%S")}
+
+    # -------- SQL-поиск (только чтение) --------
+    def query(self, sql: str) -> dict:
+        try:
+            con = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
+            con.row_factory = sqlite3.Row
+            cur = con.execute(sql)
+            cols = [d[0] for d in cur.description] if cur.description else []
+            # берём на одну строку больше лимита, чтобы ЧЕСТНО сказать,
+            # что выборка обрезана: раньше запрос на 5000 строк молча
+            # возвращал 1000, и пользователь считал, что видит всё
+            LIMIT = 1000
+            raw = cur.fetchmany(LIMIT + 1)
+            truncated = len(raw) > LIMIT
+            rows = [{k: _txt(r[k]) if not isinstance(r[k], (int, float))
+                     else r[k] for k in cols} for r in raw[:LIMIT]]
+            con.close()
+            return {"columns": cols, "rows": rows, "error": "",
+                    "truncated": truncated, "limit": LIMIT}
+        except Exception as e:
+            return {"columns": [], "rows": [], "error": str(e)}
+
+    # -------- правки из UI --------
+    def add_column(self, tab: str, col: str):
+        col = _san(col, "c")
+        with self._con() as c:
+            if self._valid(c, tab) and col not in self._columns(c, tab):
+                c.execute(f'ALTER TABLE "{tab}" ADD COLUMN "{col}" TEXT')
+
+    def create_tab(self, title: str):
+        name = "u_" + _san(title, "t")
+        with self._con() as c:
+            if c.execute("SELECT 1 FROM _tabs WHERE name=?", (name,)).fetchone():
+                return
+            c.execute(f'CREATE TABLE "{name}"(_id INTEGER PRIMARY KEY,'
+                      f'"name" TEXT)')
+            c.execute("INSERT INTO _tabs(name,title,icon,builtin,keys)"
+                      " VALUES(?,?,?,0,'')",
+                      (name, title.strip() or name, "view-list-details"))
+
+    def delete_tab(self, tab: str):
+        with self._con() as c:
+            if c.execute("SELECT 1 FROM _tabs WHERE name=? AND builtin=0",
+                         (tab,)).fetchone():
+                c.execute(f'DROP TABLE "{tab}"')
+                c.execute("DELETE FROM _tabs WHERE name=?", (tab,))
+
+    def set_cell(self, tab: str, rowid: int, col: str, value: str):
+        with self._con() as c:
+            if self._valid(c, tab) and col in self._columns(c, tab):
+                c.execute(f'UPDATE "{tab}" SET "{col}"=? WHERE _id=?',
+                          (value, rowid))
+
+    def set_colcfg(self, tab: str, cfg: str):
+        with self._con() as c:
+            if self._valid(c, tab):
+                c.execute("UPDATE _tabs SET colcfg=? WHERE name=?", (cfg, tab))
+
+    def add_row(self, tab: str):
+        with self._con() as c:
+            if self._valid(c, tab):
+                c.execute(f'INSERT INTO "{tab}" DEFAULT VALUES')
+
+    def delete_row(self, tab: str, rowid: int):
+        with self._con() as c:
+            if self._valid(c, tab):
+                c.execute(f'DELETE FROM "{tab}" WHERE _id=?', (rowid,))

@@ -1,0 +1,127 @@
+name: attach_package
+id: LS-E-21
+type: enrichment
+version: 1.0.0
+title: Attach owning package (universal link)
+# УНИВЕРСАЛЬНЫЙ УЗЕЛ СВЯЗИ. Добавляет колонку package в таблицы, у которых
+# есть путь/юнит/модуль, привязываемый к пакету через rpm. После этого
+# таблица связывается с applications.name, а через него — со всем графом.
+# Один узел на несколько потоков (suid, privesc, scheduled, services,
+# kernel_modules): логика в экспертизе, не в коде.
+code: |
+  # Общий кэш индекса файл->пакет: строится один раз на процесс, обновляется по
+  # mtime базы rpm. Держим в модульном словаре, чтобы не перечитывать 36 МБ на
+  # каждую таблицу.
+  _PKG_IDX = {}
+  _PKG_STAMP = [""]
+
+
+  def _pkg_index():
+      import json, os, subprocess
+      from pathlib import Path
+      try:
+          stamp = str(os.path.getmtime("/var/lib/rpm/rpmdb.sqlite"))
+      except OSError:
+          stamp = "0"
+      if _PKG_STAMP[0] == stamp and _PKG_IDX:
+          return _PKG_IDX
+      cache = Path.home() / ".local/share/lisin/filepkg.json"
+      idx = None
+      try:
+          c = json.loads(cache.read_text())
+          if c.get("_stamp") == stamp:
+              idx = c.get("idx")
+      except Exception:
+          idx = None
+      if idx is None:
+          idx = {}
+          try:
+              out = subprocess.run(["rpm", "-qa", "--qf", "[%{FILENAMES}\t%{=NAME}\n]"],
+                                   capture_output=True, text=True, timeout=180).stdout
+          except Exception:
+              out = ""
+          for ln in out.splitlines():
+              f = ln.split("\t", 1)
+              if len(f) == 2:
+                  idx[f[0]] = f[1]
+          try:
+              cache.write_text(json.dumps({"_stamp": stamp, "idx": idx}))
+          except OSError:
+              pass
+      _PKG_IDX.clear()
+      _PKG_IDX.update(idx)
+      _PKG_STAMP[0] = stamp
+      return _PKG_IDX
+
+
+  def enrich(rows):
+      """Привязать строку к ПАКЕТУ — универсальный узел связи между таблицами.
+
+      После этого таблица связывается с applications.name (инвентарь) и через
+      него со всем остальным. Пакет выводится тремя способами, все системные:
+        * значение-ПУТЬ — прямо по индексу rpm (учитывая объединённый /usr:
+          /usr/sbin/x это симлинк на /usr/bin/x, пакет записан по второму);
+        * значение-ЮНИТ (*.service/*.timer/*.socket) — через FragmentPath;
+        * значение-МОДУЛЬ ядра — через путь /lib/modules/.../name.ko.
+      Никаких списков имён: только сверка с тем, что объявила сама система.
+      """
+      import os
+      import subprocess
+      idx = _pkg_index()
+
+      def by_path(p):
+          if p in idx:
+              return idx[p]
+          try:
+              rp = os.path.realpath(p)
+          except OSError:
+              rp = ""
+          return idx.get(rp, "")
+
+      # соберём юниты и модули на батч-резолв (по одному вызову дорого)
+      units, mods = set(), set()
+      for r in rows:
+          for v in r.values():
+              v = str(v or "")
+              if v.endswith((".service", ".timer", ".socket", ".mount", ".path")):
+                  units.add(v)
+      unit_pkg = {}
+      for u in list(units)[:400]:
+          try:
+              fp = subprocess.run(["systemctl", "show", "-p", "FragmentPath",
+                                   "--value", u], capture_output=True, text=True,
+                                  timeout=5).stdout.strip()
+              if fp:
+                  unit_pkg[u] = by_path(fp)
+          except Exception:
+              pass
+
+      for r in rows:
+          pkg = ""
+          # 1) любое значение-путь
+          for v in r.values():
+              v = str(v or "")
+              if v.startswith("/"):
+                  pkg = by_path(v)
+                  if pkg:
+                      break
+          # 2) юнит
+          if not pkg:
+              for v in r.values():
+                  if str(v) in unit_pkg:
+                      pkg = unit_pkg[str(v)]
+                      if pkg:
+                          break
+          # 3) модуль ядра (по короткому имени)
+          if not pkg and r.get("name") and "/" not in str(r.get("name")):
+              nm = str(r["name"]).replace("-", "_")
+              try:
+                  kp = subprocess.run(["modinfo", "-F", "filename", nm],
+                                      capture_output=True, text=True,
+                                      timeout=4).stdout.strip()
+                  if kp.startswith("/"):
+                      pkg = by_path(kp) or by_path(kp.replace(".xz", "").replace(".zst", ""))
+              except Exception:
+                  pass
+          r["package"] = pkg
+      return rows

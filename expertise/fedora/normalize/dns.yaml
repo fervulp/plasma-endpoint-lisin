@@ -1,0 +1,6 @@
+name: dns
+id: LS-N-37
+type: normalization_rule
+version: 1.0.0
+title: DNS
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split(\"\\t\")\n        if len(f) < 2:\n            continue\n        k = f[0]\n        if k == \"resolv\":\n            p = f[1].split(None, 1)\n            rows.append({\"kind\": \"resolv\", \"name\": p[0],\n                         \"value\": p[1] if len(p) > 1 else \"\"})\n        elif k in (\"link-dns\", \"link-domain\") and len(f) >= 3:\n            rows.append({\"kind\": \"dns\" if k == \"link-dns\" else \"domain\",\n                         \"name\": f[1], \"value\": f[2]})\n        elif k == \"global\" and len(f) >= 3:\n            rows.append({\"kind\": \"global\", \"name\": f[1], \"value\": f[2]})\n        elif k == \"hosts\":\n            p = f[1].split(None, 1)\n            rows.append({\"kind\": \"hosts\", \"name\": p[1] if len(p) > 1 else \"\",\n                         \"value\": p[0]})\n    return rows\n"

@@ -1,0 +1,7 @@
+name: devices
+id: LS-N-6
+type: normalization_rule
+version: 3.0.0
+title: Connected devices
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split(\"\\t\", 1)\n        if len(f) < 2:\n            continue\n        src, rest = f[0], f[1]\n        if src == \"usb\":\n            m = re.search(r'Bus (\\d+) Device (\\d+): ID (\\S+)\\s*(.*)', rest)\n            if m:\n                rows.append({\"kind\": \"usb\", \"slot\": m.group(1) + \":\" + m.group(2),\n                             \"dev_id\": m.group(3), \"name\": m.group(4).strip(),\n                             \"size\": \"\"})\n        elif src == \"pci\":\n            m = re.search(r'^(\\S+)\\s+([^:]+):\\s+(.*)', rest)\n            if m:\n                rows.append({\"kind\": \"pci\", \"slot\": m.group(1),\n                             \"dev_id\": m.group(2).strip(),\n                             \"name\": m.group(3).strip(), \"size\": \"\"})\n        else:\n            p = rest.split(\" \")\n            typ = p[2] if len(p) > 2 else \"\"\n            if typ in (\"disk\", \"\
+  part\", \"rom\"):\n                rows.append({\"kind\": typ, \"slot\": p[0],\n                             \"size\": p[1] if len(p) > 1 else \"\", \"dev_id\": \"\",\n                             \"name\": (p[3].replace(r\"\\x20\", \" \") if len(p) > 3 else \"\")})\n    return rows\n"

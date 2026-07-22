@@ -1,0 +1,28 @@
+name: port_owner_pkg
+id: LS-E-14
+type: enrichment
+version: 1.0.0
+title: Socket owner package
+# ИЗ КАКОГО ПАКЕТА СЛУЖБА, слушающая порт. «Порт 5353 открыт» — полдела;
+# «его слушает avahi из пакета avahi» — уже понятно, удалять или оставить.
+code: |
+  def enrich(rows):
+      import sqlite3
+      from pathlib import Path
+      procs = {}
+      try:
+          con = sqlite3.connect("file:%s?mode=ro" % (Path.home() /
+                                ".local/share/lisin/state.db"), uri=True)
+          con.row_factory = sqlite3.Row
+          for r in con.execute("SELECT pid, package, purpose FROM processes"):
+              procs[str(r["pid"])] = (r["package"] or "", r["purpose"] or "")
+          con.close()
+      except Exception:
+          pass
+      for r in rows:
+          m = re.search(r"\((\d+)\)\s*$", str(r.get("process") or ""))
+          pkg, purp = procs.get(m.group(1), ("", "")) if m else ("", "")
+          r["owner_package"] = pkg
+          if purp and not r.get("service_purpose"):
+              r["service_purpose"] = purp
+      return rows

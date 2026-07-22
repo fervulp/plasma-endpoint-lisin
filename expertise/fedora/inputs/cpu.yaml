@@ -1,0 +1,8 @@
+name: cpu
+id: LS-I-10
+type: input
+version: 1.0.0
+title: CPU info
+command: lscpu
+interval: 600
+enabled: true

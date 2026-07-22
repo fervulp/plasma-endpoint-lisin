@@ -1,0 +1,10 @@
+name: db_net_config
+id: LS-O-net_config
+type: statedb
+version: 1.0.0
+title: Net config
+table: net_config
+key:
+- kind
+- entry
+icon: network-server

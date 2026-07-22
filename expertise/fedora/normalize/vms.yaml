@@ -1,0 +1,31 @@
+name: vms
+id: LS-N-22
+type: normalization_rule
+version: 3.0.0
+title: Virtual machines
+code: |
+  def normalize(text):
+      parts = text.split("===VM ")
+      listing = parts[0].split("\n")
+      xmls = {}
+      for i, chunk in enumerate(parts):
+          if i == 0:
+              continue
+          nl = chunk.split("===", 1)
+          if len(nl) == 2:
+              xmls[nl[0].strip()] = nl[1]
+      rows = []
+      for ln in listing:
+          ls = ln.strip()
+          m = re.match(r'^(\S+)\s+(\S+)\s+(.+)$', ls)
+          if not m or m.group(1) == "Id" or "----" in ls:
+              continue
+          name = m.group(2)
+          xml = xmls.get(name, "")
+          disks = re.findall(r"<source (?:file|dev)='([^']+)'", xml)
+          nets = re.findall(r"<mac address='([^']+)'", xml)
+          rows.append({"vm_id": m.group(1), "name": name,
+                       "state": m.group(3).strip(),
+                       "disks": "; ".join(disks),
+                       "networks": "; ".join(nets), "content": xml})
+      return rows

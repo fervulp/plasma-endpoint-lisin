@@ -1,0 +1,8 @@
+name: db_iface_stats
+id: LS-O-iface_stats
+type: statedb
+version: 1.0.0
+title: Interface statistics
+table: iface_stats
+key: [iface]
+icon: network-wired

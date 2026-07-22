@@ -1,0 +1,8 @@
+name: db_privesc
+id: LS-O-privesc
+type: statedb
+version: 1.0.0
+title: Privilege escalation
+table: privesc
+key: [kind, name, detail]
+icon: security-high

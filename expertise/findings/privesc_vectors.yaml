@@ -1,0 +1,19 @@
+name: privesc_vectors
+id: LS-FN-2
+type: finding
+version: 1.0.0
+title: Векторы повышения привилегий
+severity: high
+source: state
+sql: SELECT kind, name, detail, changed, age_days FROM privesc WHERE risk='high' ORDER BY changed DESC
+evidence: '{changed}  {kind}: {name} {detail}'
+why: 'Файловые capabilities и sudo без пароля дают root без ввода пароля. Это первое, что ищет атакующий,
+  закрепившись под обычным пользователем. Время появления вектора важно: свежий рядом с инцидентом — зацепка.'
+action: Уберите ненужные capabilities (setcap -r) и правила NOPASSWD, если они не обоснованы.
+explore_table: privesc
+explore_col: risk
+explore_val: high
+tag: privesc
+time_col: changed
+basis: mismatch
+reference: MITRE ATT&CK TA0004 Privilege Escalation

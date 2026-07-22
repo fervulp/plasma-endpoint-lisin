@@ -1,0 +1,9 @@
+name: db_security
+id: LS-O-security
+type: statedb
+version: 1.0.0
+title: Security
+table: security
+key:
+- item
+icon: security-high

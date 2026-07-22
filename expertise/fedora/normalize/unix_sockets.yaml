@@ -1,0 +1,6 @@
+name: unix_sockets
+id: LS-N-36
+type: normalization_rule
+version: 1.0.0
+title: Unix sockets
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split()\n        if len(f) < 5:\n            continue\n        typ, state, path = f[0], f[1], f[4]\n        if not (path.startswith(\"/\") or path.startswith(\"@\")):\n            continue\n        m = re.search(r'\"([^\"]+)\",pid=(\\d+)', line)\n        proc = \"%s (%s)\" % (m.group(1), m.group(2)) if m else \"\"\n        rows.append({\"path\": path, \"type\": typ, \"state\": state, \"process\": proc})\n    return rows\n"

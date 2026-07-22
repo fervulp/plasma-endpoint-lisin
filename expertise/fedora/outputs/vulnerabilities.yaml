@@ -1,0 +1,8 @@
+name: db_vulnerabilities
+id: LS-O-vulnerabilities
+type: statedb
+version: 2.0.0
+title: Vulnerabilities
+table: vulnerabilities
+key: [advisory]
+icon: security-low

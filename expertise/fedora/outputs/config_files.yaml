@@ -1,0 +1,8 @@
+name: db_config_files
+id: LS-O-config_files
+type: statedb
+version: 1.0.0
+title: Config files
+table: config_files
+key: [path]
+icon: document-properties
