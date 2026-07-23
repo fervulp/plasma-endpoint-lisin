@@ -48,16 +48,40 @@ class Backend(QObject, StateApi, EventsApi, DashboardApi, ExpertiseApi,
 
     # -------- the input scheduler + the metrics sampler --------
     def _scheduler(self):
+        # WHAT WAS COLLECTED EARLIER IS SHOWN AT ONCE. The first sweep of the
+        # inputs takes tens of seconds (46 s measured on a live machine), and the
+        # snapshot used to be emitted only after it finished - so the state page
+        # was empty for the first minute after every start, although the database
+        # was full. The database is the source: we hand it over before collecting
+        # anything.
+        self._push_state()
+        last_push = 0.0
+
+        def progress():
+            # ... and then table by table, as the inputs finish. Throttled: a
+            # snapshot rebuilds the whole model, and 38 inputs in a row would
+            # make the interface stutter.
+            nonlocal last_push
+            if time.time() - last_push >= 1.0:
+                last_push = time.time()
+                self._push_state()
+
         while True:
             now = time.time()
             if now - self._last_sample >= 10:
                 self._last_sample = now
                 self.sampler.sample()
-            if self.pipe.tick():
+            if self.pipe.tick(progress):
                 self._collect_errors()
-                self.stateReady.emit(self.db.snapshot())
+                self._push_state()
                 self._emit_pipe()
             time.sleep(2)
+
+    def _push_state(self):
+        try:
+            self.stateReady.emit(self.db.snapshot())
+        except RuntimeError:
+            pass        # the window is already gone
 
     def _collect_errors(self):
         # the error stream of the EDR modules: pipeline node errors + YAML parsing

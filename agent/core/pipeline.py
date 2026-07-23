@@ -611,10 +611,20 @@ class StatePipeline:
             written += self._walk(pl, nodes, n["id"], pipe, c)
         return written
 
-    def tick(self) -> bool:
+    def tick(self, progress=None) -> bool:
+        """Run the inputs whose interval is due.
+
+        `progress` is called after EVERY input so that the interface can show
+        what has already been collected. A full sweep of the inputs takes tens of
+        seconds on a real machine (46 s measured), and while it ran the caller
+        used to have nothing to show: the state page stayed empty from start-up
+        until the whole sweep finished. Data now appears table by table.
+        """
         ran = self.due()
         for pn, nid in ran:
             self.run_node(pn, nid)
+            if progress is not None:
+                progress()
         return bool(ran)
 
     def run_pipeline(self, pipe: str):
