@@ -1,13 +1,20 @@
+# WHAT IS INDEXED, AND WHY NOT EVERYTHING.
+# An index is not free: it is a write on every insert and space on disk.
+# 45 of the fields were indexed and 26 of them were never filtered by -
+# on 170 thousand events that was 107 MB of indexes against 178 MB of
+# data, and 45 index writes for every event appended. Indexed now are the
+# fields the sections actually select, group and sort by; add index: true
+# to a field of your own when you start filtering by it.
 name: events
 id: LS-T-1
 type: taxonomy
 version: 1.0.0
 title: Event taxonomy (ECS-like)
-description: 'The single LiSin event taxonomy. Modelled on ECS (Elastic Common Schema), with flat column names
-  (an ECS dot becomes an underscore in SQL). Normalization and correlation rules are written against THESE
-  FIELDS - the way sigma rules are written against their own taxonomy. The schema of the events table IS BUILT
-  FROM THIS FILE: add a field here and the column appears in the database. Nothing is removed automatically
-  (columns are only added).'
+description: 'The single LiSin event taxonomy. Modelled on ECS (Elastic Common Schema), with flat column
+  names (an ECS dot becomes an underscore in SQL). Normalization and correlation rules are written against
+  THESE FIELDS - the way sigma rules are written against their own taxonomy. The schema of the events
+  table IS BUILT FROM THIS FILE: add a field here and the column appears in the database. Nothing is removed
+  automatically (columns are only added).'
 key: event_id
 table: events
 fields:
@@ -44,7 +51,7 @@ fields:
 - name: event_type
   ecs: event.type
   type: text
-  index: true
+  index: false
   group: event
   desc: start | end | access | creation | deletion | change | connection | info | denied
 - name: event_action
@@ -74,7 +81,7 @@ fields:
 - name: event_dataset
   ecs: event.dataset
   type: text
-  index: true
+  index: false
   group: event
   desc: A substream of the module (journal.audit, journal.syslog...)
 - name: event_provider
@@ -105,7 +112,7 @@ fields:
 - name: subject_type
   ecs: null
   type: text
-  index: true
+  index: false
   group: event
   desc: 'Who acted: user | process | service | system'
 - name: subject_name
@@ -129,13 +136,13 @@ fields:
 - name: not_normalized
   ecs: null
   type: text
-  index: true
+  index: false
   group: event
   desc: The fields of the original record the rule did NOT parse (it shows at once what else to normalise)
 - name: host_name
   ecs: host.name
   type: text
-  index: true
+  index: false
   group: host
   desc: The host name
 - name: host_id
@@ -167,7 +174,7 @@ fields:
 - name: user_id
   ecs: user.id
   type: text
-  index: true
+  index: false
   group: user
   desc: UID
 - name: user_group
@@ -205,7 +212,7 @@ fields:
 - name: process_executable
   ecs: process.executable
   type: text
-  index: true
+  index: false
   group: process
   desc: The full path of the executable
 - name: process_command_line
@@ -252,13 +259,13 @@ fields:
 - name: change_row
   ecs: change.row
   type: text
-  index: true
+  index: false
   group: change
   desc: The key of the state row
 - name: change_field
   ecs: change.field
   type: text
-  index: true
+  index: false
   group: change
   desc: Which field changed
 - name: change_old
@@ -274,7 +281,7 @@ fields:
 - name: parent_pid
   ecs: process.parent.pid
   type: int
-  index: true
+  index: false
   group: process
   desc: PPID
 - name: parent_name
@@ -331,7 +338,7 @@ fields:
 - name: file_hash_sha256
   ecs: file.hash.sha256
   type: text
-  index: true
+  index: false
   group: file
   desc: SHA-256
 - name: file_target_path
@@ -342,13 +349,13 @@ fields:
 - name: network_transport
   ecs: network.transport
   type: text
-  index: true
+  index: false
   group: network
   desc: tcp | udp | icmp
 - name: network_protocol
   ecs: network.protocol
   type: text
-  index: true
+  index: false
   group: network
   desc: The application protocol (dns, http, tls)
 - name: network_direction
@@ -369,7 +376,7 @@ fields:
 - name: source_ip
   ecs: source.ip
   type: text
-  index: true
+  index: false
   group: network
   desc: The source IP
 - name: source_port
@@ -402,7 +409,7 @@ fields:
 - name: dns_question_name
   ecs: dns.question.name
   type: text
-  index: true
+  index: false
   group: network
   desc: The requested name
 - name: dns_resolved_ip
@@ -443,13 +450,13 @@ fields:
 - name: audit_type
   ecs: null
   type: text
-  index: true
+  index: false
   group: linux
   desc: The auditd record type (SYSCALL, EXECVE, SOCKADDR...)
 - name: audit_id
   ecs: null
   type: text
-  index: true
+  index: false
   group: linux
   desc: The serial number of the audit event (joining the records)
 - name: audit_key
@@ -465,7 +472,7 @@ fields:
 - name: syscall
   ecs: null
   type: text
-  index: true
+  index: false
   group: linux
   desc: The name/number of the system call
 - name: selinux_context
@@ -476,7 +483,7 @@ fields:
 - name: service_name
   ecs: service.name
   type: text
-  index: true
+  index: false
   group: linux
   desc: The systemd unit
 - name: service_state
@@ -503,7 +510,7 @@ fields:
 - name: rule_id
   ecs: rule.id
   type: text
-  index: true
+  index: false
   group: detection
   desc: The id of the rule that fired
 - name: rule_name
@@ -514,7 +521,7 @@ fields:
 - name: rule_tactic
   ecs: threat.tactic.name
   type: text
-  index: true
+  index: false
   group: detection
   desc: The MITRE ATT&CK tactic
 - name: rule_technique
@@ -530,13 +537,13 @@ fields:
 - name: related_ip
   ecs: related.ip
   type: text
-  index: true
+  index: false
   group: related
   desc: All the IPs of the event - for a quick pivot
 - name: related_user
   ecs: related.user
   type: text
-  index: true
+  index: false
   group: related
   desc: All the users of the event
 - name: related_hash
@@ -548,7 +555,7 @@ fields:
   type: text
   group: host
   desc: The identifier of the system boot the event happened in
-  index: true
+  index: false
 - name: boot_at
   type: text
   group: host
@@ -557,7 +564,7 @@ fields:
   type: text
   group: user
   desc: Who was logged in at that time (a login from wtmp)
-  index: true
+  index: false
 - name: session_from
   type: text
   group: user
@@ -569,5 +576,5 @@ fields:
 - name: process_alive
   type: text
   group: process
-  index: true
+  index: false
   desc: Whether the event's process was alive at linking time (yes/no)

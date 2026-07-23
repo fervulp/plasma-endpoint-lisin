@@ -239,6 +239,32 @@ Settings**. Navigation goes only through `root.open(name)`.
 
 ---
 
+## 7a. What the speed rests on
+
+Measured, not assumed - each of these was a number before it was a change:
+
+| Where | What it was | What it is |
+|---|---|---|
+| A full sweep of the 57 inputs | 41.7 s, one input at a time | **20.3 s**, four at a time (our own CPU 2.1 s - an input mostly waits) |
+| The state snapshot handed to the interface | 195 ms, 22.9 MB, every row of every table | **7 ms, 12.6 KB** - the map of the tables |
+| Rows of the table on screen | the whole table crossed into QML | **one page of 50**, selected/sorted/paged by SQLite |
+| Switching to applications (3505 rows) | 1.5 s | **0.41 s** |
+| upsert of 93 thousand unchanged rows | 0.68 s (93k UPDATEs) | **0.38 s** (no write at all) |
+| Indexes on events | 45, of which 26 were never filtered by - 107 MB | **19**, database 314 -> 246 MB |
+| Appending events | - | **20 000 events/s** |
+| Panels (network walks 104k events) | 468 ms on every refresh | **0 ms** on a repeat (memoised by the mtime of the databases) |
+| The engine's own memory for previews | 8.6 MB | **4.4 MB** |
+
+The rules behind them:
+
+* **an input waits, so let inputs overlap.** The lock guards the write, not the
+  run; four workers is deliberately modest - this is an agent on a laptop.
+* **do not carry data across a boundary you do not need to cross.** The cost of
+  handing rows to QML grows with the number of VALUES, not rows.
+* **a row that did not change is not written.** In WAL mode a write is a real page.
+* **an index is a write on every insert.** Index what is filtered, nothing else;
+  the taxonomy is the schema, so removing `index: true` drops the index.
+
 ## 8. How to verify (mandatory before calling something done)
 
 Compiling QML and rendering offscreen **do not catch** errors in slots and

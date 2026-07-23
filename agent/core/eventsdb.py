@@ -62,6 +62,33 @@ class EventsDB:
                     c.execute(f'CREATE INDEX IF NOT EXISTS '
                               f'"ix_{self.table}_{f["name"]}" '
                               f'ON "{self.table}"("{f["name"]}")')
+            # AN INDEX THAT IS NO LONGER DECLARED IS DROPPED. The taxonomy is the
+            # schema, and that has to work in both directions: adding index: true
+            # creates the index, removing it takes the index away. Otherwise an
+            # existing database keeps paying for every index it ever had - here
+            # that was 26 indexes nobody filtered by.
+            want = {f'ix_{self.table}_{f["name"]}' for f in cols if f["index"]}
+            # the list is read out FIRST: dropping an index while walking the
+            # cursor over sqlite_master locks the table under our own feet
+            have_idx = [r["name"] for r in c.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' "
+                "AND tbl_name=? AND name LIKE 'ix_%'", (self.table,))]
+            dropped = 0
+            for name in have_idx:
+                if name not in want:
+                    c.execute(f'DROP INDEX IF EXISTS "{name}"')
+                    dropped += 1
+        if dropped:
+            # the pages an index used to occupy are freed, but the file keeps its
+            # size until it is compacted. This happens once, right after the
+            # schema changed - on 170 thousand events it took 2 s and gave back
+            # 68 MB.
+            try:
+                con = sqlite3.connect(self.path, timeout=30)
+                con.execute("VACUUM")
+                con.close()
+            except Exception:
+                pass
 
     # -------- writing --------
     def append(self, rows: list) -> int:

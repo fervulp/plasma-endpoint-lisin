@@ -28,6 +28,11 @@ from ..paths import EXPERTISE
 
 _PY_CACHE = {}   # sha1(code) -> the compiled normalize(text)
 
+# A PREVIEW, NOT A COPY OF THE DATA. The "Last run" dialog shows the first rows
+# so that a rule can be checked against them; keeping 200 of them for each of the
+# 202 nodes cost 8.6 MB of the process for nothing.
+PEEK_ROWS = 50
+
 
 def _plugin(code: str, fname: str):
     """Compiles a Python plugin from a YAML rule and pulls the function out of it.
@@ -303,32 +308,38 @@ class StatePipeline:
             return
         cfg = self.objects["inputs"].get(node["ref"])
         st = {"rows": 0, "error": "", "ran_at": time.strftime("%H:%M:%S")}
-        with self.lock:
-            self.last[(pipe, node_id)] = time.time()
-            try:
-                if not cfg:
-                    raise RuntimeError(f"no input {node['ref']!r}")
-                cmd = cfg["command"]
-                # the command is simply a shell string (a user does not have to
-                # spell out an argv array); a list is supported as well
-                if isinstance(cmd, str):
-                    cmd = ["bash", "-c", cmd]
-                text = subprocess.run(cmd, capture_output=True,
-                                      text=True, timeout=60).stdout
-                # the last execution of the input: its stdout
-                self.peek[(pipe, node_id)] = {"out_text": text[:20000]}
-                st["rows"] = self._walk(pl, nodes, node_id, pipe,
-                                        {"text": text, "rows": None, "rule": None})
-            except Exception as e:
-                st["error"] = str(e)
+        # THE LOCK GUARDS THE WRITE, NOT THE WHOLE RUN. It used to be held for the
+        # entire input - the command, the parsing, the enrichment - so nothing
+        # could ever run in parallel even though an input mostly WAITS for a
+        # subprocess. It is taken in the output stage now (see _walk), where one
+        # writer at a time is what SQLite actually needs.
+        self.last[(pipe, node_id)] = time.time()
+        try:
+            if not cfg:
+                raise RuntimeError(f"no input {node['ref']!r}")
+            cmd = cfg["command"]
+            # the command is simply a shell string (a user does not have to
+            # spell out an argv array); a list is supported as well
+            if isinstance(cmd, str):
+                cmd = ["bash", "-c", cmd]
+            text = subprocess.run(cmd, capture_output=True,
+                                  text=True, timeout=60).stdout
+            # the last execution of the input: its stdout
+            self.peek[(pipe, node_id)] = {"out_text": text[:20000]}
+            st["rows"] = self._walk(pl, nodes, node_id, pipe,
+                                    {"text": text, "rows": None, "rule": None})
+        except Exception as e:
+            st["error"] = str(e)
         self.status[(pipe, node_id)] = st
 
     def events(self):
         """The event database (lazy): created only if there is a type:events output.
         The schema is built from the expertise/taxonomy/events.yaml taxonomy."""
         if self._events is None:
-            from .eventsdb import EventsDB
-            self._events = EventsDB()
+            with self.lock:                 # created once, even from several threads
+                if self._events is None:
+                    from .eventsdb import EventsDB
+                    self._events = EventsDB()
         return self._events
 
     # the limit of change events per one run of one table: a mass update
@@ -467,7 +478,7 @@ class StatePipeline:
             # the last execution of the node: what arrived at its input
             peek = {"in_text": (ctx.get("text") or "")[:20000]
                     if ctx.get("rows") is None else None,
-                    "in_rows": ctx.get("rows")[:200] if ctx.get("rows") else None}
+                    "in_rows": ctx.get("rows")[:PEEK_ROWS] if ctx.get("rows") else None}
             try:
                 if n["kind"] == "normalize":
                     # normalization ONLY parses the input into rows of the right
@@ -525,7 +536,7 @@ class StatePipeline:
                     rules = ({n["ref"]: all_rules[n["ref"]]}
                              if n.get("ref") in all_rules else all_rules)
                     rep = correlate.run(self.events(), rules)
-                    peek["out_rows"] = rep["alerts"][:200]
+                    peek["out_rows"] = rep["alerts"][:PEEK_ROWS]
                     peek["out_count"] = len(rep["alerts"])
                     if rep["errors"]:
                         peek["error"] = "; ".join(rep["errors"][:3])
@@ -538,8 +549,9 @@ class StatePipeline:
                         # EVENTS: append-only into events.db, schema from the
                         # taxonomy, dedup by the taxonomy key (INSERT OR IGNORE)
                         ev = self.events()
-                        written += ev.append(c["rows"])
-                        ev.prune()      # retention: keep the last N events
+                        with self.lock:     # one writer at a time (see run_node)
+                            written += ev.append(c["rows"])
+                            ev.prune()  # retention: keep the last N events
                     elif out.get("type") == "statedb" and c["rows"] is not None:
                         # IMPORTANT: an empty set of rows is NOT "nothing to do".
                         # The source may legitimately be empty (vulnerabilities
@@ -559,7 +571,8 @@ class StatePipeline:
                         if not cols:
                             # only an empty set has no columns: we do not touch
                             # the schema but remove the dead rows of this output
-                            self.db.clear_src(table, n["id"])
+                            with self.lock:
+                                self.db.clear_src(table, n["id"])
                             peek["out_rows"] = None
                             peek["out_count"] = 0
                             self.peek[(pipe, n["id"])] = peek
@@ -575,17 +588,20 @@ class StatePipeline:
                                 cols.append(k)
                                 for r in c["rows"]:
                                     r.setdefault(k, "")
-                        self.db.ensure_table(
-                            table, out.get("title", table),
-                            out.get("icon", "view-list-details"), cols)
+                        # ONE WRITER AT A TIME (see run_node): the inputs run in
+                        # parallel now, and this is the only place that writes.
                         # src = the id of the output node: every output owns its
-                        # share of the table's rows (several outputs -> one table)
-                        diff = self.db.upsert(table, key, cols, c["rows"],
-                                              src=n["id"])
-                        # THE COLLECTION TIMESTAMP: it shows that the source
-                        # really ran, and that an empty table means "empty" rather
-                        # than "not collected for a long time"
-                        self.db.mark_collected(table)
+                        # share of the table's rows (several outputs -> one table).
+                        # The collection timestamp shows that the source really
+                        # ran, so an empty table means "empty" rather than "not
+                        # collected for a long time".
+                        with self.lock:
+                            self.db.ensure_table(
+                                table, out.get("title", table),
+                                out.get("icon", "view-list-details"), cols)
+                            diff = self.db.upsert(table, key, cols, c["rows"],
+                                                  src=n["id"])
+                            self.db.mark_collected(table)
                         # STATE TRANSITION -> EVENT. Switched on by the
                         # track_changes flag in the output: fluid tables
                         # (processes, sockets) have their own event sources, and
@@ -594,7 +610,7 @@ class StatePipeline:
                             written += self._emit_changes(out, table, key, diff)
                         written += len(c["rows"])
                     # the output: what arrived at it
-                    peek["out_rows"] = c["rows"][:200] if c.get("rows") else None
+                    peek["out_rows"] = c["rows"][:PEEK_ROWS] if c.get("rows") else None
                     peek["out_count"] = len(c["rows"]) if c.get("rows") else 0
                     self.peek[(pipe, n["id"])] = peek
                     # AFTER an output there may be a correlation node: the events
@@ -602,7 +618,7 @@ class StatePipeline:
                     written += self._walk(pl, nodes, n["id"], pipe, c)
                     continue
                     # normalization/filter: what came out of the node
-                peek["out_rows"] = c["rows"][:200] if c.get("rows") else None
+                peek["out_rows"] = c["rows"][:PEEK_ROWS] if c.get("rows") else None
                 peek["out_count"] = len(c["rows"]) if c.get("rows") else 0
                 self.peek[(pipe, n["id"])] = peek
             except Exception as e:
@@ -611,28 +627,55 @@ class StatePipeline:
             written += self._walk(pl, nodes, n["id"], pipe, c)
         return written
 
+    # HOW MANY INPUTS RUN AT ONCE.
+    # An input mostly WAITS: it starts dnf, rpm, ss, systemctl and sits on the
+    # subprocess. Measured on a full sweep of 57 inputs: 41.7 s of wall clock for
+    # about 6 s of our own CPU - the rest was waiting, one at a time. A few
+    # workers turn the waiting into overlap without adding load: the work is the
+    # same, it is only no longer serialised. Four is deliberately modest - this
+    # is an agent on someone's laptop, not a batch job.
+    WORKERS = 4
+
+    def _run_many(self, jobs, progress=None) -> None:
+        """Run inputs in parallel, report each one as it finishes.
+
+        Only the output stage takes the write lock (see run_node), so the
+        commands, the parsing and the enrichment overlap while the database still
+        has a single writer at a time.
+        """
+        if len(jobs) <= 1:
+            for pn, nid in jobs:
+                self.run_node(pn, nid)
+                if progress is not None:
+                    progress()
+            return
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=min(self.WORKERS, len(jobs))) as pool:
+            futures = [pool.submit(self.run_node, pn, nid) for pn, nid in jobs]
+            for f in as_completed(futures):
+                f.result()          # an input never raises; this re-raises a bug
+                if progress is not None:
+                    progress()
+
     def tick(self, progress=None) -> bool:
         """Run the inputs whose interval is due.
 
         `progress` is called after EVERY input so that the interface can show
-        what has already been collected. A full sweep of the inputs takes tens of
-        seconds on a real machine (46 s measured), and while it ran the caller
-        used to have nothing to show: the state page stayed empty from start-up
-        until the whole sweep finished. Data now appears table by table.
+        what has already been collected. A full sweep takes tens of seconds, and
+        while it ran the caller used to have nothing to show: the state page
+        stayed empty from start-up until the whole sweep finished. Data now
+        appears table by table.
         """
         ran = self.due()
-        for pn, nid in ran:
-            self.run_node(pn, nid)
-            if progress is not None:
-                progress()
+        if ran:
+            self._run_many(ran, progress)
         return bool(ran)
 
     def run_pipeline(self, pipe: str):
         pl = self.pipelines.get(pipe)
         if pl:
-            for n in pl["nodes"]:
-                if n["kind"] == "input":
-                    self.run_node(pipe, n["id"])
+            self._run_many([(pipe, n["id"]) for n in pl["nodes"]
+                            if n["kind"] == "input"])
 
     def run_all(self):
         for pn in self.pipelines:

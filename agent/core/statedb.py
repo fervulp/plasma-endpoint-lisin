@@ -156,44 +156,51 @@ class StateDB:
             if dup_ids:
                 c.executemany(f'DELETE FROM "{name}" WHERE _id=?',
                               [(i,) for i in dup_ids])
+            # A ROW THAT DID NOT CHANGE IS NOT WRITTEN. Every row used to be
+            # UPDATEd on every run - 93 thousand writes per run for package_files
+            # alone, and in WAL mode a write is a real page. Comparing first and
+            # writing only the difference is also what keeps the change events
+            # honest: what is written is exactly what changed.
             alive = set()
+            to_update, to_insert = [], []
             for row in rows:
                 vals = {k: _txt(row.get(k)) for k in cols}
                 key = tuple(vals[k] for k in keys)
                 alive.add(key)
                 if key in have:
-                    old = prev.get(key, {})
-                    ch = {k: [str(old.get(k, "")), vals[k]] for k in cols
-                          if str(old.get(k, "")) != vals[k]}
+                    was = prev.get(key, {})
+                    ch = {k: [str(was.get(k, "")), vals[k]] for k in cols
+                          if str(was.get(k, "")) != vals[k]}
                     if ch:
                         diff["changed"].append({"key": list(key), "fields": ch})
-                    sets = ",".join(f'"{k}"=?' for k in cols)
-                    c.execute(f'UPDATE "{name}" SET {sets},"_src"=? WHERE _id=?',
-                              [*vals.values(), src, have[key]])
+                        to_update.append([*vals.values(), src, have[key]])
                 else:
                     diff["added"].append({"key": list(key), "row": dict(vals)})
-                    names = ",".join(f'"{k}"' for k in cols) + ',"_src"'
-                    ph = ",".join("?" * (len(cols) + 1))
-                    c.execute(f'INSERT INTO "{name}"({names}) VALUES({ph})',
-                              [*vals.values(), src])
+                    to_insert.append([*vals.values(), src])
+            if to_update:
+                sets = ",".join(f'"{k}"=?' for k in cols)
+                c.executemany(f'UPDATE "{name}" SET {sets},"_src"=? WHERE _id=?',
+                              to_update)
+            if to_insert:
+                names = ",".join(f'"{k}"' for k in cols) + ',"_src"'
+                ph = ",".join("?" * (len(cols) + 1))
+                c.executemany(f'INSERT INTO "{name}"({names}) VALUES({ph})',
+                              to_insert)
             # staleness by WRITER (_src): we delete the rows of THIS output that
             # are no longer in the live set (dead processes, closed sockets).
             # Other rules write into the same table under their own _src - their
             # rows are left alone.
             keycols = ",".join(f'"{k}"' for k in keys)
+            # one pass: what is gone is collected and deleted at once (it used
+            # to walk the table twice whenever anything had disappeared)
             stale = []
             for r in c.execute(
                     f'SELECT _id,{keycols} FROM "{name}" WHERE "_src"=?', (src,)):
-                if tuple(r[kk] for kk in keys) not in alive:
+                k = tuple(r[kk] for kk in keys)
+                if k not in alive:
                     stale.append(r["_id"])
+                    diff["removed"].append({"key": list(k), "row": prev.get(k, {})})
             if stale:
-                for r in c.execute(
-                        f'SELECT _id,{keycols} FROM "{name}" WHERE "_src"=?',
-                        (src,)):
-                    if r["_id"] in stale:
-                        diff["removed"].append(
-                            {"key": [r[kk] for kk in keys],
-                             "row": prev.get(tuple(r[kk] for kk in keys), {})})
                 c.executemany(f'DELETE FROM "{name}" WHERE _id=?',
                               [(i,) for i in stale])
         return diff
