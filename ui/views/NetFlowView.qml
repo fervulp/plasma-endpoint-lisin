@@ -15,27 +15,65 @@ Item {
     property var d: ({ flows: [], dns: [], by_asn: [], live: [], resolvers: [],
                        series: [], by_process: [], rare: 0,
                        total: 0, external: 0, unit: "" })
-    property bool extOnly: false
-    property bool rareOnly: false
     property var whois: null
-    property var detail: null
+    property var sel: null
+    property string query: ""
+    property var hiddenCols: []
+
+    // one description of the columns, read by the header and by the rows
+    readonly property var cols: [
+        { k: "last_seen", t: "Last seen", w: 11, mono: true },
+        { k: "ip", t: "Address", w: 14, mono: true },
+        { k: "as_org", t: "Network owner", w: 22, fill: true },
+        { k: "country", t: "Country", w: 5 },
+        { k: "process_name", t: "Process", w: 12, mono: true },
+        { k: "protocol", t: "Protocol", w: 7 },
+        { k: "sessions", t: "Sessions", w: 6, right: true, mono: true },
+        { k: "direction", t: "Direction", w: 8 },
+        { k: "rare", t: "Unusual", w: 14 }
+    ]
+    function fmt(row, key) {
+        if (key === "last_seen") return Fmt.local(row.last_seen)
+        if (key === "as_org" && !row.as_org)
+            return row.direction === "internal" ? "(private network)" : ""
+        return undefined
+    }
+    function rowAccent(r) {
+        if (!r) return ""
+        if (r.threat) return "#e74c3c"
+        if (r.rare) return "#e67e22"
+        return r.direction === "external" ? "#f1c40f" : ""
+    }
     function refresh() { view.d = backend.networkFlows() }
     Component.onCompleted: refresh()
     Connections { target: backend; function onStateReady(s) { view.refresh() } }
 
-    property int maxSessions: {
-        var m = 1, f = d.flows || []
-        for (var i = 0; i < f.length; i++) m = Math.max(m, f[i].sessions)
-        return m
-    }
-    property var shown: {
-        var f = d.flows || [], o = []
-        for (var i = 0; i < f.length; i++) {
-            if (extOnly && f[i].direction !== "external") continue
-            if (rareOnly && !f[i].rare) continue
-            o.push(f[i])
+    readonly property var rows: d.flows || []
+    // The condition is evaluated here: the flows are aggregated in Python and
+    // there is no table to hand an SQL string to. The syntax is the one the
+    // shared query bar produces.
+    readonly property var shown: {
+        var q = (view.query || "").trim()
+        if (q === "") return view.rows
+        var m = q.match(/^\s*(\w+)\s*(=|<>|!=|LIKE|NOT LIKE)\s*'?([^']*)'?\s*$/i)
+        var out = []
+        for (var i = 0; i < view.rows.length; i++) {
+            var r = view.rows[i]
+            if (m) {
+                var v = String(r[m[1]] === undefined ? "" : r[m[1]]).toLowerCase()
+                var want = m[3].toLowerCase(), op = m[2].toUpperCase()
+                var hit = op === "=" ? v === want
+                        : (op === "<>" || op === "!=") ? v !== want
+                        : op === "LIKE" ? v.indexOf(want.replace(/%/g, "")) >= 0
+                        : v.indexOf(want.replace(/%/g, "")) < 0
+                if (hit) out.push(r)
+            } else {
+                var hay = ""
+                for (var k in r) hay += " " + r[k]
+                if (hay.toLowerCase().indexOf(q.toLowerCase()) >= 0) out.push(r)
+            }
         }
-        return o
+        return out
     }
 
     ColumnLayout {
@@ -52,18 +90,20 @@ Item {
                 text: view.d.total + " addresses · " + view.d.external + " external · " + view.d.unit
             }
             Item { Layout.fillWidth: true }
+            // A FACET IS A CONDITION, so it writes into the same query bar
+            // instead of filtering on the side: two ways to select the same
+            // thing are two places to get it wrong (principle 17).
             QQC2.ToolButton {
-                text: "External Only"; checkable: true; checked: view.extOnly
-                onToggled: view.extOnly = checked
+                text: "External only"
+                onClicked: qbar.addCondition("direction", "=", "external")
             }
             // RARE SESSIONS. Bulk traffic is visible anyway; the inconspicuous -
             // a few connections, an unknown owner, a narrow window - is exactly
             // what gets lost in a common list.
             QQC2.ToolButton {
                 text: "Unusual (" + view.d.rare + ")"
-                checkable: true; checked: view.rareOnly
                 enabled: view.d.rare > 0
-                onToggled: view.rareOnly = checked
+                onClicked: qbar.addCondition("rare", "<>", "")
             }
             QQC2.ToolButton { icon.name: "view-refresh"; onClicked: view.refresh() }
         }
@@ -117,95 +157,132 @@ Item {
         }
         Kirigami.Separator { Layout.fillWidth: true }
 
+        QueryBar {
+            id: qbar
+            Layout.fillWidth: true
+            Layout.leftMargin: Kirigami.Units.smallSpacing
+            Layout.rightMargin: Kirigami.Units.smallSpacing
+            fields: view.cols.map(function (c) { return { name: c.k } })
+            defaultSelect: view.cols.map(function (c) { return c.k })
+            placeholder: "direction = 'external'   \u00b7   or just type an address or a name"
+            onApplied: function (spec, sql) {
+                var hide = []
+                if (spec.select.length)
+                    for (var i = 0; i < view.cols.length; i++)
+                        if (spec.select.indexOf(view.cols[i].k) < 0)
+                            hide.push(view.cols[i].k)
+                view.hiddenCols = hide
+                view.query = qbar.builderMode ? qbar.buildSql() : qbar.manualWhere()
+            }
+        }
+        Kirigami.Separator { Layout.fillWidth: true }
+
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
 
-            // ---- directions ----
-            ListView {
+            DataTable {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                clip: true
-                model: view.shown
-                QQC2.ScrollBar.vertical: QQC2.ScrollBar {}
-                Kirigami.PlaceholderMessage {
-                    anchors.centerIn: parent
-                    visible: parent.count === 0
-                    text: "No network events yet"
+                columns: view.cols
+                rows: view.shown
+                hidden: view.hiddenCols
+                accent: view.rowAccent
+                formatter: view.fmt
+                onRowActivated: function (row) {
+                    view.sel = row
+                    view.whois = null
                 }
-                delegate: QQC2.ItemDelegate {
-                    width: ListView.view.width
-                    height: Kirigami.Units.gridUnit * 3
-                    onClicked: {
-                        // Kirigami.Dialog is a Popup: it is opened by calling
-                        // open(). The binding `visible: detail !== null` did not
-                        // fire, so a click on a session did not open the
-                        // breakdown - hence "I click and cannot look at it".
-                        // the graph answers "who sent this" directly, which
-                        // the old text dialog could not
-                        view.openAddress(modelData.ip)
-                    }
-                    contentItem: ColumnLayout {
-                        spacing: 1
-                        RowLayout {
+                onConditionRequested: function (field, op, value) {
+                    qbar.addCondition(field, op, value)
+                }
+            }
+
+            SidePanel {
+                id: side
+                Layout.fillHeight: true
+                open: view.sel !== null
+                title: view.sel ? view.sel.ip : ""
+                iconName: "network-connect"
+                onCloseRequested: { view.sel = null; view.whois = null }
+
+                QQC2.ScrollView {
+                    id: scroller
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    ColumnLayout {
+                        width: scroller.availableWidth
+                        spacing: Kirigami.Units.smallSpacing
+
+                        // WHAT TO DO NEXT - transitions, not the advice "go and
+                        // look yourself" (principle 6).
+                        QQC2.Button {
                             Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing
-                            Rectangle {
-                                Layout.preferredWidth: Kirigami.Units.gridUnit * 0.6
-                                Layout.preferredHeight: Kirigami.Units.gridUnit * 0.6
-                                radius: 3
-                                color: modelData.threat ? "#c0392b"
-                                     : modelData.direction === "external" ? "#2980b9" : "#7f8c8d"
-                            }
-                            QQC2.Label {
-                                text: modelData.ip
-                                font.family: "monospace"
-                                Layout.preferredWidth: Kirigami.Units.gridUnit * 9
-                            }
-                            QQC2.Label {
+                            text: "Who talked to this address"
+                            icon.name: "distribute-graph-directed"
+                            onClicked: view.openAddress(view.sel.ip)
+                        }
+                        QQC2.Button {
+                            Layout.fillWidth: true
+                            text: "Events for this address"
+                            icon.name: "view-list-details"
+                            onClicked: root.focusEvents("destination_ip='" + view.sel.ip + "'")
+                        }
+                        QQC2.Button {
+                            Layout.fillWidth: true
+                            text: "WHOIS"
+                            icon.name: "documentinfo"
+                            onClicked: view.whois = backend.whoisLookup(view.sel.ip)
+                        }
+                        Kirigami.Separator { Layout.fillWidth: true }
+
+                        Repeater {
+                            model: view.sel ? Object.keys(view.sel) : []
+                            delegate: RowLayout {
+                                required property var modelData
                                 Layout.fillWidth: true
-                                elide: Text.ElideRight
-                                opacity: 0.8
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                text: (modelData.domain || modelData.as_org || "")
-                                      + (modelData.country ? "  (" + modelData.country + ")" : "")
-                                      + (modelData.threat ? "   ⚠ " + modelData.threat : "")
-                            }
-                            QQC2.Label {
-                                text: modelData.sessions + " sessions"
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                opacity: 0.75
+                                visible: String(view.sel[modelData] || "") !== ""
+                                spacing: Kirigami.Units.smallSpacing
+                                QQC2.Label {
+                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 8
+                                    text: modelData
+                                    opacity: 0.6
+                                    elide: Text.ElideRight
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                }
+                                QQC2.Label {
+                                    Layout.fillWidth: true
+                                    text: (modelData === "last_seen" || modelData === "first_seen")
+                                          ? Fmt.local(view.sel[modelData])
+                                          : String(view.sel[modelData])
+                                    wrapMode: Text.WrapAnywhere
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                }
                             }
                         }
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing
-                            Rectangle {          // the frequency bar
-                                // IMPORTANT: the width is computed from a fixed base
-                                // and not from parent.width - otherwise the Layout
-                                // recomputes itself in a circle ("recursive rearrange").
-                                Layout.preferredWidth: Math.max(2,
-                                    Kirigami.Units.gridUnit * 18
-                                    * modelData.sessions / view.maxSessions)
-                                Layout.preferredHeight: Kirigami.Units.gridUnit * 0.5
-                                radius: 2
-                                color: modelData.direction === "external"
-                                       ? Kirigami.Theme.highlightColor : "#95a5a6"
-                                opacity: 0.7
-                            }
-                            Item { Layout.fillWidth: true }
-                            QQC2.Label {
-                                opacity: 0.6
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                text: (modelData.process_name
-                                       ? "opened by: " + modelData.process_name
-                                         + (modelData.process_source
-                                            ? " (" + modelData.process_source + ")" : "")
-                                         + "  ·  "
-                                       : "owner unknown  ·  ")
-                                      + "ports " + modelData.ports
-                                      + "  ·  " + (modelData.last_seen || "").replace("T", " ").replace("Z", "")
+
+                        Kirigami.Separator { Layout.fillWidth: true; visible: view.whois !== null }
+                        Repeater {
+                            model: view.whois ? Object.keys(view.whois) : []
+                            delegate: RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                visible: String(view.whois[modelData] || "") !== ""
+                                spacing: Kirigami.Units.smallSpacing
+                                QQC2.Label {
+                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 8
+                                    text: modelData
+                                    opacity: 0.6
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                }
+                                QQC2.Label {
+                                    Layout.fillWidth: true
+                                    text: String(view.whois[modelData])
+                                    wrapMode: Text.WrapAnywhere
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                }
                             }
                         }
                     }
@@ -362,119 +439,4 @@ Item {
         }
     }
 
-    // THE BREAKDOWN OF A DIRECTION on a click. A dashboard must answer not "how
-    // many" but "what to do": who talked, when, through which process and where
-    // to go next - jumps, not the advice "go and look yourself".
-    Kirigami.Dialog {
-        id: detailDlg
-        title: view.detail ? ("Traffic with " + view.detail.ip) : ""
-        preferredWidth: Kirigami.Units.gridUnit * 40
-        preferredHeight: Kirigami.Units.gridUnit * 30
-        standardButtons: Kirigami.Dialog.Close
-        onRejected: view.detail = null
-        onClosed: view.detail = null
-
-        QQC2.ScrollView {
-            id: dScroll
-            anchors.fill: parent
-            clip: true
-            ColumnLayout {
-                width: dScroll.availableWidth
-                spacing: Kirigami.Units.smallSpacing
-
-                Kirigami.Heading { level: 4; text: "Who Communicated" }
-                Repeater {
-                    model: view.detail ? (view.detail.processes || []) : []
-                    delegate: RowLayout {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        spacing: Kirigami.Units.smallSpacing
-                        QQC2.Label {
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 10
-                            text: modelData.name
-                            font.bold: true
-                            elide: Text.ElideRight
-                        }
-                        QQC2.Label {
-                            Layout.fillWidth: true
-                            font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            opacity: 0.8
-                            wrapMode: Text.WordWrap
-                            text: modelData.sessions + " sessions · "
-                                  + String(modelData.first_seen).replace("T", " ").substring(0, 16)
-                                  + " … "
-                                  + String(modelData.last_seen).replace("T", " ").substring(0, 16)
-                                  + (modelData.how ? "  (" + modelData.how + ")" : "")
-                        }
-                    }
-                }
-
-                Kirigami.Heading {
-                    level: 4
-                    text: "Which Application"
-                    visible: view.detail && (view.detail.packages || []).length > 0
-                }
-                Repeater {
-                    model: view.detail ? (view.detail.packages || []) : []
-                    delegate: QQC2.Label {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        wrapMode: Text.WordWrap
-                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        text: "PID " + modelData.pid + " · " + modelData.user
-                              + " · package: " + (modelData.package || "unpackaged")
-                              + (modelData.purpose ? " — " + modelData.purpose : "")
-                              + "\n" + modelData.command
-                    }
-                }
-
-                Kirigami.Heading { level: 4; text: "Where to Look" }
-                Flow {
-                    Layout.fillWidth: true
-                    spacing: Kirigami.Units.smallSpacing
-                    Repeater {
-                        model: view.detail ? (view.detail.explore || []) : []
-                        delegate: QQC2.Button {
-                            required property var modelData
-                            text: modelData.label
-                            // the icon hints WHERE the jump leads
-                            icon.name: modelData.kind === "events"
-                                       ? "view-calendar-list" : "search"
-                            onClicked: {
-                                if (modelData.kind === "events")
-                                    root.focusEvents(modelData.where)
-                                else
-                                    root.focusState(modelData.table,
-                                                    modelData.col, modelData.val)
-                                view.detail = null
-                                detailDlg.close()
-                            }
-                        }
-                    }
-                    QQC2.Button {
-                        text: "WHOIS"
-                        icon.name: "documentinfo"
-                        onClicked: view.whois = backend.whoisLookup(view.detail.ip)
-                    }
-                }
-
-                Kirigami.Heading { level: 4; text: "Event Feed" }
-                Repeater {
-                    model: view.detail ? (view.detail.events || []).slice(0, 40) : []
-                    delegate: QQC2.Label {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        elide: Text.ElideRight
-                        font.family: "monospace"
-                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        text: Fmt.local(modelData.ts)
-                              + "  " + modelData.event_action
-                              + "  " + (modelData.process_name || "?")
-                              + "  :" + (modelData.destination_port || "")
-                              + "  " + (modelData.network_protocol || "")
-                    }
-                }
-            }
-        }
-    }
 }

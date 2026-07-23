@@ -1,0 +1,58 @@
+# COPY THIS FILE TO .github/workflows/rpm.yml IN THE REPOSITORY.
+# It is kept here because a token without the `workflow` scope may not push
+# anything under .github/workflows - GitHub refuses it. Either add that scope
+# to the token and move the file, or create it once through the web interface
+# (Actions -> New workflow -> set up a workflow yourself) and paste this in.
+#
+# Building the RPM and attaching it to a release.
+#
+# The package is built on GitHub rather than on a developer machine on purpose:
+# a binary in the repository would go stale and nobody could tell which sources
+# it came from. Here every release carries an RPM built from that exact tag, in
+# a clean Fedora container, and the log shows how.
+name: rpm
+
+on:
+  push:
+    tags: ["v*"]          # a tag is what makes a release
+  workflow_dispatch: {}   # or build it by hand from the Actions tab
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    permissions:
+      contents: write     # needed to attach the file to the release
+    steps:
+      - name: Install the build tools
+        run: dnf -y install rpm-build rpmdevtools python3 tar git
+
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: bash packaging/build-rpm.sh
+
+      - name: Check the package
+        run: |
+          set -e
+          rpm=$(ls ~/rpmbuild/RPMS/noarch/lisin-*.rpm)
+          echo "built: $rpm"
+          rpm -qip "$rpm"
+          # the working journals and the byte cache must not be inside
+          ! rpm -qlp "$rpm" | grep -E 'CLAUDE.md|WISHES.md|__pycache__|\.pyc$'
+          # the expertise and the interface must be
+          rpm -qlp "$rpm" | grep -q 'expertise/taxonomy/events.yaml'
+          rpm -qlp "$rpm" | grep -q 'ui/Main.qml'
+          cp "$rpm" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lisin-rpm
+          path: lisin-*.rpm
+
+      - name: Attach it to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: lisin-*.rpm
+          generate_release_notes: true

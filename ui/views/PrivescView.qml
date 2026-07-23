@@ -2,134 +2,219 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import "../components/Fmt.js" as Fmt
 import "../components"
-import "../pages"
-import "."
+import "../components/Fmt.js" as Fmt
 
-// Privilege escalation: both the EVENTS (who did what through sudo, failed
+// PRIVILEGE ESCALATION: both the EVENTS (who did what through sudo, failed
 // logins) and the STANDING VECTORS (capabilities, NOPASSWD, SUID, polkit).
 // One is useless without the other: events say "what happened", vectors say
 // "what else could be used".
+//
+// Built on the shared templates (principle 17): one query bar, one table, one
+// side panel. Two datasets of a different shape cannot share one table, so the
+// switch at the top says which one is on screen - and both are tables.
 Item {
     id: view
-    property var d: ({ events: [], vectors: [], suid: [], admins: [],
-                       polkit: [], auth_failures: [], sudo_commands: [], total: 0 })
-    property string tab: "events"
+    property var d: ({ events: [], vectors: [], suid: [], admins: [], polkit: [], total: 0 })
+    property var sel: null
+    property string query: ""
+    property string mode: "vectors"      // vectors | events | admins
+
+    readonly property var colsVectors: [
+        { k: "changed", t: "Changed", w: 10, mono: true },
+        { k: "age_days", t: "Age, days", w: 6, right: true, mono: true },
+        { k: "kind", t: "Kind", w: 8 },
+        { k: "name", t: "Object", w: 22, fill: true, mono: true },
+        { k: "detail", t: "Detail", w: 18 },
+        { k: "risk", t: "Risk", w: 5 },
+        { k: "package", t: "Package", w: 10 }
+    ]
+    readonly property var colsEvents: [
+        { k: "ts", t: "Time", w: 11, mono: true },
+        { k: "subject_name", t: "Who", w: 10 },
+        { k: "event_action", t: "Action", w: 12 },
+        { k: "event_outcome", t: "Outcome", w: 7 },
+        { k: "process_name", t: "Process", w: 10, mono: true },
+        { k: "message", t: "Message", w: 30, fill: true }
+    ]
+    readonly property var colsAdmins: [
+        { k: "name", t: "User", w: 10 },
+        { k: "privilege", t: "Privilege", w: 10 },
+        { k: "admin_groups", t: "Through", w: 20, fill: true },
+        { k: "shell", t: "Shell", w: 14, mono: true }
+    ]
+    readonly property var cols: mode === "events" ? colsEvents
+                              : mode === "admins" ? colsAdmins : colsVectors
+    property var hiddenCols: []
+
     function refresh() { view.d = backend.privescActivity() }
     Component.onCompleted: refresh()
-    Connections { target: backend; function onStateReady(s) { view.refresh() } }
+    Connections {
+        target: backend
+        function onStateReady(s) { view.refresh() }
+    }
 
-    ColumnLayout {
+    // THE TIME IS MANDATORY (principle 6): a vector without a date cannot be
+    // tied to an incident. For a vector that is the mtime of its carrier, for
+    // an event its own time; both are shown in the local zone.
+    function fmt(row, key) {
+        if (key === "ts") return Fmt.local(row.ts)
+        if (key === "changed") return Fmt.localShort(row.changed)
+        return undefined
+    }
+    function rowAccent(r) {
+        if (!r) return ""
+        if (r.risk === "high" || r.event_outcome === "failure") return "#e74c3c"
+        if (r.nopasswd === "yes" || r.privilege === "admin") return "#e67e22"
+        return ""
+    }
+
+    readonly property var rows: mode === "events" ? (d.events || [])
+                              : mode === "admins" ? (d.admins || []) : (d.vectors || [])
+    readonly property var shown: {
+        var q = (view.query || "").trim()
+        if (q === "") return view.rows
+        var m = q.match(/^\s*(\w+)\s*(=|<>|!=|LIKE|NOT LIKE)\s*'?([^']*)'?\s*$/i)
+        var out = []
+        for (var i = 0; i < view.rows.length; i++) {
+            var r = view.rows[i]
+            if (m) {
+                var v = String(r[m[1]] === undefined ? "" : r[m[1]]).toLowerCase()
+                var want = m[3].toLowerCase(), op = m[2].toUpperCase()
+                var hit = op === "=" ? v === want
+                        : (op === "<>" || op === "!=") ? v !== want
+                        : op === "LIKE" ? v.indexOf(want.replace(/%/g, "")) >= 0
+                        : v.indexOf(want.replace(/%/g, "")) < 0
+                if (hit) out.push(r)
+            } else {
+                var hay = ""
+                for (var k in r) hay += " " + r[k]
+                if (hay.toLowerCase().indexOf(q.toLowerCase()) >= 0) out.push(r)
+            }
+        }
+        return out
+    }
+
+    RowLayout {
         anchors.fill: parent
         spacing: 0
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.margins: Kirigami.Units.smallSpacing
-            spacing: Kirigami.Units.smallSpacing
-            Kirigami.Heading { level: 3; text: "Privilege Escalation" }
-            Item { Layout.fillWidth: true }
-            Repeater {
-                model: [{ k: "events", t: "Events" }, { k: "vectors", t: "Vectors" },
-                        { k: "suid", t: "SUID" }, { k: "admins", t: "Admins" },
-                        { k: "polkit", t: "Polkit" }]
-                QQC2.ToolButton {
-                    text: modelData.t + "  " + (
-                        modelData.k === "events" ? view.d.events.length
-                        : modelData.k === "vectors" ? view.d.vectors.length
-                        : modelData.k === "suid" ? view.d.suid.length
-                        : modelData.k === "admins" ? view.d.admins.length
-                                                   : view.d.polkit.length)
-                    checkable: true
-                    checked: view.tab === modelData.k
-                    onClicked: view.tab = modelData.k
-                }
-            }
-            QQC2.ToolButton { icon.name: "view-refresh"; onClicked: view.refresh() }
-        }
-        Kirigami.Separator { Layout.fillWidth: true }
 
-        ListView {
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            clip: true
-            QQC2.ScrollBar.vertical: QQC2.ScrollBar {}
-            model: view.tab === "events" ? view.d.events
-                 : view.tab === "vectors" ? view.d.vectors
-                 : view.tab === "suid" ? view.d.suid
-                 : view.tab === "admins" ? view.d.admins : view.d.polkit
-            Kirigami.PlaceholderMessage {
-                anchors.centerIn: parent
-                visible: parent.count === 0
-                text: "Nothing to show"
+            spacing: Kirigami.Units.smallSpacing
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.margins: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.smallSpacing
+                Kirigami.Heading { level: 3; text: "Privilege use" }
+                Item { width: Kirigami.Units.largeSpacing }
+                QQC2.ButtonGroup { id: modeGroup }
+                Repeater {
+                    model: [{ k: "vectors", t: "Standing vectors" },
+                            { k: "events", t: "Events" },
+                            { k: "admins", t: "Who is admin" }]
+                    QQC2.ToolButton {
+                        required property var modelData
+                        checkable: true
+                        QQC2.ButtonGroup.group: modeGroup
+                        checked: view.mode === modelData.k
+                        text: modelData.t + " (" +
+                              (modelData.k === "vectors" ? (view.d.vectors || []).length
+                               : modelData.k === "events" ? (view.d.events || []).length
+                               : (view.d.admins || []).length) + ")"
+                        onClicked: { view.mode = modelData.k; view.sel = null }
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                QQC2.Label {
+                    text: view.shown.length + " of " + view.rows.length
+                    opacity: 0.6
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                }
+                QQC2.ToolButton { icon.name: "view-refresh"; onClicked: view.refresh() }
             }
-            delegate: QQC2.ItemDelegate {
-                width: ListView.view.width
-                height: Kirigami.Units.gridUnit * 2.4
-                contentItem: RowLayout {
-                    spacing: Kirigami.Units.smallSpacing
-                    // THE TIME IN THE FIRST COLUMN (principle 6): a vector or an
-                    // event without a date cannot be tied to an incident. For a
-                    // vector that is the mtime of its carrier, for an event its time.
-                    QQC2.Label {
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 8
-                        Layout.alignment: Qt.AlignVCenter
-                        font.family: "monospace"
-                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        opacity: 0.8
-                        text: {
-                            var t = view.tab === "events"
-                                    ? String(modelData.ts || "")
-                                    : String(modelData.changed || "")
-                            if (t === "") return "—"
-                            return Fmt.localShort(t)
+
+            QueryBar {
+                id: qbar
+                Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.smallSpacing
+                Layout.rightMargin: Kirigami.Units.smallSpacing
+                fields: view.cols.map(function (c) { return { name: c.k } })
+                defaultSelect: view.cols.map(function (c) { return c.k })
+                placeholder: "risk = 'high'   ·   or just type text to search"
+                onApplied: function (spec, sql) {
+                    var hide = []
+                    if (spec.select.length)
+                        for (var i = 0; i < view.cols.length; i++)
+                            if (spec.select.indexOf(view.cols[i].k) < 0)
+                                hide.push(view.cols[i].k)
+                    view.hiddenCols = hide
+                    view.query = qbar.builderMode ? qbar.buildSql() : qbar.manualWhere()
+                }
+            }
+            Kirigami.Separator { Layout.fillWidth: true }
+
+            DataTable {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                columns: view.cols
+                rows: view.shown
+                hidden: view.hiddenCols
+                accent: view.rowAccent
+                formatter: view.fmt
+                onRowActivated: function (row) { view.sel = row }
+                onConditionRequested: function (field, op, value) {
+                    qbar.addCondition(field, op, value)
+                }
+            }
+        }
+
+        SidePanel {
+            id: side
+            Layout.fillHeight: true
+            open: view.sel !== null
+            title: view.sel ? (view.sel.name || view.sel.event_action || "") : ""
+            iconName: "security-medium"
+            onCloseRequested: view.sel = null
+
+            QQC2.ScrollView {
+                id: scroller
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                ColumnLayout {
+                    width: scroller.availableWidth
+                    spacing: 2
+                    Repeater {
+                        model: view.sel ? Object.keys(view.sel) : []
+                        delegate: RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            visible: String(view.sel[modelData] || "") !== ""
+                            spacing: Kirigami.Units.smallSpacing
+                            QQC2.Label {
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 8
+                                text: modelData
+                                opacity: 0.6
+                                elide: Text.ElideRight
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            }
+                            QQC2.Label {
+                                Layout.fillWidth: true
+                                text: String(view.sel[modelData])
+                                wrapMode: Text.WrapAnywhere
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            }
                         }
                     }
-                    QQC2.Label {
-                        Layout.preferredWidth: Kirigami.Units.gridUnit * 4
-                        Layout.alignment: Qt.AlignVCenter
-                        opacity: 0.55
-                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        visible: view.tab === "vectors"
-                        text: modelData.age_days ? (modelData.age_days + " d") : ""
-                    }
-                    Rectangle {
-                        Layout.preferredWidth: 4; Layout.fillHeight: true
-                        color: (modelData.risk === "high" || modelData.event_outcome === "failure"
-                                || (parseInt(modelData.event_severity) || 0) >= 55)
-                               ? "#e74c3c" : Kirigami.Theme.disabledTextColor
-                    }
-                    ColumnLayout {
+                    QQC2.Button {
                         Layout.fillWidth: true
-                        spacing: 0
-                        QQC2.Label {
-                            Layout.fillWidth: true
-                            elide: Text.ElideMiddle
-                            font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            text: view.tab === "events"
-                                  ? ((modelData.subject_name || "?") + " → " +
-                                     (modelData.event_action || "") +
-                                     (modelData.object_name ? " → " + modelData.object_name : ""))
-                                  : view.tab === "vectors"
-                                  ? (modelData.kind + ": " + modelData.name)
-                                  : view.tab === "suid" ? modelData.path
-                                  : view.tab === "admins"
-                                  ? (modelData.name + "  [" + (modelData.admin_groups || "") + "]")
-                                  : modelData.action
-                        }
-                        QQC2.Label {
-                            Layout.fillWidth: true
-                            opacity: 0.65
-                            elide: Text.ElideRight
-                            font.family: "monospace"
-                            font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            text: view.tab === "events" ? (modelData.process_command_line
-                                                           || modelData.message || "")
-                                : view.tab === "vectors" ? (modelData.detail || "")
-                                : view.tab === "suid" ? (modelData.owner + " " + modelData.perms)
-                                : view.tab === "admins" ? (modelData.shell || "")
-                                : (modelData.title || "")
-                        }
+                        visible: view.mode === "vectors" && view.sel && view.sel.name
+                        text: "Show in State"
+                        icon.name: "search"
+                        onClicked: root.focusState("privesc", "name", view.sel.name)
                     }
                 }
             }

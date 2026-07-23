@@ -249,6 +249,11 @@ The ready templates:
 A new section with multi-field elements MUST be built on these templates. Its
 own table or its own search bar in a new section is a defect.
 
+Every section that shows rows is on them now: State, Events, SQL,
+Vulnerabilities, Findings, Privilege use, File activity, Network activity. A
+facet button does not filter on the side - it writes a condition into the same
+query bar, where it is visible and can be edited.
+
 ## 16. Layout hygiene: nothing overlaps and nothing escapes
 
 A component counts as finished only if it withstands REAL data: a long package

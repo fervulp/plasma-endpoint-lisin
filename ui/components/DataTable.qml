@@ -62,7 +62,15 @@ Item {
         return out
     }
     function cellText(row, key) {
-        if (formatter) return formatter(row, key)
+        // A FORMATTER HANDLES ONLY THE COLUMNS IT CARES ABOUT. Returning
+        // undefined means "show the raw value" - otherwise every view would have
+        // to repeat the default branch, and a formatter that forgot one column
+        // silently assigned undefined to a QString ("Unable to assign
+        // [undefined] to QString" on every cell of that column).
+        if (formatter) {
+            var f = formatter(row, key)
+            if (f !== undefined && f !== null) return String(f)
+        }
         var v = row[key]
         return (v === undefined || v === null) ? "" : String(v)
     }
