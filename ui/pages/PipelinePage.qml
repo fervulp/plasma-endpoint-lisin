@@ -99,6 +99,12 @@ Kirigami.ScrollablePage {
 
     Component { id: graphComp; PipelineGraphPage {} }
 
+    // open a pipeline's graph editor by name (used by the Open Graph buttons and
+    // by the documentation screenshots)
+    function openGraph(name) {
+        root.pageStack.layers.push(graphComp, { pipeName: name })
+    }
+
     Kirigami.PromptDialog {
         id: newDialog
         title: "New pipeline"

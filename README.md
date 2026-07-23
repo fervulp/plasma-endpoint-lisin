@@ -24,25 +24,71 @@ Everything runs as your normal user. No root, no kernel module, no daemon.
 
 ## Screenshots
 
-*The data below is synthetic (a fictional user `alice`, RFC 5737 example
-addresses) — generated for the documentation, not a real machine.*
+*All the data below is synthetic (a fictional user `alice`, RFC 5737 example
+addresses) — generated for the documentation, never a real machine.*
 
-The investigation graph around a process. It reads as a timeline, left to
-right: the computer was **turned on**, then **the user logged in** (the session
-resolved by time — the login whose window contains the process start), then the
-ancestry down to the process, with its working directory and its context
-(application, startup, network, files, user) as collapsible blocks.
+### State — what is on the machine
+
+~50 inventory tables (processes, network sockets, applications, services,
+scheduled jobs, logins, SUID binaries, persistence, open files…) behind one
+query bar: quick search, a click-built `SELECT / WHERE / GROUP BY`, or plain SQL.
+
+![State inventory](docs/screenshots/state.png)
+
+### Events — what happened
+
+An append-only stream shaped by an ECS-like taxonomy. Each row reads as a
+sentence — *subject → action → object*: `alice → process_started → firefox`,
+`firefox → connection_opened → 203.0.113.88:443`.
+
+![Event feed](docs/screenshots/events.png)
+
+The same query bar takes SQL typed by hand — here, only the network events:
+
+![Events with an SQL query](docs/screenshots/events-sql.png)
+
+### Dashboards — the investigation graph
+
+The graph around a process reads as a timeline, left to right: the computer was
+**turned on**, then **the user logged in** (the session resolved by *time* — the
+login whose window contains the process start, so a logout/login picks the right
+one), then the ancestry down to the process — with its working directory and its
+context (application, startup, network, files, user) as collapsible blocks.
+Clicking any event opens this same graph, resolving even a network address to
+the process that owns the socket.
 
 ![Process graph](docs/screenshots/graph.png)
 
-The same graph inside the State dashboard, next to the process tree:
+The same graph lives inside the State dashboard, next to the process tree:
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
-The event feed with a plain SQL query — the query bar takes either a click-built
-filter or SQL typed by hand:
+**Findings** answer *what should I look at?* — each with why it matters, what to
+do, the evidence, and a jump to the state it came from:
 
-![Events with an SQL query](docs/screenshots/events-sql.png)
+![Findings](docs/screenshots/findings.png)
+
+### Vulnerabilities — what to patch
+
+Fedora security advisories matched against installed packages, with the CVSS
+score computed from the vector, and the exact `dnf` command to fix them.
+
+![Vulnerabilities](docs/screenshots/vulnerabilities.png)
+
+### Pipelines — how every source is wired
+
+Each input, normalization, enrichment, filter and output is a node you can see,
+run and edit. This is the events pipeline: journal, package, file-integrity,
+process and network inputs, each normalized into the one taxonomy.
+
+![Pipeline graph](docs/screenshots/pipeline.png)
+
+### Expertise — the rules themselves
+
+Every source is a YAML object you can read, edit, run and test. No data source
+lives in the application code.
+
+![Expertise catalog](docs/screenshots/expertise.png)
 
 ---
 
