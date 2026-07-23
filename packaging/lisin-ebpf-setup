@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Set up ONLY the eBPF process collector, as root. Separate from
+# lisin-grant-access so the auditd steps there cannot block it. RUN AS ROOT:
+#
+#     cd <the LiSin repo>
+#     sudo ./packaging/lisin-ebpf-setup <your-user>
+#
+# It installs bpftrace if missing, deploys the collector, and runs it as a
+# systemd unit that appends process execve/exit lines to a spool the LiSin input
+# reads. Nothing is silent - each step prints what it does.
+set -euo pipefail
+
+USER_NAME="${1:-${SUDO_USER:-}}"
+[ -z "$USER_NAME" ] && { echo "usage: sudo $0 <your-user>"; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "root required: sudo $0 $USER_NAME"; exit 1; }
+id "$USER_NAME" >/dev/null 2>&1 || { echo "no such user: $USER_NAME"; exit 1; }
+
+echo "==> bpftrace"
+if ! command -v bpftrace >/dev/null 2>&1; then
+  echo "    installing bpftrace..."
+  dnf install -y bpftrace || { echo "    could not install bpftrace - do it manually"; exit 1; }
+fi
+echo "    $(bpftrace --version 2>/dev/null | head -1)"
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+BT="$HERE/lisin-ebpf-exec.bt"
+[ -f "$BT" ] || { echo "collector script not found next to this one: $BT"; exit 1; }
+
+echo "==> collector -> /usr/local/lib/lisin/lisin-ebpf-exec.bt"
+install -D -m 0755 "$BT" /usr/local/lib/lisin/lisin-ebpf-exec.bt
+
+HOME_DIR="$(getent passwd "$USER_NAME" | cut -d: -f6)"
+[ -n "$HOME_DIR" ] || { echo "cannot resolve the home of $USER_NAME"; exit 1; }
+SPOOL="$HOME_DIR/.local/share/lisin/ebpf-exec.log"
+echo "==> spool -> $SPOOL (owned by $USER_NAME, so the input can read it)"
+install -d -o "$USER_NAME" -g "$USER_NAME" -m 0755 "$HOME_DIR/.local/share/lisin"
+[ -f "$SPOOL" ] || install -o "$USER_NAME" -g "$USER_NAME" -m 0640 /dev/null "$SPOOL"
+
+echo "==> systemd unit -> /etc/systemd/system/lisin-ebpf.service"
+cat > /etc/systemd/system/lisin-ebpf.service <<UNIT
+[Unit]
+Description=LiSin eBPF process collector (execve/exit)
+After=network.target
+
+[Service]
+Type=simple
+# -B line: flush each event promptly; append: survive restarts and logrotate
+ExecStart=/usr/bin/bpftrace -q -B line /usr/local/lib/lisin/lisin-ebpf-exec.bt
+StandardOutput=append:$SPOOL
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+echo "==> logrotate -> /etc/logrotate.d/lisin-ebpf (cap the spool at 20 MB)"
+cat > /etc/logrotate.d/lisin-ebpf <<ROT
+$SPOOL {
+    size 20M
+    rotate 1
+    missingok
+    notifempty
+    copytruncate
+}
+ROT
+
+systemctl daemon-reload
+systemctl enable --now lisin-ebpf
+sleep 2
+echo "==> status"
+systemctl --no-pager --lines=6 status lisin-ebpf || true
+echo
+echo "DONE. Watch events arrive (run something in another terminal):"
+echo "    tail -f $SPOOL"
+echo "Then in Pipelines you can switch off 'proc_events' to avoid duplicate starts."
