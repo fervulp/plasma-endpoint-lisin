@@ -444,7 +444,7 @@ def _normalize_xy(nodes, pad=120):
             nd["y"] += dy
 
 
-def _owner_pid(db, kind: str, val: str) -> str:
+def _owner_pid(db, kind: str, val: str, eventsdb=None) -> str:
     """Which process an entity belongs to - so that we can enter its graph.
 
     Returns the pid, or "" if there is no owner (then a generic graph is built).
@@ -473,9 +473,45 @@ def _owner_pid(db, kind: str, val: str) -> str:
             for r in _q(con, "SELECT pid FROM processes WHERE package=? "
                              "AND command NOT LIKE '[%' LIMIT 1", (val,)):
                 return str(r["pid"])
+        elif kind == "address":
+            # a connection is tied to a process: first a live socket whose remote
+            # is this address, then the owner recorded on a network event. Even a
+            # "network connection" leads to a PID - that is what to investigate.
+            for r in _q(con, "SELECT process FROM ports WHERE remote LIKE ? "
+                             "AND COALESCE(process,'')<>'' "
+                             "ORDER BY _id DESC LIMIT 1", (str(val) + ":%",)):
+                m = re.search(r"\((\d+)\)", str(r.get("process") or ""))
+                if m and m.group(1) in _live_pids(con):
+                    return m.group(1)
+            if eventsdb is not None:
+                try:
+                    for r in eventsdb.query(
+                            "SELECT process_pid p FROM events "
+                            "WHERE destination_ip=? AND COALESCE(process_pid,'')<>'' "
+                            "ORDER BY ts DESC LIMIT 20", (str(val),)).get("rows", []):
+                        if str(r.get("p")) in _live_pids(con):
+                            return str(r["p"])
+                except Exception:
+                    pass
     finally:
         pass
     return ""
+
+
+_LIVE = {}
+
+
+def _live_pids(con):
+    # the pids present in the current snapshot, cached per connection so a graph
+    # that checks several candidates does not re-read the table each time
+    key = id(con)
+    hit = _LIVE.get(key)
+    if hit is not None:
+        return hit
+    pids = {str(r["pid"]) for r in _q(con, "SELECT pid FROM processes")}
+    _LIVE.clear()
+    _LIVE[key] = pids
+    return pids
 
 
 def anchor_graph(db, eventsdb, kind: str, val: str, expanded=()) -> dict:
@@ -497,7 +533,7 @@ def anchor_graph(db, eventsdb, kind: str, val: str, expanded=()) -> dict:
     # marking what we entered through.
     # A user is the exception: that is not one object but a set of processes, and a
     # generic graph with a "processes" block is more honest here.
-    pid = _owner_pid(db, kind, str(val))
+    pid = _owner_pid(db, kind, str(val), eventsdb)
     if pid:
         g = around(db, eventsdb, pid, expanded=expanded)
         if not g.get("error"):
@@ -761,6 +797,33 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
                        "label": label}, "error": ""}
 
 
+def _proc_started_abs(pid, boot_iso):
+    """Absolute ISO-8601 (UTC) start time of a process.
+
+    /proc/<pid>/stat field 22 is the start time in clock ticks SINCE BOOT, so
+    adding it to the boot time gives when the process actually began. This is how
+    the graph decides WHICH login session a process came from - the session whose
+    window contains this instant - so logging out and back in picks the right one.
+    Returns '' if it cannot be read (the process is gone, or boot time unknown).
+    """
+    if not boot_iso:
+        return ""
+    try:
+        import os
+        from datetime import datetime, timedelta, timezone
+        with open("/proc/%s/stat" % pid) as f:
+            data = f.read()
+        rest = data[data.rindex(")") + 2:].split()   # skip "pid (comm) "
+        starttime = int(rest[19])                     # field 22, 0-based here
+        hz = os.sysconf("SC_CLK_TCK") or 100
+        bdt = datetime.fromisoformat(boot_iso.rstrip("Z")).replace(
+            tzinfo=timezone.utc)
+        pdt = bdt + timedelta(seconds=starttime / float(hz))
+        return pdt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return ""
+
+
 def around(db, eventsdb, pid: str, depth_up: int = 6,
            depth_down: int = 2, expanded=()) -> dict:
     """THE PROCESS TREE AS STEPS around the selected one.
@@ -906,6 +969,73 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
             if "proc:" + ppid in seen and ppid != rpid:
                 link("proc:" + ppid, nid, "spawned")
 
+    # ---- THE ORIGIN OF THE PROCESS: boot -> the login session it came from ----
+    # This is part of the SPINE, not a side block: every process ultimately begins
+    # when the computer was turned on (systemd, pid 1) and, for a user process,
+    # when that user logged in. Read left to right it is a timeline:
+    #   [computer on] -> [user logged in] -> ...ancestors... -> the process.
+    # The session is resolved BY TIME (see _proc_started_abs), so logging out and
+    # back in selects the RIGHT session, not merely the most recent login.
+    origin_anchor = ("proc:" + str(chain[0]["pid"])) if chain else root
+    OX, OY = 160, 120
+    bc = _ro(db)
+    try:
+        boot_iso = ""
+        br = _q(bc, "SELECT boot_id, started FROM boot_sessions "
+                    "WHERE kind='boot' AND current='yes' "
+                    "ORDER BY started DESC LIMIT 1") \
+            or _q(bc, "SELECT boot_id, started FROM boot_sessions "
+                      "WHERE kind='boot' ORDER BY started DESC LIMIT 1")
+        boot_here = False
+        if br:
+            boot_iso = str(br[0].get("started") or "")
+            add("boot:origin", "boot", "computer turned on",
+                boot_iso[:10] + " " + boot_iso[11:19], "boot_sessions",
+                "boot_id", str(br[0].get("boot_id") or ""), drill="state",
+                when=boot_iso)
+            nodes[-1]["x"] = OX - 2 * STEP_X
+            nodes[-1]["y"] = OY
+            boot_here = True
+        # the session this process came from: the login whose window contains the
+        # process start time (for the process's own user)
+        sess = None
+        if user:
+            pstart = _proc_started_abs(pid, boot_iso)
+            logins = _q(bc, 'SELECT tty, "from", start, until FROM logins '
+                            "WHERE user=? AND COALESCE(start,'')<>'' "
+                            "ORDER BY start DESC", (user,))
+            if pstart:
+                for lg in logins:
+                    s, u = str(lg.get("start") or ""), str(lg.get("until") or "")
+                    if s <= pstart and (not u or pstart <= u):
+                        sess = lg
+                        break
+            if sess is None and logins:
+                sess = logins[0]      # fall back to the most recent login
+        if sess is not None:
+            frm = str(sess.get("from") or "")
+            fromtxt = (" from " + frm) if frm and frm not in ("local", ":0") else ""
+            add("session:origin", "session", "%s logged in" % user,
+                ("on " + str(sess.get("tty") or "")) + fromtxt, "logins",
+                "tty", str(sess.get("tty") or ""), drill="state",
+                when=str(sess.get("start") or ""))
+            nodes[-1]["x"] = OX - STEP_X
+            nodes[-1]["y"] = OY
+            # boot started systemd (pid 1); the login started the FIRST process of
+            # this branch that belongs to the user - that is where the session
+            # actually enters the tree, not at systemd which predates the login.
+            user_root = next((c_ for c_ in chain
+                              if (c_.get("user") or "").strip() == user), me)
+            if boot_here:
+                link("boot:origin", origin_anchor, "booted", rel="booted")
+                link("boot:origin", "session:origin", "then", rel="logged_in")
+            link("session:origin", "proc:" + str(user_root["pid"]),
+                 "started", rel="session")
+        elif boot_here:
+            link("boot:origin", origin_anchor, "booted", rel="booted")
+    finally:
+        pass
+
     # ---- THE CONTEXT OF THE PROCESS: CATEGORY CLUSTERS around the node ----
     # Instead of a long column - meaningful categories (user, package, service,
     # network, IPC, files, configs, events, vulnerabilities...). A large category
@@ -1033,40 +1163,15 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
              f_.rsplit("/", 1)[-1][:26], "given on the command line",
              "app_config", "path", f_, rel="declares", drill="state")
 
-    # THE TIMELINE THE PROCESS LIVES INSIDE: the computer was turned on at T1, the
-    # owning user logged in at T2, and these are that user's services - so "when
-    # did this process appear" is answered by the context around it. All carry a
-    # time (when=), which the graph shows.
-    bc = _ro(db)
-    try:
-        for b_ in _q(bc, "SELECT boot_id, started FROM boot_sessions "
-                         "WHERE kind = 'boot' AND started <> '' "
-                         "ORDER BY started DESC LIMIT 1"):
-            push("session", "boot:" + str(b_.get("boot_id") or ""), "boot",
-                 "computer turned on", "boot " + str(b_.get("boot_id") or "")[:12],
-                 "boot_sessions", "boot_id", str(b_.get("boot_id") or ""),
-                 rel="booted", drill="state", when=str(b_.get("started") or ""))
-    except Exception:
-        pass
+    # THE USER'S OWN SERVICES - the services enabled for the logged-in user, tied
+    # to the origin. Kept as a collapsible block (the boot and the login itself are
+    # now the spine, above); the services answer "what this user's session starts".
     if user:
         try:
-            for s_ in _q(bc, "SELECT user, tty, \"from\", start, active FROM logins "
-                             "WHERE user = ? AND COALESCE(start,'') <> '' "
-                             "ORDER BY start DESC LIMIT 4", (user,)):
-                frm = str(s_.get("from") or "local")
-                push("session", "sess:%s:%s" % (s_.get("user"), s_.get("tty")),
-                     "session",
-                     "%s logged in on %s" % (s_.get("user"), s_.get("tty")),
-                     ("from " + frm) if frm and frm != "local" else "local login",
-                     "logins", "tty", str(s_.get("tty") or ""),
-                     rel="logged_in", drill="state", when=str(s_.get("start") or ""))
-        except Exception:
-            pass
-        try:
-            for sv in _q(bc, "SELECT unit, desc FROM services "
-                             "WHERE scope = 'user' AND enabled = 'enabled' "
-                             "ORDER BY unit LIMIT 30"):
-                push("session", "usvc:" + str(sv.get("unit") or ""), "service",
+            for sv in _q(con, "SELECT unit, desc FROM services "
+                              "WHERE scope = 'user' AND enabled = 'enabled' "
+                              "ORDER BY unit LIMIT 60"):
+                push("startup", "usvc:" + str(sv.get("unit") or ""), "service",
                      str(sv.get("unit") or ""),
                      str(sv.get("desc") or "") or "user service",
                      "services", "unit", str(sv.get("unit") or ""),
@@ -1076,11 +1181,17 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
 
     # THE WORKING DIRECTORY - where the process runs from (live from /proc; only
     # ours is readable without root). It catches a process running out of /tmp.
+    # Shown as a node attached DIRECTLY to the process (not a collapsed block), so
+    # "where does it run from" is answered at a glance, next to boot and session.
     try:
         cwd = os.readlink("/proc/%s/cwd" % pid)
         if cwd:
-            push("location", "cwd:" + pid, "dir", cwd.rsplit("/", 1)[-1] or "/",
-                 cwd, "open_files", "dir", cwd, rel="runs_in", drill="state")
+            add("cwd:" + pid, "dir", cwd.rsplit("/", 1)[-1] or "/", cwd,
+                "open_files", "dir", cwd, drill="state",
+                risk=cwd.startswith(("/tmp", "/dev/shm", "/var/tmp")))
+            nodes[-1]["x"] = ax + STEP_X
+            nodes[-1]["y"] = ay + STEP_Y
+            link(root, "cwd:" + pid, "runs in", rel="runs_in")
     except OSError:
         pass
 

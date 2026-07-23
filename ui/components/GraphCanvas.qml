@@ -183,6 +183,53 @@ Item {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
 
+        // THE GRID, DONE CHEAPLY. A Canvas the size of the whole world allocated a
+        // backing image of ~1000x2000 for a faint pattern. This one is the size of
+        // the VISIBLE viewport and scrolls with the content: it draws the grid in
+        // screen space, offset by the scroll, so the backing store is a screen,
+        // not the whole graph, whatever the graph's size.
+        Canvas {
+            id: gridLayer
+            x: flick.contentX
+            y: flick.contentY
+            width: flick.width
+            height: flick.height
+            z: -1
+            opacity: 0.5
+            property real ox: flick.contentX
+            property real oy: flick.contentY
+            property real z2: canvasRoot.zoom
+            onOxChanged: requestPaint()
+            onOyChanged: requestPaint()
+            onZ2Changed: requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+            Component.onCompleted: requestPaint()
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.reset()
+                var g = 40 * canvasRoot.zoom
+                if (g < 8) return                 // too dense when zoomed out
+                var sx = -((flick.contentX) % (g * 4))
+                var sy = -((flick.contentY) % (g * 4))
+                ctx.lineWidth = 1
+                var i = 0
+                for (var x = sx; x < width; x += g, i++) {
+                    ctx.strokeStyle = Qt.alpha(Kirigami.Theme.textColor,
+                                               i % 4 === 0 ? 0.10 : 0.05)
+                    ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, 0)
+                    ctx.lineTo(Math.round(x) + 0.5, height); ctx.stroke()
+                }
+                i = 0
+                for (var y = sy; y < height; y += g, i++) {
+                    ctx.strokeStyle = Qt.alpha(Kirigami.Theme.textColor,
+                                               i % 4 === 0 ? 0.10 : 0.05)
+                    ctx.beginPath(); ctx.moveTo(0, Math.round(y) + 0.5)
+                    ctx.lineTo(width, Math.round(y) + 0.5); ctx.stroke()
+                }
+            }
+        }
+
         Item {
             id: world
             width: canvasRoot.worldW
@@ -549,20 +596,13 @@ Item {
                     flick.contentX = Math.max(0, fx * next - w.x)
                     flick.contentY = Math.max(0, fy * next - w.y)
                 } else {
-                    // Give the wheel back to the page when the graph has
-                    // nothing left to scroll in that direction. It used to
-                    // swallow every wheel event, so hovering the graph froze
-                    // the dashboard's own scrolling.
-                    var maxY = Math.max(0, flick.contentHeight - flick.height)
-                    var atTop = flick.contentY <= 0
-                    var atBottom = flick.contentY >= maxY - 0.5
-                    var up = w.angleDelta.y > 0
-                    if (maxY <= 0 || (up && atTop) || (!up && atBottom)) {
-                        w.accepted = false          // let the page scroll
-                        return
-                    }
-                    flick.contentY = Math.max(0, Math.min(maxY,
-                                              flick.contentY - w.angleDelta.y))
+                    // PLAIN WHEEL ALWAYS SCROLLS THE PAGE. Hovering the graph used
+                    // to trap the wheel and scroll the graph instead of the
+                    // dashboard, so the page would not move until the pointer was
+                    // off the graph. The graph is panned by DRAGGING (the
+                    // Flickable) and zoomed with Ctrl+wheel; the wheel belongs to
+                    // the page.
+                    w.accepted = false
                 }
             }
         }
@@ -590,7 +630,7 @@ Item {
         anchors { right: parent.right; bottom: parent.bottom; margins: Kirigami.Units.smallSpacing }
         opacity: 0.5
         font.pointSize: Kirigami.Theme.smallFont.pointSize
-        text: "click a group to expand · double-click to re-centre · Ctrl+wheel to zoom "
+        text: "drag to pan · scroll the page · Ctrl+wheel to zoom · double-click to re-centre "
               + Math.round(canvasRoot.zoom * 100) + "%"
     }
 }

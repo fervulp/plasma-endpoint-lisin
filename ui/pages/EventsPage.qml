@@ -1775,31 +1775,29 @@ Kirigami.Page {
             open: page.sel !== null && !colPanel.open
             onCloseRequested: page.sel = null
 
-            // LOOK AT THE EVENT ON THE GRAPH. The engine anchors on any entity,
-            // so an event offers the jumps that fit it: its process (while it is
-            // alive - only a live pid builds the tree) and the address it talked
-            // to. It reads as "see who did this, or who they talked to".
+            // OPEN THE EVENT ON THE PROCESS GRAPH. An event is always about a
+            // process - even a network connection is owned by a PID. So one
+            // button, aiming at the process: if the event's own process is still
+            // alive we anchor on it directly; otherwise we anchor on the address
+            // it talked to, which the graph resolves to the process that owns that
+            // socket. Only when nothing resolves do we say the process is gone.
             QQC2.Button {
                 Layout.fillWidth: true
-                visible: page.sel && page.eventProcess(page.sel).alive
+                visible: page.sel && (page.eventProcess(page.sel).alive
+                                      || String(page.sel.destination_ip || "") !== "")
                 icon.name: "distribute-graph-directed"
                 text: "Open process graph"
-                QQC2.ToolTip.text: page.sel
+                QQC2.ToolTip.text: page.sel && page.eventProcess(page.sel).alive
                     ? "PID " + page.sel.process_pid + " — "
                       + page.liveCommand(page.sel.process_pid)
-                    : ""
+                    : (page.sel ? "the process that owns " + page.sel.destination_ip : "")
                 QQC2.ToolTip.visible: hovered
-                onClicked: root.focusGraph("process", page.sel.process_pid)
-            }
-            QQC2.Button {
-                Layout.fillWidth: true
-                visible: page.sel && String(page.sel.destination_ip || "") !== ""
-                icon.name: "network-connect"
-                text: "Open address graph"
-                QQC2.ToolTip.text: page.sel
-                    ? "who talked to " + page.sel.destination_ip : ""
-                QQC2.ToolTip.visible: hovered
-                onClicked: root.focusGraph("address", page.sel.destination_ip)
+                onClicked: {
+                    if (page.eventProcess(page.sel).alive)
+                        root.focusGraph("process", page.sel.process_pid)
+                    else
+                        root.focusGraph("address", page.sel.destination_ip)
+                }
             }
             QQC2.Label {
                 Layout.fillWidth: true
