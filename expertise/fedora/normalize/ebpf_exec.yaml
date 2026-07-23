@@ -1,15 +1,18 @@
 name: ebpf_exec
 id: LS-N-40
 type: normalization_rule
-version: 1.0.0
-title: eBPF process exec/exit -> event taxonomy
-# Turns the eBPF collector's lines into events. This is the source polling can
-# never match: every execve with its FULL command line and real parent, and the
-# matching exit with the code - so a process that lived a few milliseconds is a
-# first-class event. From a complete exec/exit stream the process STATE can later
-# be rebuilt (start -> alive -> exit), which is the point of collecting it.
-#   E <nsecs> <pid> <ppid> <uid> <comm> <argv...>
-#   X <nsecs> <pid> <exit_code>
+version: 2.0.0
+title: eBPF exec/exit/file/connect -> event taxonomy
+# Turns the eBPF collector's lines into events - the real-time syscall stream a
+# poller cannot match. From a complete exec/exit + file + connect stream, tied to
+# the SESSION each process runs in, the running state can be rebuilt and every
+# change followed, which is the point of collecting it.
+#
+# LINE FORMAT (tab-separated; argv/path are the last field, may contain spaces):
+#   E <ns> <pid> <ppid> <uid> <loginuid> <sid> <comm> <argv...>   exec + session
+#   X <ns> <pid> <code>                                           exit
+#   F <ns> <pid> <uid> <comm> <op> <path>       op = write|create|unlink|rename
+#   N <ns> <pid> <uid> <comm> <af> <daddr> <dport>                connect  af = 4|6
 code: |
   import pwd
 
@@ -24,20 +27,31 @@ code: |
               _UID[uid] = ""
       return _UID[uid]
 
-  def normalize(text):
-      rows = []
-      btime = 0          # boot epoch, from the input's first line
-      from datetime import datetime, timezone
+  def _priv(ip):
+      # RFC1918 / loopback / link-local - structural, not a list
+      return (ip.startswith(("10.", "127.", "192.168.", "::1", "fe80", "fc", "fd"))
+              or ip.startswith("169.254.")
+              or any(ip.startswith("172.%d." % n) for n in range(16, 32)))
 
-      def when(nsecs):
+  def normalize(text):
+      import re
+      from datetime import datetime, timezone
+      rows = []
+      btime = 0
+
+      def when(ns):
           if not btime:
               return ""
           try:
-              t = btime + int(nsecs) / 1e9
-              return datetime.fromtimestamp(t, timezone.utc).strftime(
-                  "%Y-%m-%dT%H:%M:%SZ")
+              return datetime.fromtimestamp(btime + int(ns) / 1e9,
+                                            timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
           except (ValueError, OverflowError):
               return ""
+
+      FILE_ACT = {"write": ("file_modified", "change", 35),
+                  "create": ("file_created", "creation", 30),
+                  "unlink": ("file_deleted", "deletion", 40),
+                  "rename": ("file_renamed", "change", 35)}
 
       for line in text.splitlines():
           if line.startswith("BTIME "):
@@ -49,94 +63,147 @@ code: |
           if not line or "\t" not in line:
               continue
           f = line.split("\t")
-          kind = f[0]
+          k = f[0]
 
-          if kind == "E" and len(f) >= 6:
-              nsecs, pid, ppid, uid, comm = f[1], f[2], f[3], f[4], f[5]
-              argv = "\t".join(f[6:]).strip() if len(f) > 6 else ""
+          if k == "E" and len(f) >= 6:
+              # BACKWARD COMPATIBLE: the session fields (loginuid, sid) are
+              # OPTIONAL. Old collector: E ns pid ppid uid COMM argv (comm at 5).
+              # Extended: E ns pid ppid uid loginuid sid COMM argv (both numeric
+              # before comm). comm is a process name, rarely a bare number, so two
+              # numeric fields in a row mark the extended form.
+              if len(f) >= 8 and f[5].isdigit() and f[6].isdigit():
+                  ns, pid, ppid, uid, loginuid, sid, comm = f[1:8]
+                  argv = "\t".join(f[8:]).strip() if len(f) > 8 else ""
+              else:
+                  ns, pid, ppid, uid, comm = f[1:6]
+                  loginuid, sid = "", ""
+                  argv = "\t".join(f[6:]).strip() if len(f) > 6 else ""
               exe = argv.split(" ")[0] if argv else comm
-              user = _user(uid)
               rows.append({
-                  "ts": when(nsecs),
-                  "event_id": "ebpf:exec:%s:%s" % (nsecs, pid),
-                  "event_kind": "event",
-                  "event_category": "process",
-                  "event_type": "start",
-                  "event_action": "process_started",
-                  "event_outcome": "success",
-                  "event_severity": 25,
-                  "event_module": "ebpf",
-                  "event_provider": "ebpf",
+                  "ts": when(ns),
+                  "event_id": "ebpf:exec:%s:%s" % (ns, pid),
+                  "event_kind": "event", "event_category": "process",
+                  "event_type": "start", "event_action": "process_started",
+                  "event_outcome": "success", "event_severity": 25,
+                  "event_module": "ebpf", "event_provider": "ebpf",
                   "event_dataset": "syscalls.execve",
-                  "process_pid": pid,
-                  "parent_pid": ppid,
-                  "process_name": comm,
-                  "process_executable": exe,
+                  "process_pid": pid, "parent_pid": ppid,
+                  "process_name": comm, "process_executable": exe,
                   "process_command_line": argv or comm,
-                  "user_id": uid,
-                  "user_name": user,
+                  "user_id": uid, "user_name": _user(uid),
+                  # SESSION: loginuid = who really logged in (unchanged by su),
+                  # sid = the audit session; ties every exec to a login session
+                  "user_audit_id": loginuid if loginuid not in ("4294967295", "-1") else "",
+                  "session_id": sid if sid not in ("4294967295", "-1") else "",
                   "process_source": "ebpf (execve)",
-                  "subject_type": "process",
-                  "subject_name": comm,
+                  "subject_type": "process", "subject_name": comm,
                   "object_type": "process",
                   "object_name": exe.rsplit("/", 1)[-1] if exe else comm,
-                  # a binary run out of a world-writable/temp path is the classic
-                  # dropper - flag it by the path, structurally, not by a name list
                   "tags": "temp_exec" if exe.startswith(
                       ("/tmp", "/dev/shm", "/var/tmp", "/run/user")) else "",
-                  "message": "exec %s (pid %s, parent %s)" % (
-                      argv or comm, pid, ppid),
+                  "message": "exec %s (pid %s, parent %s)" % (argv or comm, pid, ppid),
               })
-          elif kind == "X" and len(f) >= 4:
-              nsecs, pid, code = f[1], f[2], f[3]
+
+          elif k == "X" and len(f) >= 4:
+              ns, pid, code = f[1], f[2], f[3]
               rows.append({
-                  "ts": when(nsecs),
-                  "event_id": "ebpf:exit:%s:%s" % (nsecs, pid),
-                  "event_kind": "event",
-                  "event_category": "process",
-                  "event_type": "end",
-                  "event_action": "process_ended",
+                  "ts": when(ns), "event_id": "ebpf:exit:%s:%s" % (ns, pid),
+                  "event_kind": "event", "event_category": "process",
+                  "event_type": "end", "event_action": "process_ended",
                   "event_outcome": "success" if code in ("0", "") else "failure",
-                  "event_severity": 10,
-                  "event_module": "ebpf",
-                  "event_provider": "ebpf",
-                  "event_dataset": "syscalls.exit",
-                  "process_pid": pid,
-                  "process_exit_code": code,
+                  "event_severity": 10, "event_module": "ebpf",
+                  "event_provider": "ebpf", "event_dataset": "syscalls.exit",
+                  "process_pid": pid, "process_exit_code": code,
                   "process_source": "ebpf (exit)",
-                  "subject_type": "process",
-                  "object_type": "process",
+                  "subject_type": "process", "object_type": "process",
                   "message": "exit pid %s code %s" % (pid, code),
+              })
+
+          elif k == "F" and len(f) >= 6:
+              ns, pid, uid, comm, op = f[1:6]
+              path = "\t".join(f[6:]).strip()
+              act, typ, sev = FILE_ACT.get(op, ("file_change", "change", 30))
+              rows.append({
+                  "ts": when(ns), "event_id": "ebpf:file:%s:%s" % (ns, pid),
+                  "event_kind": "event", "event_category": "file",
+                  "event_type": typ, "event_action": act,
+                  "event_outcome": "success", "event_severity": sev,
+                  "event_module": "ebpf", "event_provider": "ebpf",
+                  "event_dataset": "syscalls.file",
+                  "process_pid": pid, "process_name": comm,
+                  "user_id": uid, "user_name": _user(uid),
+                  "file_path": path, "file_name": path.rsplit("/", 1)[-1],
+                  "file_directory": path.rsplit("/", 1)[0] if "/" in path else "",
+                  "file_extension": path.rsplit(".", 1)[-1] if "." in path.rsplit("/", 1)[-1] else "",
+                  "process_source": "ebpf (%s)" % op,
+                  "subject_type": "process", "subject_name": comm,
+                  "object_type": "file", "object_name": path,
+                  "message": "%s %s by %s (pid %s)" % (op, path, comm, pid),
+              })
+
+          elif k == "N" and len(f) >= 7:
+              ns, pid, uid, comm, af, daddr, dport = f[1:8]
+              ext = not _priv(daddr)
+              rows.append({
+                  "ts": when(ns), "event_id": "ebpf:conn:%s:%s:%s" % (ns, pid, dport),
+                  "event_kind": "event", "event_category": "network",
+                  "event_type": "connection", "event_action": "connection_opened",
+                  "event_outcome": "success", "event_severity": 35 if ext else 20,
+                  "event_module": "ebpf", "event_provider": "ebpf",
+                  "event_dataset": "syscalls.connect",
+                  "process_pid": pid, "process_name": comm,
+                  "user_id": uid, "user_name": _user(uid),
+                  "destination_ip": daddr, "destination_port": dport,
+                  "network_transport": "tcp",
+                  "network_direction": "external" if ext else "internal",
+                  "process_source": "ebpf (connect)",
+                  "subject_type": "process", "subject_name": comm,
+                  "object_type": "socket", "object_name": "%s:%s" % (daddr, dport),
+                  "related_ip": daddr,
+                  "message": "%s -> %s:%s" % (comm, daddr, dport),
               })
       return rows
 
 tests:
-  - name: an execve line becomes a process_started event with the full command
+  - name: exec with session becomes process_started + loginuid + session id
     input: |
       BTIME 1750000000
-      E	123456789	4242	4200	1000	curl	/usr/bin/curl -fsSL http://198.51.100.9/x
+      E	123	4242	4200	1000	1000	7	curl	/usr/bin/curl -fsSL http://198.51.100.9/x
     expect:
       rows: 1
       row0:
         event_action: process_started
         process_pid: "4242"
         parent_pid: "4200"
+        user_audit_id: "1000"
+        session_id: "7"
         process_command_line: /usr/bin/curl -fsSL http://198.51.100.9/x
-        event_module: ebpf
-  - name: an exit line becomes a process_ended event with the code
+  - name: a file write becomes a file_modified event
     input: |
       BTIME 1750000000
-      X	123999999	4242	1
+      F	200	4242	1000	code	write	/home/x/.config/app/state.db
     expect:
       rows: 1
       row0:
-        event_action: process_ended
-        process_exit_code: "1"
-        event_outcome: failure
-  - name: a binary from /tmp is tagged temp_exec
+        event_action: file_modified
+        event_category: file
+        file_path: /home/x/.config/app/state.db
+        file_name: state.db
+  - name: a connect to a public address is external
     input: |
       BTIME 1750000000
-      E	1	9	1	1000	evil	/tmp/evil --run
+      N	300	4242	1000	firefox	4	203.0.113.9	443
     expect:
       rows: 1
-      contains: {tags: temp_exec}
+      row0:
+        event_action: connection_opened
+        destination_ip: 203.0.113.9
+        destination_port: "443"
+        network_direction: external
+  - name: an exit line becomes process_ended with the code
+    input: |
+      BTIME 1750000000
+      X	400	4242	1
+    expect:
+      rows: 1
+      contains: {event_action: process_ended, process_exit_code: "1", event_outcome: failure}

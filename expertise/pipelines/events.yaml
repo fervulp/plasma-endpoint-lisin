@@ -19,18 +19,18 @@ nodes:
 - id: out_events
   kind: output
   ref: fedora/outputs/events
-  x: 2280
-  y: 520
+  x: 2120
+  y: 360
 - id: in_pkg_events
   kind: input
   ref: fedora/inputs/pkg_events
   x: 40
-  y: 200
+  y: 840
 - id: no_pkg_events
   kind: normalize
   ref: fedora/normalize/pkg_events
-  x: 360
-  y: 200
+  x: 680
+  y: 40
 - id: flt_noise
   kind: filter
   ref: noise/event_noise
@@ -39,13 +39,13 @@ nodes:
 - id: in_proc_events
   kind: input
   ref: fedora/inputs/proc_events
-  x: 40
-  y: 360
+  x: 360
+  y: 840
 - id: no_proc_events
   kind: normalize
   ref: fedora/normalize/proc_events
-  x: 360
-  y: 360
+  x: 680
+  y: 200
 - id: in_ebpf_exec
   kind: input
   ref: fedora/inputs/ebpf_exec
@@ -99,13 +99,13 @@ nodes:
 - id: en_session
   kind: enrich
   ref: fedora/enrich/event_session
-  x: 1960
-  y: 520
+  x: 1800
+  y: 360
 - id: en_context
   kind: enrich
   ref: fedora/enrich/event_context
-  x: 2120
-  y: 520
+  x: 1960
+  y: 680
 - id: en_auth
   kind: enrich
   ref: fedora/enrich/event_auth
