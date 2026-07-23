@@ -456,20 +456,31 @@ Kirigami.Page {
             WheelHandler {
                 acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                 onWheel: event => {
+                    // A TOUCHPAD reports high-resolution pixelDelta; a mouse wheel
+                    // reports angleDelta in 120-unit notches. Using the touchpad's
+                    // fine deltas directly makes both zoom and pan track the
+                    // fingers instead of jumping a fixed step per tick.
+                    var pd = event.pixelDelta
+                    var touch = (pd.x !== 0 || pd.y !== 0)
                     if (event.modifiers & Qt.ControlModifier) {
-                        page.setZoom(page.zoom * (event.angleDelta.y > 0 ? 1.12 : 1/1.12),
-                                     event.x, event.y)
-                    } else if (event.modifiers & Qt.ShiftModifier) {
-                        flick.contentX = Math.max(0, Math.min(
-                            flick.contentWidth - flick.width,
-                            flick.contentX - event.angleDelta.y))
+                        var f = touch ? Math.exp(pd.y * 0.0025)
+                                      : (event.angleDelta.y > 0 ? 1.12 : 1 / 1.12)
+                        page.setZoom(page.zoom * f, event.x, event.y)
                     } else {
-                        flick.contentY = Math.max(0, Math.min(
-                            flick.contentHeight - flick.height,
-                            flick.contentY - event.angleDelta.y))
-                        flick.contentX = Math.max(0, Math.min(
-                            flick.contentWidth - flick.width,
-                            flick.contentX - event.angleDelta.x))
+                        var dx = touch ? pd.x : event.angleDelta.x
+                        var dy = touch ? pd.y : event.angleDelta.y
+                        if (event.modifiers & Qt.ShiftModifier) {
+                            flick.contentX = Math.max(0, Math.min(
+                                flick.contentWidth - flick.width,
+                                flick.contentX - dy))
+                        } else {
+                            flick.contentY = Math.max(0, Math.min(
+                                flick.contentHeight - flick.height,
+                                flick.contentY - dy))
+                            flick.contentX = Math.max(0, Math.min(
+                                flick.contentWidth - flick.width,
+                                flick.contentX - dx))
+                        }
                     }
                 }
             }

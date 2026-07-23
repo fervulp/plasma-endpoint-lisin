@@ -29,8 +29,18 @@ Item {
     property string selectedId: ""
     property string hoveredId: ""
     property real zoom: 1.0
-    // the scale changes smoothly: an abrupt jump breaks orientation
-    Behavior on zoom { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+    // A DISCRETE zoom (a button, one mouse-wheel notch) eases over 120 ms so the
+    // jump does not break orientation. A CONTINUOUS gesture (a touchpad pinch or
+    // Ctrl+two-finger scroll) must NOT be animated: the gesture is already smooth,
+    // and animating every tiny step makes the view lag and stutter behind the
+    // fingers. smoothZoom is turned off for the duration of such a gesture.
+    property bool smoothZoom: true
+    Behavior on zoom {
+        enabled: canvasRoot.smoothZoom
+        NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
+    }
+    // after a touchpad gesture goes quiet, re-enable easing for the next button click
+    Timer { id: zoomIdle; interval: 180; onTriggered: canvasRoot.smoothZoom = true }
     property int worldW: graph && graph.width ? graph.width : 1100
     property int worldH: graph && graph.height ? graph.height : 780
 
@@ -586,7 +596,10 @@ Item {
         PinchHandler {
             target: null
             property real startZoom: 1
-            onActiveChanged: if (active) startZoom = canvasRoot.zoom
+            onActiveChanged: {
+                if (active) { startZoom = canvasRoot.zoom; canvasRoot.smoothZoom = false }
+                else zoomIdle.restart()          // ease again once the pinch ends
+            }
             onScaleChanged: {
                 if (!active) return
                 var next = Math.max(0.35, Math.min(2.2, startZoom * activeScale))
@@ -606,8 +619,20 @@ Item {
             onWheel: function (w) {
                 if (w.modifiers & Qt.ControlModifier) {
                     var old = canvasRoot.zoom
-                    var next = Math.max(0.35, Math.min(2.2,
-                                        old * (w.angleDelta.y > 0 ? 1.12 : 0.89)))
+                    var factor
+                    if (w.pixelDelta.y !== 0) {
+                        // TOUCHPAD (high-resolution pixel scroll): zoom CONTINUOUSLY
+                        // in proportion to the scroll amount, without easing, so it
+                        // tracks the fingers instead of jumping a fixed 12 % a tick
+                        canvasRoot.smoothZoom = false
+                        factor = Math.exp(w.pixelDelta.y * 0.0025)
+                        zoomIdle.restart()
+                    } else {
+                        // MOUSE WHEEL: one eased 12 % notch
+                        canvasRoot.smoothZoom = true
+                        factor = w.angleDelta.y > 0 ? 1.12 : 0.89
+                    }
+                    var next = Math.max(0.35, Math.min(2.2, old * factor))
                     var fx = (flick.contentX + w.x) / old, fy = (flick.contentY + w.y) / old
                     canvasRoot.zoom = next
                     flick.contentX = Math.max(0, fx * next - w.x)
