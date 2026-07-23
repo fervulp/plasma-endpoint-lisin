@@ -422,6 +422,51 @@ def _emit_categories(add, link, anchor_id, ax, ay, cats, expanded,
     return summary
 
 
+def _declutter(nodes, w=240, h=120, rounds=80):
+    """Push overlapping cards apart so none sit on top of each other.
+
+    The tree, the boot/login spine, the working-directory node and the category
+    grids are each placed independently, so a directory could land on a tree node
+    (that was the "directories overlap strangely" bug). This one pass guarantees a
+    clear gap - the same idea as the pipeline editor's enforceLayout. It only ever
+    moves cards that actually collide, so a graph that is already tidy is untouched.
+    Pushes are whole GRID steps, so cards stay grid-aligned and a later snap cannot
+    pull two cleared cards back on top of each other.
+    """
+    if len(nodes) < 2:
+        return
+    for n in nodes:                               # start grid-aligned
+        n["x"] = _snap(n["x"])
+        n["y"] = _snap(n["y"])
+    for _ in range(rounds):
+        moved = False
+        for i in range(len(nodes)):
+            a = nodes[i]
+            for j in range(i + 1, len(nodes)):
+                b = nodes[j]
+                dx = b["x"] - a["x"]
+                dy = b["y"] - a["y"]
+                ox = w - abs(dx)
+                oy = h - abs(dy)
+                if ox <= 0 or oy <= 0:
+                    continue                      # no overlap
+                if ox < oy:                       # separate along x (smaller push)
+                    s = (ox // 2 // GRID + 1) * GRID
+                    if dx >= 0:
+                        a["x"] -= s; b["x"] += s
+                    else:
+                        a["x"] += s; b["x"] -= s
+                else:                             # separate along y
+                    s = (oy // 2 // GRID + 1) * GRID
+                    if dy >= 0:
+                        a["y"] -= s; b["y"] += s
+                    else:
+                        a["y"] += s; b["y"] -= s
+                moved = True
+        if not moved:
+            break
+
+
 def _normalize_xy(nodes, pad=120):
     """Shift all nodes so that the minimum x/y is a positive margin.
 
@@ -788,6 +833,7 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
         pass
 
     categories = _emit_categories(add, link, root, ax, ay, cats, expanded)
+    _declutter(nodes)
     _normalize_xy(nodes)
     width = max((n["x"] for n in nodes), default=800) + 300
     height = max((n["y"] for n in nodes), default=600) + 200
@@ -795,6 +841,41 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
             "categories": categories,
             "anchor": {"kind": kind, "table": table, "col": col, "val": val,
                        "label": label}, "error": ""}
+
+
+def _fmt_ram(mb):
+    """rss in MB -> a short human string ('640 MB', '2.1 GB'); '' if none."""
+    try:
+        v = float(mb)
+    except (TypeError, ValueError):
+        return ""
+    if v <= 0:
+        return ""
+    return ("%.1f GB" % (v / 1024)) if v >= 1024 else ("%d MB" % round(v))
+
+
+def _started_from_elapsed(elapsed):
+    """ps etime ('[[DD-]HH:]MM:SS') -> local clock 'HH:MM' when the process began.
+
+    The processes table already carries the uptime; subtracting it from now gives
+    when it was launched, which is what the analyst reads on the node.
+    """
+    s = str(elapsed or "").strip()
+    if not s:
+        return ""
+    try:
+        from datetime import datetime, timedelta
+        days = 0
+        if "-" in s:
+            d, s = s.split("-", 1)
+            days = int(d)
+        parts = [int(x) for x in s.split(":")]
+        while len(parts) < 3:
+            parts.insert(0, 0)
+        secs = days * 86400 + parts[-3] * 3600 + parts[-2] * 60 + parts[-1]
+        return (datetime.now() - timedelta(seconds=secs)).strftime("%H:%M")
+    except Exception:
+        return ""
 
 
 def _proc_started_abs(pid, boot_iso):
@@ -845,7 +926,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
     con = _ro(db)
     try:
         rows = _q(con, "SELECT pid, ppid, user, command, package, purpose, "
-                       "title, rss_mb, cpu, arg_files FROM processes")
+                       "title, rss_mb, cpu, elapsed, arg_files FROM processes")
         by_pid = {str(r["pid"]): r for r in rows}
         kids_of = {}
         for r in rows:
@@ -954,10 +1035,23 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
                 counts.append("files %d" % fd)
             if ev_n.get(rpid):
                 counts.append("events %d" % ev_n[rpid])
+            # A FAINT METRICS LINE: RAM, CPU and when it started. Small and low
+            # contrast (rendered dim in QML) - present for a glance, not shouting.
+            mtr = []
+            ram = _fmt_ram(r.get("rss_mb"))
+            if ram:
+                mtr.append(ram)
+            cpu = str(r.get("cpu") or "").strip()
+            if cpu and cpu not in ("0", "0.0", "0.00"):
+                mtr.append(cpu + "%")
+            started = _started_from_elapsed(r.get("elapsed"))
+            if started:
+                mtr.append("↑ " + started)
             add(nid, "process", name,
                 "pid %s · %s" % (rpid, r.get("user") or ""),
                 "processes", "pid", rpid,
                 counts=" · ".join(counts),
+                metrics=" · ".join(mtr),
                 focus=(rpid == pid), drill="reanchor",
                 risk=bool(not (r.get("package") or "").strip()),
                 purpose=(r.get("purpose") or r.get("title") or ""))
@@ -1201,7 +1295,9 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
         add("cwd:" + pid, "dir", cwd.rsplit("/", 1)[-1] or "/", cwd,
             "open_files", "dir", cwd, drill="state",
             risk=cwd.startswith(("/tmp", "/dev/shm", "/var/tmp")))
-        nodes[-1]["x"] = ax + STEP_X
+        # directly BELOW the anchor, not in the child column (that put it on top
+        # of a child process); _declutter clears any remaining overlap
+        nodes[-1]["x"] = ax
         nodes[-1]["y"] = ay + STEP_Y
         link(root, "cwd:" + pid, "runs in", rel="runs_in")
 
@@ -1277,6 +1373,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
                                   set(expanded), tree_right=tree_right,
                                   tree_bottom=tree_bottom)
 
+    _declutter(nodes)
     _normalize_xy(nodes)
     width = max((n["x"] for n in nodes), default=800) + 300
     height = max((n["y"] for n in nodes), default=600) + 200

@@ -267,6 +267,14 @@ Item {
                         var e = edges[j]
                         var a = pos[e.a], b = pos[e.b]
                         if (!a || !b) continue
+                        // WHEN A CATEGORY IS EXPANDED, its members are shown as a
+                        // tidy grid next to the block header - a wire from the
+                        // header to every one of them turned that into a hairball.
+                        // The members read as a cluster (same colour, grouped in
+                        // place); the wires appear only when the block or one of
+                        // its members is hovered, to confirm what belongs where.
+                        if (a.kind === "group" && hov !== e.a && hov !== e.b)
+                            continue
                         var lit = hov === "" || e.a === hov || e.b === hov
                         var member = e.rel === "member"
                         var conn = e.rel === "connected"
@@ -434,6 +442,16 @@ Item {
                                 Layout.maximumWidth: chip.maxW - Kirigami.Units.gridUnit * 2
                                 font.bold: true
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
+                            }
+                            // A FAINT METRICS LINE (RAM · CPU · started). Dim and
+                            // tiny on purpose: there for a glance, never shouting.
+                            QQC2.Label {
+                                text: modelData.metrics || ""
+                                visible: text !== ""
+                                color: Qt.alpha("white", 0.6)
+                                elide: Text.ElideRight
+                                Layout.maximumWidth: chip.maxW - Kirigami.Units.gridUnit * 2
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize - 2
                             }
                         }
                         // the counter on a category meta node
