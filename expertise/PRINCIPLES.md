@@ -254,6 +254,29 @@ Vulnerabilities, Findings, Privilege use, File activity, Network activity. A
 facet button does not filter on the side - it writes a condition into the same
 query bar, where it is visible and can be edited.
 
+## 15a. Never assign to a bound property, and never name a file in a string
+
+Two QML traps that both hide from every check that does not RENDER:
+
+- **An assignment kills the binding.** `colOrder = ...` on a property declared as
+  `property var colOrder: <expression over cur>` silently freezes it at that
+  value forever. The state table did exactly this: the columns froze at the
+  first table opened, every other table drew those columns, and since its rows
+  have no such fields the table showed the right number of rows with every cell
+  empty - "State shows nothing", while the rows were never the problem. What a
+  view chooses goes into its OWN property; what depends on the data stays a
+  binding.
+- **A file named in a string is not checked by the compiler.**
+  `Qt.resolvedUrl("DashboardView.qml")` resolves against the file it is written
+  in, so moving a view left six Loaders pointing at nothing - and a Loader that
+  finds nothing stays silent. Every dashboard was blank while every check passed.
+  The verification now resolves each `Qt.resolvedUrl()` in ui/ and requires the
+  file to exist.
+
+Sign of both: the interface is empty or stale, and there is no error anywhere.
+Neither compiling QML nor loading the window reports them; only opening the
+section and looking at what is drawn does.
+
 ## 16. Layout hygiene: nothing overlaps and nothing escapes
 
 A component counts as finished only if it withstands REAL data: a long package

@@ -71,22 +71,24 @@ Kirigami.Page {
     // private keys the value is empty), and public keys are open by definition -
     // we show their content directly. Only real secrets are masked.
     readonly property var sensitiveCols: ["secret", "private", "token", "password"]
-    // HOW MANY COLUMNS ARE SHOWN BY DEFAULT. Events shows 8 of its 98 fields for
-    // the same reason: a row of twenty columns is not read, it is scrolled, and
-    // every extra column is 50 more objects on the page - a tab switch to
-    // applications took 1.2 s with all 19 shown. The rest are one click away in
-    // the query bar (SELECT) or in the Columns panel, and a saved choice always
-    // wins over this default.
-    readonly property int defaultCols: 8
-    property var hiddenCols: {
-        if (cur && cur.colcfg && cur.colcfg.hidden) return cur.colcfg.hidden
-        var hide = listCols.filter(c => longCols.includes(c)
-                                        || sensitiveCols.includes(c))
-        var shown = listCols.filter(c => !hide.includes(c))
-        for (var i = defaultCols; i < shown.length; i++) hide.push(shown[i])
-        return hide
+    // WHICH COLUMNS ARE SHOWN BY DEFAULT: all of them except the long ones
+    // (content, description, vrl) and the secret ones.
+    //
+    // Capping the default at eight, as Events does with its 98 taxonomy fields,
+    // saved 0.17 s per tab switch and cost the point of the table: for processes
+    // it hid `command`, which is the column people come to that table for. A
+    // table is read by its columns; the cheap thing to cut was the number of
+    // objects per cell, and that is cut.
+    property var hiddenCols: cur && cur.colcfg && cur.colcfg.hidden
+                             ? cur.colcfg.hidden
+                             : listCols.filter(c => longCols.includes(c)
+                                                    || sensitiveCols.includes(c))
+    // A selection made in the query bar wins, but only for the columns this table
+    // actually has - so it can never outlive the table it was made for.
+    property var visibleCols: {
+        var mine = selectCols.filter(c => listCols.includes(c))
+        return mine.length ? mine : colOrder.filter(c => !hiddenCols.includes(c))
     }
-    property var visibleCols: colOrder.filter(c => !hiddenCols.includes(c))
 
     property var savedWidths: cur && cur.colcfg && cur.colcfg.widths
                               ? cur.colcfg.widths : ({})
@@ -99,7 +101,7 @@ Kirigami.Page {
         // A DIFFERENT TABLE HAS DIFFERENT FIELDS: both the selection and the
         // condition of the previous table are meaningless here - reset them with the view.
         page.loadRows()
-        page.queryText = ""; page.queryError = ""
+        page.queryText = ""; page.queryError = ""; page.selectCols = []
         if (typeof qbar !== "undefined") qbar.clearAll()
         liveWidths = ({}); selRows = []; selAnchor = -1; pageIndex = 0
         sortCol = ""; sortAsc = true; lastSel = null; selName = ""
@@ -246,14 +248,22 @@ Kirigami.Page {
     // THE SELECTION SETS THE COLUMNS for the current view; the permanent setup is
     // the "Columns" panel, and that is what persists (otherwise one query would
     // reshape the view forever)
+    // THE COLUMNS CHOSEN BY THE QUERY live in their OWN property.
+    //
+    // This used to assign colOrder and hiddenCols directly - and an assignment
+    // to a bound property DESTROYS the binding. Both were bound to the current
+    // table, so after the first query (the query bar applies one as soon as the
+    // page is built) the columns froze at whatever table was open then. Every
+    // other table kept drawing those columns, and since its rows have no such
+    // fields, the table showed the right number of rows with every cell empty -
+    // "State shows nothing". The rows were never the problem.
+    property var selectCols: []
     function applySelectCols(sel) {
         if (!sel || !sel.length || !cur) return
         var all = cur.columns.filter(c => !c.startsWith("_"))
         var keep = sel.filter(c => all.indexOf(c) >= 0)
         if (!keep.length) return
-        var rest = all.filter(c => keep.indexOf(c) < 0)
-        colOrder = keep.concat(rest)
-        hiddenCols = rest
+        selectCols = keep
     }
 
     // THE RISK COLOUR IN A ROW: the severity is visible at once, without reading

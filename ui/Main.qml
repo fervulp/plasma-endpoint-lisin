@@ -57,29 +57,15 @@ Kirigami.ApplicationWindow {
         open("dashboards")
     }
 
-    // A SECTION IS BUILT ONCE AND KEPT. Every navigation used to destroy the page
-    // and create it again: opening Events cost about a second, because that page
-    // rebuilds a query bar over 98 taxonomy fields, a table and its panels from
-    // scratch. Seven pages are cheap to keep, and the state of a section - the
-    // query, the scroll position, the selected row - survives leaving it, which
-    // is what an investigation needs anyway.
-    property var pageCache: ({})
-    function pageFor(name) {
-        if (pageCache[name] !== undefined)
-            return pageCache[name]
-        var comp = name === "state" ? statePageComp
-                 : name === "dashboards" ? dashboardPageComp
-                 : name === "events" ? eventsPageComp
-                 : name === "sql" ? sqlPageComp
-                 : name === "pipeline" ? pipelinePageComp
-                 : name === "expertise" ? expertisePageComp
-                 : name === "settings" ? settingsPageComp
-                 : placeholder
-        var obj = comp.createObject(root)
-        pageCache[name] = obj
-        return obj
-    }
-
+    // A SECTION IS BUILT ON EVERY NAVIGATION, from its Component.
+    //
+    // Caching the created pages and pushing the same object again was faster on
+    // paper (Events 1.04 s -> 0.09 s), but a PageRow sizes and owns the pages it
+    // creates itself; handing it an item created elsewhere is not the same thing,
+    // and the section came up blank. A second of building a page is cheaper than
+    // a section that does not show. What was gained honestly stays: the rows come
+    // from the database a page at a time, a cell is one object, the panels are
+    // memoised.
     function open(name) {
         if (root.section === name)
             return
@@ -87,7 +73,14 @@ Kirigami.ApplicationWindow {
         while (root.pageStack.layers.depth > 1)   // close fullscreen layers
             root.pageStack.layers.pop()
         root.pageStack.clear()                    // drop leftover columns
-        root.pageStack.push(pageFor(name))
+        root.pageStack.push(name === "state" ? statePageComp
+                          : name === "dashboards" ? dashboardPageComp
+                          : name === "events" ? eventsPageComp
+                          : name === "sql" ? sqlPageComp
+                          : name === "pipeline" ? pipelinePageComp
+                          : name === "expertise" ? expertisePageComp
+                          : name === "settings" ? settingsPageComp
+                          : placeholder)
     }
 
     globalDrawer: Kirigami.GlobalDrawer {
