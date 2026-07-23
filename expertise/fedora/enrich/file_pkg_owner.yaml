@@ -1,45 +1,62 @@
 name: file_pkg_owner
-id: LS-E-11
+id: LS-E-30
 type: enrichment
-version: 1.0.0
-title: File owner package
+version: 2.0.0
+title: Owning package of a changed file
 # WHOSE FILE THIS IS: we add the package that owns the file to an integrity
 # event. Without it "/etc/x was changed" does not say what to fix - with the
 # package it is obvious: rpm -V <package> and a rollback.
+#
+# VERSION 2: the rpm call moved out of here into the package_files flow
+# (principle 1). This is now a plain lookup.
 code: |
-  def enrich(rows):
-      import os, subprocess
+  # A SHARED LOOKUP IN THE STATE TABLES, WITHOUT A SINGLE COMMAND.
+  # The index is collected by its own flow (fedora/inputs/package_files), so the
+  # source is visible in the pipeline, can be switched off and can be run by
+  # hand. An enrichment only links what has already been collected (principle 1).
+  _CACHE = {}
+
+
+  def _lookup(table, key_col, val_col):
+      """{key: value} from a state table, cached by the mtime of the database."""
+      import os
+      import sqlite3
       from pathlib import Path
-      CACHE = Path.home() / ".local/share/lisin/filepkg.json"
+      db = str(Path.home() / ".local/share/lisin/state.db")
       try:
-          key = str(os.path.getmtime("/var/lib/rpm/rpmdb.sqlite"))
+          sig = os.path.getmtime(db)
       except OSError:
-          key = "0"
-      idx = None
+          sig = 0
+      name = table + ":" + val_col
+      hit = _CACHE.get(name)
+      if hit and hit[0] == sig:
+          return hit[1]
+      out = {}
       try:
-          c = json.loads(CACHE.read_text())
-          if c.get("_stamp") == key:
-              idx = c.get("idx")
+          con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=5)
+          for k, v in con.execute(
+                  'SELECT "%s", "%s" FROM "%s"' % (key_col, val_col, table)):
+              if k:
+                  out[k] = v or ""
+          con.close()
       except Exception:
-          idx = None
-      if idx is None:
-          idx = {}
-          try:
-              out = subprocess.run(["rpm", "-qa", "--qf",
-                                    "[%{FILENAMES}\t%{=NAME}\n]"],
-                                   capture_output=True, text=True, timeout=120).stdout
-          except Exception:
-              out = ""
-          for ln in out.splitlines():
-              f = ln.split("\t", 1)
-              if len(f) == 2 and f[0].startswith(("/etc/", "/usr/", "/opt/", "/var/")):
-                  idx[f[0]] = f[1]
-          try:
-              CACHE.parent.mkdir(parents=True, exist_ok=True)
-              CACHE.write_text(json.dumps({"_stamp": key, "idx": idx}))
-          except OSError:
-              pass
+          pass
+      _CACHE[name] = (sig, out)
+      return out
+
+
+  def enrich(rows):
+      import os
+      idx = _lookup("package_files", "path", "package")
+      if not idx:
+          return rows
       for r in rows:
-          p = str(r.get("file_path") or "")
-          r["package_name"] = idx.get(p, "") if p else ""
+          path = str(r.get("file_path") or r.get("path") or "")
+          pkg = idx.get(path, "")
+          if not pkg and path:
+              try:
+                  pkg = idx.get(os.path.realpath(path), "")
+              except OSError:
+                  pkg = ""
+          r["package_name"] = pkg
       return rows

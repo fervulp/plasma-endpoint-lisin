@@ -1,0 +1,24 @@
+name: package_files
+id: LS-N-60
+type: normalization_rule
+version: 2.0.0
+title: Files owned by packages
+code: |
+  def normalize(text):
+      rows = []
+      for line in text.splitlines():
+          f = line.split("\t")
+          if len(f) < 3 or not f[0].startswith("/"):
+              continue
+          rows.append({"path": f[0], "mode": f[1], "package": f[2]})
+      return rows
+tests:
+  - name: an executable file becomes a row
+    input: "/usr/bin/btop\t-rwxr-xr-x\tbtop\n"
+    expect:
+      rows: 1
+      contains: {path: /usr/bin/btop, package: btop}
+  - name: a line without a path is dropped
+    input: "not-a-path\t-rw-r--r--\tpkg\n"
+    expect:
+      rows: 0

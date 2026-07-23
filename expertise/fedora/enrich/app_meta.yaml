@@ -1,112 +1,67 @@
 name: app_meta
-id: LS-E-4
+id: LS-E-25
 type: enrichment
-version: 1.0.0
-title: Application purpose (category / description / site)
+version: 2.0.0
+title: What an application is and what it is for
 # WHAT THIS APPLICATION IS AND WHAT IT IS FOR.
 # The inventory only answered "name + version", from which one cannot tell what
 # the package is and whether it can be touched. Here we add:
-#   category - the category (from .desktop Categories for GUI, otherwise rpm Group);
-#   purpose  - a human description (Comment from .desktop - it is clearer than the
-#              rpm Summary: "New era of messaging" instead of "telegram-desktop");
+#   category - the category (from the .desktop Categories, otherwise rpm Group);
+#   purpose  - a human description (the .desktop Comment - it is clearer than
+#              the rpm Summary: "New era of messaging" instead of a package name);
 #   url      - the project site, so that one can look it up.
-# Everything is taken with TWO cheap rpm calls + reading .desktop, and the result
-# is cached by the mtime of the rpm database (recomputed only when packages changed).
+#
+# VERSION 2: the rpm calls and the .desktop reading moved out of here into the
+# package_meta flow (principle 1: collecting is the job of an input). This is
+# now a join by package name.
 code: |
-  def enrich(rows):
-      import os, subprocess
+  # A SHARED LOOKUP IN THE STATE TABLES, WITHOUT A SINGLE COMMAND.
+  # The index is collected by its own flow (fedora/inputs/package_files), so the
+  # source is visible in the pipeline, can be switched off and can be run by
+  # hand. An enrichment only links what has already been collected (principle 1).
+  _CACHE = {}
+
+
+  def _lookup(table, key_col, val_col):
+      """{key: value} from a state table, cached by the mtime of the database."""
+      import os
+      import sqlite3
       from pathlib import Path
-
-      CACHE = Path.home() / ".local/share/lisin/appmeta.json"
-      RPMDB = "/var/lib/rpm/rpmdb.sqlite"
-
-      def stamp():
-          try:
-              return str(os.path.getmtime(RPMDB))
-          except OSError:
-              return "0"
-
-      meta = None
-      key = stamp()
+      db = str(Path.home() / ".local/share/lisin/state.db")
       try:
-          c = json.loads(CACHE.read_text())
-          if c.get("_stamp") == key:
-              meta = c.get("meta")
+          sig = os.path.getmtime(db)
+      except OSError:
+          sig = 0
+      name = table + ":" + val_col
+      hit = _CACHE.get(name)
+      if hit and hit[0] == sig:
+          return hit[1]
+      out = {}
+      try:
+          con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=5)
+          for k, v in con.execute(
+                  'SELECT "%s", "%s" FROM "%s"' % (key_col, val_col, table)):
+              if k:
+                  out[k] = v or ""
+          con.close()
       except Exception:
-          meta = None
+          pass
+      _CACHE[name] = (sig, out)
+      return out
 
-      if meta is None:
-          meta = {}
-          # 1) one rpm call: the site, the licence and the group for ALL packages
-          try:
-              out = subprocess.run(
-                  ["rpm", "-qa", "--qf",
-                   "%{NAME}\t%{URL}\t%{GROUP}\n"],
-                  capture_output=True, text=True, timeout=60).stdout
-          except Exception:
-              out = ""
-          for ln in out.splitlines():
-              f = ln.split("\t")
-              if len(f) >= 3 and f[0]:
-                  meta[f[0]] = {
-                      "url": "" if f[1] in ("(none)", "none") else f[1],
-                      "category": "" if f[2] in ("(none)", "Unspecified") else f[2],
-                      "purpose": "",
-                  }
-          # 2) .desktop: a human description and categories for GUI programs.
-          #    We link by basename(Exec) and by the name of the .desktop file itself -
-          #    the package name often differs from both (telegram-desktop/Telegram).
-          dirs = ["/usr/share/applications",
-                  str(Path.home() / ".local/share/applications"),
-                  "/var/lib/flatpak/exports/share/applications"]
-          for d in dirs:
-              try:
-                  names = os.listdir(d)
-              except OSError:
-                  continue
-              for fn in names:
-                  if not fn.endswith(".desktop"):
-                      continue
-                  try:
-                      txt = open(os.path.join(d, fn), errors="replace").read()
-                  except OSError:
-                      continue
-                  g = {}
-                  for line in txt.splitlines():
-                      if line.startswith("[") and not line.startswith("[Desktop Entry"):
-                          break        # the main section only
-                      for k in ("Comment", "Categories", "Exec", "Name", "GenericName"):
-                          if line.startswith(k + "="):
-                              g.setdefault(k, line.split("=", 1)[1].strip())
-                  if not g:
-                      continue
-                  cat = (g.get("Categories") or "").strip(";").replace(";", ", ")
-                  purpose = g.get("Comment") or g.get("GenericName") or ""
-                  keys = {fn[:-8]}
-                  ex = (g.get("Exec") or "").split()
-                  if ex:
-                      keys.add(os.path.basename(ex[0]))
-                  for k in keys:
-                      if not k:
-                          continue
-                      m = meta.setdefault(k, {"url": "", "category": "",
-                                              "purpose": ""})
-                      if purpose and not m.get("purpose"):
-                          m["purpose"] = purpose
-                      if cat:
-                          m["category"] = cat
-          try:
-              CACHE.parent.mkdir(parents=True, exist_ok=True)
-              CACHE.write_text(json.dumps({"_stamp": key, "meta": meta}))
-          except OSError:
-              pass
 
+  def enrich(rows):
+      purpose = _lookup("package_meta", "name", "purpose")
+      summary = _lookup("package_meta", "name", "summary")
+      url = _lookup("package_meta", "name", "url")
+      category = _lookup("package_meta", "name", "category")
+      group = _lookup("package_meta", "name", "group")
+      if not summary and not purpose:
+          return rows
       for r in rows:
-          nm = (r.get("name") or "").strip()
-          m = meta.get(nm) or meta.get(nm.lower()) or {}
-          if not m and r.get("path"):
-              m = meta.get(os.path.basename(r["path"])) or {}
-          r["category"] = m.get("category", "")
-          r["purpose"] = m.get("purpose", "")
-          r["url"] = m.get("url", "")
+          nm = str(r.get("name") or "")
+          r["category"] = category.get(nm, "") or group.get(nm, "")
+          # the human description first, the package summary as a fallback
+          r["purpose"] = purpose.get(nm, "") or summary.get(nm, "")
+          r["url"] = url.get(nm, "")
       return rows

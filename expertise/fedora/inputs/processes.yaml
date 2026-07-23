@@ -1,8 +1,13 @@
 name: processes
 id: LS-I-14
 type: input
-version: 1.0.0
+version: 2.0.0
 title: Processes
-command: ps axo pid=,ppid=,user:20=,pcpu=,pmem=,rss=,stat=,etime=,args= --sort=-pcpu
+command: "# The BINARY of a process is resolved HERE, in the input. Reading\n# /proc/<pid>/exe is collecting,\
+  \ and collecting belongs to an input\n# (principle 1) - the proc_purpose enrichment used to do it itself.\n\
+  # For a foreign process the link is not readable without root; then the\n# field stays empty and the\
+  \ rule falls back to the command line.\nps axo pid=,ppid=,user:20=,pcpu=,pmem=,rss=,stat=,etime=,args=\
+  \ --sort=-pcpu |\nwhile read -r pid rest; do\n  exe=$(readlink \"/proc/$pid/exe\" 2>/dev/null)\n  printf\
+  \ '%s\\t%s\\t%s\\n' \"$pid\" \"$exe\" \"$rest\"\ndone\ntrue\n"
 interval: 60
 enabled: true

@@ -1,0 +1,26 @@
+name: example_login_shells
+id: LS-X-2
+type: normalization_rule
+version: 1.0.0
+title: "Example 2/4: login shells (normalization)"
+# STEP 2 - THE NORMALIZATION. Text becomes rows. The columns of the table are
+# the keys of the dictionaries; nothing is declared anywhere else.
+code: |
+  def normalize(text):
+      rows = []
+      for line in text.splitlines():
+          path = line.strip()
+          if not path.startswith("/"):
+              continue
+          rows.append({"path": path, "shell": path.rsplit("/", 1)[-1]})
+      return rows
+tests:
+  - name: a path becomes a row with the shell name
+    input: "/bin/bash\n/usr/bin/zsh\n"
+    expect:
+      rows: 2
+      row0: {path: /bin/bash, shell: bash}
+  - name: comments and blank lines are dropped
+    input: "# comment\n\n/bin/sh\n"
+    expect:
+      rows: 1

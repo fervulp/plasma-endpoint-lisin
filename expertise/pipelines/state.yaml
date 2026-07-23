@@ -776,11 +776,6 @@ nodes:
   ref: fedora/enrich/user_privileges
   x: 680
   y: 2120
-- id: en_kmod_signed
-  kind: enrich
-  ref: fedora/enrich/kmod_signed
-  x: 680
-  y: 3560
 - id: en_port_owner_pkg
   kind: enrich
   ref: fedora/enrich/port_owner_pkg
@@ -951,6 +946,71 @@ nodes:
   ref: fedora/outputs/boot_sessions
   x: 840
   y: 9800
+- id: in_package_files
+  kind: input
+  ref: fedora/inputs/package_files
+  x: 40
+  y: 9960
+- id: no_package_files
+  kind: normalize
+  ref: fedora/normalize/package_files
+  x: 360
+  y: 9960
+- id: out_package_files
+  kind: output
+  ref: fedora/outputs/package_files
+  x: 1320
+  y: 9960
+- id: in_package_meta
+  kind: input
+  ref: fedora/inputs/package_meta
+  x: 40
+  y: 10120
+- id: no_package_meta
+  kind: normalize
+  ref: fedora/normalize/package_meta
+  x: 360
+  y: 10120
+- id: out_package_meta
+  kind: output
+  ref: fedora/outputs/package_meta
+  x: 1320
+  y: 10120
+- id: in_ip_intel
+  kind: input
+  ref: fedora/inputs/ip_intel
+  x: 40
+  y: 10280
+- id: no_ip_intel
+  kind: normalize
+  ref: fedora/normalize/ip_intel
+  x: 360
+  y: 10280
+- id: out_ip_intel
+  kind: output
+  ref: fedora/outputs/ip_intel
+  x: 1320
+  y: 10280
+- id: in_example_shells
+  kind: input
+  ref: examples/input_login_shells
+  x: 40
+  y: 10480
+- id: no_example_shells
+  kind: normalize
+  ref: examples/normalize_login_shells
+  x: 360
+  y: 10480
+- id: en_example_shells
+  kind: enrich
+  ref: examples/enrich_login_shells
+  x: 680
+  y: 10480
+- id: out_example_shells
+  kind: output
+  ref: examples/output_login_shells
+  x: 1320
+  y: 10480
 edges:
 - - in_system
   - no_system
@@ -1142,10 +1202,6 @@ edges:
   - en_user_privileges
 - - en_user_privileges
   - out_users
-- - no_kmods
-  - en_kmod_signed
-- - en_kmod_signed
-  - out_kmods
 - - no_ports
   - en_port_owner_pkg
 - - en_port_owner_pkg
@@ -1230,3 +1286,23 @@ edges:
   - no_boot_sessions
 - - no_boot_sessions
   - out_boot_sessions
+- - in_package_files
+  - no_package_files
+- - no_package_files
+  - out_package_files
+- - in_package_meta
+  - no_package_meta
+- - no_package_meta
+  - out_package_meta
+- - no_kmods
+  - out_kmods
+- - in_ip_intel
+  - no_ip_intel
+- - no_ip_intel
+  - out_ip_intel
+- - in_example_shells
+  - no_example_shells
+- - no_example_shells
+  - en_example_shells
+- - en_example_shells
+  - out_example_shells

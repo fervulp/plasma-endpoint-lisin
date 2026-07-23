@@ -1,0 +1,37 @@
+name: package_meta
+id: LS-I-61
+type: input
+version: 1.0.0
+title: Package descriptions and desktop entries
+# WHAT A PACKAGE IS AND WHAT IT IS FOR - one input instead of the rpm and
+# .desktop reading that the app_meta and proc_purpose enrichments used to do
+# themselves (principle 1: collecting is the job of an input).
+#
+# Two sections, both from the system:
+#   * rpm    - the summary, the project site and the group of every package;
+#   * DESKTOP - the .desktop entries, where the description is written for a
+#     human ("New era of messaging" instead of "telegram-desktop") and the
+#     categories are declared. The link to the package is basename(Exec) and the
+#     name of the .desktop file itself - a package name often matches neither.
+command: |
+  rpm -qa --qf '%{NAME}\t%{SUMMARY}\t%{URL}\t%{GROUP}\n' 2>/dev/null
+  echo "===DESKTOP==="
+  for d in /usr/share/applications ~/.local/share/applications \
+           /var/lib/flatpak/exports/share/applications \
+           ~/.local/share/flatpak/exports/share/applications; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*.desktop; do
+      [ -f "$f" ] || continue
+      awk -F= -v file="$f" '
+        /^\[Desktop Entry\]/ {in_main=1; next}
+        /^\[/ {in_main=0}
+        in_main && $1=="Name"       && !n {n=$2}
+        in_main && $1=="Comment"    && !c {c=$2}
+        in_main && $1=="Categories" && !g {g=$2}
+        in_main && $1=="Exec"       && !e {e=$2}
+        END {if (n) printf "%s\t%s\t%s\t%s\t%s\n", file, n, c, g, e}' "$f"
+    done
+  done
+  true
+interval: 3600
+enabled: true

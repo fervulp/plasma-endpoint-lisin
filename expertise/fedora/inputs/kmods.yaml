@@ -1,13 +1,13 @@
 name: kmods
 id: LS-I-8
 type: input
-version: 2.0.0
+version: 3.0.0
 title: Kernel modules
-command: |
-  lsmod | tail -n +2 | while read -r name size ref used; do
-    desc=$(modinfo -d "$name" 2>/dev/null | head -1 | tr '\n' ' ')
-    printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$size" "$ref" "$used" "$desc"
-  done
-  true
+command: "# The signature is taken HERE, in the input, not in an enrichment: asking\n# modinfo is collecting,\
+  \ and collecting belongs to an input (principle 1).\n# An unsigned module on a system with Secure Boot\
+  \ is an anomaly: it was\n# either built locally or loaded from outside.\nlsmod | tail -n +2 | while\
+  \ read -r name size ref used; do\n  desc=$(modinfo -d \"$name\" 2>/dev/null | head -1 | tr '\\n' ' ')\n\
+  \  signer=$(modinfo -F signer \"$name\" 2>/dev/null | head -1)\n  printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\\
+  n' \"$name\" \"$size\" \"$ref\" \"$used\" \"$desc\" \"$signer\"\ndone\ntrue\n"
 interval: 600
 enabled: true

@@ -95,63 +95,154 @@ The package is unsigned. To sign it, see `packaging/sign-rpm.sh`.
 
 ---
 
-## Adding a source
+## Adding a source — a worked example
 
-Nothing about a data source lives in the application code. To collect
-something new, add three small YAML files and wire them into the pipeline:
+Nothing about a data source lives in the application code. The four files below
+are **real and shipped**: `expertise/examples/`, wired into the state pipeline.
+They run on this machine, on a handful of rows, and you can watch every step in
+the interface.
 
-1. **Input** — `expertise/fedora/inputs/my_source.yaml`
+**The question the example answers:** which shells can be used to log in, and
+which package does each of them come from — including the ones that come from no
+package at all, because those were put there by hand.
+
+### 1. Input — where the data comes from
+
+`expertise/examples/input_login_shells.yaml`
 
 ```yaml
-name: my_source
-id: LS-I-90
+name: example_login_shells
+id: LS-X-1
 type: input
 version: 1.0.0
-title: My source
-command: my-command --some-flag
-interval: 300
+title: "Example 1/4: login shells (input)"
+command: |
+  grep -v '^#' /etc/shells 2>/dev/null | grep -v '^$'
+  true
+interval: 3600
 enabled: true
 ```
 
-2. **Normalization** — `expertise/fedora/normalize/my_source.yaml`
+A shell command, nothing more. `/etc/shells` is the list the system itself
+considers usable for logging in, so nothing is invented here. Its stdout:
+
+```
+/bin/sh
+/bin/bash
+/usr/bin/sh
+/usr/bin/bash
+/usr/bin/tmux
+/bin/tmux
+/bin/dash
+```
+
+### 2. Normalization — text becomes rows
+
+`expertise/examples/normalize_login_shells.yaml`
 
 ```yaml
-name: my_source
-id: LS-N-90
 type: normalization_rule
-version: 1.0.0
-title: My source
 code: |
   def normalize(text):
       rows = []
       for line in text.splitlines():
-          parts = line.split()
-          if len(parts) >= 2:
-              rows.append({"name": parts[0], "value": parts[1]})
+          path = line.strip()
+          if not path.startswith("/"):
+              continue
+          rows.append({"path": path, "shell": path.rsplit("/", 1)[-1]})
       return rows
 tests:
-  - name: one line becomes one row
-    input: "alpha 42\n"
-    rows: 1
-    row0: { name: alpha, value: "42" }
+  - name: a path becomes a row with the shell name
+    input: "/bin/bash\n/usr/bin/zsh\n"
+    expect:
+      rows: 2
+      row0: {path: /bin/bash, shell: bash}
 ```
 
-3. **Output** — `expertise/fedora/outputs/my_source.yaml`
+The columns of the table are the keys of the dictionaries — they are not
+declared anywhere else. The `tests:` section lives next to the rule; the
+**Tests** button runs it and shows pass/fail.
+
+### 3. Enrichment — the interesting part
+
+`expertise/examples/enrich_login_shells.yaml`
 
 ```yaml
-name: out_my_source
-id: LS-O-90
-type: statedb
-version: 1.0.0
-title: My source
-table: my_source
-key: [name]
-icon: view-list-details
+type: enrichment
+code: |
+  def enrich(rows):
+      import os, sqlite3
+      from pathlib import Path
+      db = str(Path.home() / ".local/share/lisin/state.db")
+      idx = {}
+      con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=5)
+      for path, pkg in con.execute("SELECT path, package FROM package_files"):
+          idx[path] = pkg
+      con.close()
+
+      for r in rows:
+          pkg = idx.get(r["path"], "") or idx.get(os.path.realpath(r["path"]), "")
+          r["package"] = pkg
+          r["packaged"] = "yes" if pkg else "no"
+      return rows
 ```
 
-Then connect `input → normalize → output` in the pipeline graph
-(**Pipelines** section), press **Run** on the rule in **Expertise** to see the
-parsed rows, and **Tests** to run the `tests:` section.
+This adds nothing of its own and **asks the system nothing**. It joins our rows
+with another table that a *different* flow has already collected —
+`package_files` (path → package), filled by
+`expertise/fedora/inputs/package_files.yaml`.
+
+That division is the rule for every enrichment: **collecting is the job of an
+input, linking is the job of an enrichment.** If this plugin ran `rpm -qf`
+itself, the source would be invisible in the pipeline, could not be switched off
+and could not be run by hand to see what came back.
+
+One detail worth keeping: a package records `/usr/bin/bash`, while `/etc/shells`
+lists `/bin/bash` — the same file through the merged-`/usr` symlink. Resolving
+the path is what turns 3 resolved rows into 7.
+
+### 4. Output — where the rows land
+
+`expertise/examples/output_login_shells.yaml`
+
+```yaml
+type: statedb
+table: example_login_shells
+key: [path]
+icon: utilities-terminal
+```
+
+The key is what makes a row *updated* rather than duplicated on the next run,
+and what makes a row that disappeared from the system get deleted.
+
+### What you get
+
+A table `example_login_shells` in **State**, 7 rows on this machine:
+
+| path | shell | package | packaged |
+|---|---|---|---|
+| /bin/bash | bash | bash | yes |
+| /bin/dash | dash | dash | yes |
+| /bin/sh | sh | bash | yes |
+| /bin/tmux | tmux | tmux | yes |
+| /usr/bin/bash | bash | bash | yes |
+| /usr/bin/sh | sh | bash | yes |
+| /usr/bin/tmux | tmux | tmux | yes |
+
+Read it as a sentence: `/bin/sh` is a login shell, and it is provided by the
+**bash** package — not by a package called "sh". A row with `packaged = no`
+would mean a login shell that no package installed, which is worth a look.
+
+Because the table now carries a `package` column, it also joins the rest of the
+graph by itself: the investigation graph discovers links by measuring how column
+values overlap, so this table links to `applications`, and through it to
+processes, services and vulnerabilities — without a line of code being changed.
+
+### Wiring it up
+
+Connect `input → normalize → enrich → output` in the **Pipelines** graph, press
+**Run** on the rule in **Expertise** to see the parsed rows, and **Tests** to
+run the `tests:` section.
 
 Porting to another distribution usually means changing the `command:` line and
 the parser in `code:` — the application, the database schema and the interface

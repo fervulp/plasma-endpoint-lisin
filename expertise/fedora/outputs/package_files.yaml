@@ -1,0 +1,9 @@
+name: db_package_files
+id: LS-O-package_files
+type: statedb
+version: 1.0.0
+title: Package files
+table: package_files
+key:
+- path
+icon: package-x-generic

@@ -1,0 +1,9 @@
+name: db_ip_intel
+id: LS-O-ip_intel
+type: statedb
+version: 1.0.0
+title: Address owners
+table: ip_intel
+key:
+- ip
+icon: network-server

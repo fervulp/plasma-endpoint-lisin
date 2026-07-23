@@ -14,7 +14,7 @@ nodes:
 - id: en_ipintel
   kind: enrich
   ref: fedora/enrich/ip_intel
-  x: 680
+  x: 640
   y: 840
 - id: out_events
   kind: output
@@ -35,7 +35,7 @@ nodes:
   kind: filter
   ref: noise/event_noise
   x: 1000
-  y: 520
+  y: 560
 - id: in_proc_events
   kind: input
   ref: fedora/inputs/proc_events
@@ -69,7 +69,7 @@ nodes:
 - id: cor_detect
   kind: correlation
   ref: correlation/exec_from_temp
-  x: 1000
+  x: 680
   y: 40
 - id: en_file_pkg
   kind: enrich
@@ -90,7 +90,7 @@ nodes:
   kind: enrich
   ref: fedora/enrich/event_session
   x: 960
-  y: 960
+  y: 920
 - id: en_proc_link
   kind: enrich
   ref: fedora/enrich/event_process_link
@@ -100,12 +100,12 @@ nodes:
   kind: correlation
   ref: correlation/auth_bruteforce
   x: 1000
-  y: 160
+  y: 120
 - id: co_external_beacon
   kind: correlation
   ref: correlation/external_beacon
-  x: 1000
-  y: 280
+  x: 1320
+  y: 40
 - id: co_file_perm_burst
   kind: correlation
   ref: correlation/file_perm_burst

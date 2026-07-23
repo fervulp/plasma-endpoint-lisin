@@ -1,6 +1,31 @@
 name: processes
 id: LS-N-14
 type: normalization_rule
-version: 3.0.0
+version: 2.0.0
 title: Processes
-code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.strip().split(None, 8)\n        if len(f) >= 8 and f[0].isdigit():\n            try:\n                rss = \"%g\" % round(float(f[5]) / 1024.0, 1)\n            except Exception:\n                rss = \"0\"\n            rows.append({\"pid\": f[0], \"ppid\": f[1], \"user\": f[2], \"cpu\": f[3],\n                         \"mem\": f[4], \"rss_mb\": rss, \"stat\": f[6],\n                         \"elapsed\": f[7], \"command\": f[8] if len(f) > 8 else \"\"})\n    return rows\n"
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        # the input gives\
+  \ \"pid<TAB>exe<TAB>the rest of the ps line\"\n        head = line.split(\"\\t\")\n        if len(head)\
+  \ < 3 or not head[0].strip().isdigit():\n            continue\n        pid, exe = head[0].strip(), head[1].strip()\n\
+  \        exe = exe.split(\" (deleted)\")[0]\n        f = head[2].strip().split(None, 7)\n        if\
+  \ len(f) < 7:\n            continue\n        try:\n            rss = \"%g\" % round(float(f[4]) / 1024.0,\
+  \ 1)\n        except Exception:\n            rss = \"0\"\n        rows.append({\"pid\": pid, \"ppid\"\
+  : f[0], \"user\": f[1], \"cpu\": f[2],\n                     \"mem\": f[3], \"rss_mb\": rss, \"stat\"\
+  : f[5],\n                     \"elapsed\": f[6], \"exe\": exe,\n                     \"command\": f[7]\
+  \ if len(f) > 7 else \"\"})\n    return rows\n"
+tests:
+- name: a process line with a binary
+  input: "1234\t/usr/bin/btop\t1 local 0.5 0.2 20480 S 01:02 btop --utf-force\n"
+  expect:
+    rows: 1
+    contains:
+      pid: '1234'
+      exe: /usr/bin/btop
+      user: local
+- name: a process whose binary is unreadable keeps the command line
+  input: "7\t\t2 root 0.0 0.0 0 S 10:00 [kworker/0:1]\n"
+  expect:
+    rows: 1
+    contains:
+      pid: '7'
+      exe: ''
+      command: '[kworker/0:1]'

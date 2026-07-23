@@ -1,0 +1,9 @@
+name: db_package_meta
+id: LS-O-package_meta
+type: statedb
+version: 1.0.0
+title: Package descriptions
+table: package_meta
+key:
+- name
+icon: help-about

@@ -1,100 +1,90 @@
 name: attach_package
 id: LS-E-21
 type: enrichment
-version: 1.0.0
+version: 3.0.0
 title: Attach owning package (universal link)
 # THE UNIVERSAL LINKING NODE. It adds a package column to the tables that have a
-# path/unit/module that can be tied to a package through rpm. After that the
-# table links to applications.name and through it to the whole graph.
-# One node for several flows (suid, privesc, scheduled, services,
-# kernel_modules): the logic is in the expertise, not in the code.
+# path/unit/module that can be tied to a package. After that the table links to
+# applications.name and through it to the whole graph. One node for several
+# flows (suid, privesc, scheduled, services, kernel_modules): the logic is in
+# the expertise, not in the code.
+#
+# VERSION 3: NOT A SINGLE COMMAND IS RUN HERE ANY MORE. It used to call rpm to
+# build the file index, systemctl to resolve a unit and modinfo to resolve a
+# kernel module. That broke principle 1: an enrichment links data that has
+# already been collected, while collecting is the job of an input - only then is
+# the source visible in the pipeline, can be switched off and can be run by hand.
+#
+# Now everything is one lookup in the package_files table, which its own flow
+# fills (fedora/inputs/package_files). Three resolutions, all from that table:
+#   * a PATH value    - directly, taking the merged /usr into account
+#                       (/usr/sbin/x is a symlink to /usr/bin/x);
+#   * a UNIT value    - the unit file itself is a packaged file, so we look for a
+#                       path ending with /<unit>. systemctl is not needed;
+#   * a kernel MODULE - its .ko file is a packaged file too, so we look for a
+#                       path ending with /<name>.ko*. modinfo is not needed.
+# It is also faster: reading the index takes 18 ms instead of the ~1 s that
+# running rpm cost, and there is no per-unit systemctl call at all.
 code: |
-  # A shared cache of the file->package index: built once per process, refreshed by
-  # the mtime of the rpm database. Kept in a module dictionary so as not to reread
-  # 36 MB for every table.
-  _PKG_IDX = {}
-  _PKG_STAMP = [""]
+  _CACHE = {}
 
 
-  def _pkg_index():
-      import json, os, subprocess
-      from pathlib import Path
+  def _index(db_path):
+      """path -> package, plus lookups by unit file name and by module name.
+
+      Read once per process and reused: the table changes only when packages
+      change, and it is read by seven flows.
+      """
+      import os
+      import sqlite3
       try:
-          stamp = str(os.path.getmtime("/var/lib/rpm/rpmdb.sqlite"))
+          sig = os.path.getmtime(db_path)
       except OSError:
-          stamp = "0"
-      if _PKG_STAMP[0] == stamp and _PKG_IDX:
-          return _PKG_IDX
-      cache = Path.home() / ".local/share/lisin/filepkg.json"
-      idx = None
+          sig = 0
+      hit = _CACHE.get("idx")
+      if hit and hit[0] == sig:
+          return hit[1]
+      by_path, by_unit, by_mod = {}, {}, {}
       try:
-          c = json.loads(cache.read_text())
-          if c.get("_stamp") == stamp:
-              idx = c.get("idx")
+          con = sqlite3.connect("file:%s?mode=ro" % db_path, uri=True, timeout=5)
+          for path, pkg in con.execute("SELECT path, package FROM package_files"):
+              if not path or not pkg:
+                  continue
+              by_path[path] = pkg
+              base = path.rsplit("/", 1)[-1]
+              if base.endswith((".service", ".timer", ".socket", ".mount", ".path")):
+                  by_unit.setdefault(base, pkg)
+              elif ".ko" in base:
+                  mod = base.split(".ko")[0].replace("-", "_")
+                  by_mod.setdefault(mod, pkg)
+          con.close()
       except Exception:
-          idx = None
-      if idx is None:
-          idx = {}
-          try:
-              out = subprocess.run(["rpm", "-qa", "--qf", "[%{FILENAMES}\t%{=NAME}\n]"],
-                                   capture_output=True, text=True, timeout=180).stdout
-          except Exception:
-              out = ""
-          for ln in out.splitlines():
-              f = ln.split("\t", 1)
-              if len(f) == 2:
-                  idx[f[0]] = f[1]
-          try:
-              cache.write_text(json.dumps({"_stamp": stamp, "idx": idx}))
-          except OSError:
-              pass
-      _PKG_IDX.clear()
-      _PKG_IDX.update(idx)
-      _PKG_STAMP[0] = stamp
-      return _PKG_IDX
+          pass
+      idx = (by_path, by_unit, by_mod)
+      _CACHE["idx"] = (sig, idx)
+      return idx
 
 
   def enrich(rows):
-      """Tie a row to a PACKAGE - the universal linking node between tables.
-
-      After that the table links to applications.name (the inventory) and through
-      it to everything else. The package is derived in three ways, all from the system:
-        * a PATH value - straight from the rpm index (taking the merged /usr into
-          account: /usr/sbin/x is a symlink to /usr/bin/x, the package records the latter);
-        * a UNIT value (*.service/*.timer/*.socket) - through FragmentPath;
-        * a kernel MODULE value - through the path /lib/modules/.../name.ko.
-      No lists of names: only a comparison with what the system itself declared.
-      """
+      """Tie a row to a PACKAGE - the universal linking node between tables."""
       import os
-      import subprocess
-      idx = _pkg_index()
+      from pathlib import Path
+      by_path, by_unit, by_mod = _index(
+          str(Path.home() / ".local/share/lisin/state.db"))
+      if not by_path:
+          return rows
 
-      def by_path(p):
-          if p in idx:
-              return idx[p]
+      def path_pkg(p):
+          pkg = by_path.get(p)
+          if pkg:
+              return pkg
+          # the merged /usr: a package records /usr/bin/x while the row may hold
+          # /usr/sbin/x or /bin/x - the same file through a symlink
           try:
               rp = os.path.realpath(p)
           except OSError:
               rp = ""
-          return idx.get(rp, "")
-
-      # collect the units and modules for a batch resolve (one call each is expensive)
-      units, mods = set(), set()
-      for r in rows:
-          for v in r.values():
-              v = str(v or "")
-              if v.endswith((".service", ".timer", ".socket", ".mount", ".path")):
-                  units.add(v)
-      unit_pkg = {}
-      for u in list(units)[:400]:
-          try:
-              fp = subprocess.run(["systemctl", "show", "-p", "FragmentPath",
-                                   "--value", u], capture_output=True, text=True,
-                                  timeout=5).stdout.strip()
-              if fp:
-                  unit_pkg[u] = by_path(fp)
-          except Exception:
-              pass
+          return by_path.get(rp, "")
 
       for r in rows:
           pkg = ""
@@ -102,26 +92,24 @@ code: |
           for v in r.values():
               v = str(v or "")
               if v.startswith("/"):
-                  pkg = by_path(v)
+                  pkg = path_pkg(v)
                   if pkg:
                       break
-          # 2) a unit
+          # 2) a unit: its unit file belongs to a package
           if not pkg:
               for v in r.values():
-                  if str(v) in unit_pkg:
-                      pkg = unit_pkg[str(v)]
+                  v = str(v or "")
+                  if v.endswith((".service", ".timer", ".socket", ".mount", ".path")):
+                      pkg = by_unit.get(v, "")
                       if pkg:
                           break
-          # 3) a kernel module (by its short name)
-          if not pkg and r.get("name") and "/" not in str(r.get("name")):
-              nm = str(r["name"]).replace("-", "_")
-              try:
-                  kp = subprocess.run(["modinfo", "-F", "filename", nm],
-                                      capture_output=True, text=True,
-                                      timeout=4).stdout.strip()
-                  if kp.startswith("/"):
-                      pkg = by_path(kp) or by_path(kp.replace(".xz", "").replace(".zst", ""))
-              except Exception:
-                  pass
-          r["package"] = pkg
+          # 3) a kernel module: its .ko file belongs to a package
+          if not pkg:
+              nm = str(r.get("name") or "")
+              if nm and "/" not in nm:
+                  pkg = by_mod.get(nm.replace("-", "_"), "")
+          if pkg:
+              r["package"] = pkg
+          else:
+              r.setdefault("package", "")
       return rows

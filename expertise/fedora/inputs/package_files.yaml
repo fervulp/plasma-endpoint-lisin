@@ -1,0 +1,30 @@
+name: package_files
+id: LS-I-60
+type: input
+version: 2.0.0
+title: Files owned by packages
+# WHICH FILE BELONGS TO WHICH PACKAGE - collected HERE, in an input, and not
+# inside an enrichment. An enrichment links data that has already been
+# collected; the moment it starts asking the system itself, the source becomes
+# invisible in the pipeline, cannot be switched off and cannot be run by hand
+# (principle 1). Four enrichments used to call rpm on their own.
+#
+# The whole index is 454 thousand files. We keep the part the links actually
+# need, and the criterion is STRUCTURAL, not a list of directories: the file is
+# EXECUTABLE (any x bit, taken from rpm itself), or it is a configuration file
+# in /etc, or it is a kernel module, or it is a unit file. A directory list had
+# already lost four SUID binaries that live in /usr/lib64 and /usr/share.
+#
+# Directories are excluded (they carry the x bit too and say nothing): 93
+# thousand rows, ~8 MB in the database, under a second to write once an hour.
+# Reading the index back takes 18 ms - forty times faster than the rpm call that
+# every enrichment used to make.
+#
+# %{=NAME} inside the array iteration: a plain %{NAME} is not expanded and
+# returns a couple of rows instead of thousands.
+command: |
+  rpm -qa --qf '[%{FILENAMES}\t%{FILEMODES:perms}\t%{=NAME}\n]' 2>/dev/null |
+    awk -F'\t' '$2 !~ /^d/ && ($2 ~ /x/ || $1 ~ /^\/etc\// || $1 ~ /[.]ko([.][a-z]+)?$/ || $1 ~ /[.](service|timer|socket|path|mount)$/)'
+  true
+interval: 3600
+enabled: true

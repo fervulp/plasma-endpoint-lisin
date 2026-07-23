@@ -3,4 +3,25 @@ id: LS-N-8
 type: normalization_rule
 version: 3.0.0
 title: Kernel modules
-code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split(\"\\t\")\n        if len(f) < 3:\n            continue\n        rows.append({\"name\": f[0], \"size\": f[1], \"refcount\": f[2],\n                     \"used_by\": f[3] if len(f) > 3 else \"\",\n                     \"description\": f[4].strip() if len(f) > 4 else \"\"})\n    return rows\n"
+code: "def normalize(text):\n    rows = []\n    for line in text.splitlines():\n        f = line.split(\"\
+  \\t\")\n        if len(f) < 3:\n            continue\n        # the signer comes from the input: an\
+  \ empty one means the module is\n        # unsigned, which matters on a system with Secure Boot\n  \
+  \      signer = f[5].strip() if len(f) > 5 else \"\"\n        rows.append({\"name\": f[0], \"size\"\
+  : f[1], \"refcount\": f[2],\n                     \"used_by\": f[3] if len(f) > 3 else \"\",\n     \
+  \                \"description\": f[4].strip() if len(f) > 4 else \"\",\n                     \"signer\"\
+  : signer,\n                     \"signed\": \"yes\" if signer else \"no\"})\n    return rows\n"
+tests:
+- name: a signed module keeps its signer
+  input: "nvidia\t1000\t2\tnvidia_uvm\tNVIDIA driver\tFedora kernel signing key\n"
+  expect:
+    rows: 1
+    contains:
+      name: nvidia
+      signed: 'yes'
+- name: a module with no signer is marked unsigned
+  input: "vboxdrv\t600\t0\t-\tVirtualBox\t\n"
+  expect:
+    rows: 1
+    contains:
+      name: vboxdrv
+      signed: 'no'

@@ -1,0 +1,34 @@
+name: ip_intel
+id: LS-N-62
+type: normalization_rule
+version: 1.0.0
+title: Who is behind an address
+code: |
+  def normalize(text):
+      rows, seen = [], set()
+      for line in text.splitlines():
+          f = line.split("\t")
+          if not f or not f[0].strip() or f[0] in seen:
+              continue
+          seen.add(f[0])
+          rows.append({"ip": f[0].strip(),
+                       "as_number": f[1].strip() if len(f) > 1 else "",
+                       "as_org": f[2].strip() if len(f) > 2 else "",
+                       "country": f[3].strip() if len(f) > 3 else "",
+                       "scope": f[4].strip() if len(f) > 4 else ""})
+      return rows
+tests:
+  - name: a public address keeps its owner
+    input: "192.0.2.10\t64496\tEXAMPLE-AS\tUS\tpublic\n"
+    expect:
+      rows: 1
+      contains: {ip: 192.0.2.10, as_number: "64496", as_org: EXAMPLE-AS, scope: public}
+  - name: a private address is marked and carries no owner
+    input: "10.0.0.5\t\t\t\tprivate\n"
+    expect:
+      rows: 1
+      contains: {ip: 10.0.0.5, scope: private, as_org: ""}
+  - name: a repeated address is not duplicated
+    input: "192.0.2.10\t64496\tEXAMPLE-AS\tUS\tpublic\n192.0.2.10\t64496\tEXAMPLE-AS\tUS\tpublic\n"
+    expect:
+      rows: 1

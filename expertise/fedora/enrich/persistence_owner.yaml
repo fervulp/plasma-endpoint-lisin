@@ -1,26 +1,67 @@
 name: persistence_owner
-id: LS-E-20
+id: LS-E-31
 type: enrichment
-version: 1.0.1
-title: Persistence file owner package
-code: "def enrich(rows):\n    \"\"\"The owner of an autostart mechanism file: a package or nobody.\n\n\
-  \    It replaces a rule like `vector LIKE '%preload%'`. The name of a mechanism says\n    nothing about\
-  \ whether it is legitimate: ld.so.conf.d is full of files from\n    packages. The real property is a\
-  \ MISMATCH: the file lies in a system autostart\n    mechanism but no package installed it. Such a file\
-  \ appeared by hand, and that is\n    the one to look at.\n    \"\"\"\n    import json\n    import os\n\
-  \    import subprocess\n    from pathlib import Path\n    CACHE = Path.home() / \".local/share/lisin/filepkg.json\"\
-  \n    try:\n        stamp = str(os.path.getmtime(\"/var/lib/rpm/rpmdb.sqlite\"))\n    except OSError:\n\
-  \        stamp = \"0\"\n    idx = None\n    try:\n        c = json.loads(CACHE.read_text())\n      \
-  \  if c.get(\"_stamp\") == stamp:\n            idx = c.get(\"idx\")\n    except Exception:\n       \
-  \ idx = None\n    if idx is None:\n        idx = {}\n        try:\n            out = subprocess.run([\"\
-  rpm\", \"-qa\", \"--qf\",\n                                  \"[%{FILENAMES}\\t%{=NAME}\\n]\"],\n  \
-  \                               capture_output=True, text=True,\n                                 timeout=180).stdout\n\
-  \        except Exception:\n            out = \"\"\n        for ln in out.splitlines():\n          \
-  \  f = ln.split(\"\\t\", 1)\n            if len(f) == 2:\n                idx[f[0]] = f[1]\n       \
-  \ if idx:\n            try:\n                CACHE.parent.mkdir(parents=True, exist_ok=True)\n     \
-  \           CACHE.write_text(json.dumps({\"_stamp\": stamp, \"idx\": idx}))\n            except OSError:\n\
-  \                pass\n    for r in rows:\n        path = str(r.get(\"path\") or \"\")\n        pkg\
-  \ = idx.get(path, \"\") if path else \"\"\n        r[\"package\"] = pkg\n        # a system path with\
-  \ no package = installed bypassing the package manager\n        under_system = path.startswith((\"/etc/\"\
-  , \"/usr/\", \"/lib\", \"/opt/\"))\n        r[\"unpackaged\"] = \"yes\" if (path and not pkg and under_system)\
-  \ else \"\"\n        r[\"scope\"] = \"system\" if under_system else \"user\"\n    return rows\n"
+version: 2.0.0
+title: Owner of an autostart mechanism
+# The owner of an autostart mechanism file: a package or nobody.
+#
+# It replaces a rule like `vector LIKE '%preload%'`. The name of a mechanism
+# says nothing about whether it is legitimate: ld.so.conf.d is full of files
+# from packages. The real property is a MISMATCH: the file lies in a system
+# autostart mechanism but no package installed it. Such a file appeared by
+# hand, and that is the one to look at.
+#
+# VERSION 2: the rpm call moved out of here into the package_files flow
+# (principle 1). This is now a plain lookup.
+code: |
+  # A SHARED LOOKUP IN THE STATE TABLES, WITHOUT A SINGLE COMMAND.
+  # The index is collected by its own flow (fedora/inputs/package_files), so the
+  # source is visible in the pipeline, can be switched off and can be run by
+  # hand. An enrichment only links what has already been collected (principle 1).
+  _CACHE = {}
+
+
+  def _lookup(table, key_col, val_col):
+      """{key: value} from a state table, cached by the mtime of the database."""
+      import os
+      import sqlite3
+      from pathlib import Path
+      db = str(Path.home() / ".local/share/lisin/state.db")
+      try:
+          sig = os.path.getmtime(db)
+      except OSError:
+          sig = 0
+      name = table + ":" + val_col
+      hit = _CACHE.get(name)
+      if hit and hit[0] == sig:
+          return hit[1]
+      out = {}
+      try:
+          con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=5)
+          for k, v in con.execute(
+                  'SELECT "%s", "%s" FROM "%s"' % (key_col, val_col, table)):
+              if k:
+                  out[k] = v or ""
+          con.close()
+      except Exception:
+          pass
+      _CACHE[name] = (sig, out)
+      return out
+
+
+  def enrich(rows):
+      import os
+      idx = _lookup("package_files", "path", "package")
+      for r in rows:
+          path = str(r.get("path") or "")
+          pkg = idx.get(path, "") if path else ""
+          if not pkg and path:
+              try:
+                  pkg = idx.get(os.path.realpath(path), "")
+              except OSError:
+                  pkg = ""
+          r["package"] = pkg
+          # a system path with no package = installed bypassing the package manager
+          under_system = path.startswith(("/etc/", "/usr/", "/lib", "/opt/"))
+          r["unpackaged"] = "yes" if (path and not pkg and under_system) else ""
+      return rows

@@ -1,0 +1,44 @@
+name: example_shell_package
+id: LS-X-3
+type: enrichment
+version: 1.0.0
+title: "Example 3/4: which package provides the shell (enrichment)"
+# STEP 3 - THE ENRICHMENT. THIS IS THE POINT OF THE EXAMPLE: it adds nothing of
+# its own and asks the system nothing. It LINKS our rows with another table that
+# a different flow has already collected - package_files (path -> package).
+#
+# That is the rule for every enrichment (principle 1): collecting is the job of
+# an input, linking is the job of an enrichment. If this plugin ran `rpm -qf`
+# itself, the source would be invisible in the pipeline, could not be switched
+# off and could not be run by hand.
+#
+# The merged /usr matters here: a package records /usr/bin/bash while /etc/shells
+# lists /bin/bash - the same file through a symlink. So we also try the resolved
+# path, which is what makes 6 rows out of 6 resolve instead of 2.
+code: |
+  def enrich(rows):
+      import os
+      import sqlite3
+      from pathlib import Path
+      db = str(Path.home() / ".local/share/lisin/state.db")
+      idx = {}
+      try:
+          con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=5)
+          for path, pkg in con.execute("SELECT path, package FROM package_files"):
+              idx[path] = pkg
+          con.close()
+      except Exception:
+          return rows
+
+      for r in rows:
+          path = r.get("path", "")
+          pkg = idx.get(path, "")
+          if not pkg:
+              try:
+                  pkg = idx.get(os.path.realpath(path), "")
+              except OSError:
+                  pkg = ""
+          r["package"] = pkg
+          # a login shell that belongs to no package was put there by hand
+          r["packaged"] = "yes" if pkg else "no"
+      return rows

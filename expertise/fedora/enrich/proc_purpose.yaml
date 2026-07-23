@@ -1,54 +1,126 @@
 name: proc_purpose
-id: LS-E-6
+id: LS-E-22
 type: enrichment
-version: 3.2.1
-title: Process meaning (from package metadata)
-code: "def enrich(rows):\n    import os, subprocess\n    from pathlib import Path\n\n    CACHE = Path.home()\
-  \ / \".local/share/lisin/procpkg.json\"\n    RPMDB = \"/var/lib/rpm/rpmdb.sqlite\"\n    KEEP = (\"/usr/bin/\"\
-  , \"/usr/sbin/\", \"/usr/libexec/\", \"/usr/lib/\",\n            \"/usr/lib64/\", \"/opt/\", \"/bin/\"\
-  , \"/sbin/\")\n\n    def stamp():\n        try:\n            return str(os.path.getmtime(RPMDB))\n \
-  \       except OSError:\n            return \"0\"\n\n    key, idx = stamp(), None\n    try:\n      \
-  \  c = json.loads(CACHE.read_text())\n        if c.get(\"_stamp\") == key:\n            idx = c.get(\"\
-  idx\")\n    except Exception:\n        idx = None\n\n    if idx is None:\n        idx = {}\n       \
-  \ try:\n            out = subprocess.run(\n                [\"rpm\", \"-qa\", \"--qf\", \"[%{FILENAMES}\\\
-  t%{=NAME}\\t%{=SUMMARY}\\n]\"],\n                capture_output=True, text=True, timeout=120).stdout\n\
-  \        except Exception:\n            out = \"\"\n        for ln in out.splitlines():\n          \
-  \  f = ln.split(\"\\t\", 2)\n            if len(f) < 3 or not f[0].startswith(KEEP):\n             \
-  \   continue          # we keep only the directories with executables\n            idx[f[0]] = [f[1],\
-  \ f[2]]\n        try:\n            CACHE.parent.mkdir(parents=True, exist_ok=True)\n            CACHE.write_text(json.dumps({\"\
-  _stamp\": key, \"idx\": idx}))\n        except OSError:\n            pass\n\n    for r in rows:\n  \
-  \      cmd = str(r.get(\"command\") or \"\").strip()\n        if not cmd:\n            continue\n  \
-  \      if cmd.startswith(\"[\"):\n            r[\"title\"] = \"kernel thread\"\n            r[\"purpose\"\
-  ] = \"Linux kernel internal task\"\n            r[\"package\"] = \"\"\n            continue\n      \
-  \  exe = \"\"\n        pid = str(r.get(\"pid\") or \"\")\n        if pid:\n            try:\n      \
-  \          exe = os.readlink(\"/proc/%s/exe\" % pid).split(\" (deleted)\")[0]\n            except OSError:\n\
-  \                exe = \"\"\n        if not exe:\n            # For a root process /proc/<pid>/exe cannot\
-  \ be read without rights, and\n            # some processes REWRITE their own command line:\n      \
-  \      # \"sshd: /usr/sbin/sshd -D [listener]\" - the first word there is\n            # \"sshd:\",\
-  \ and parsing by it produced an empty package.\n            # We take the first word that looks like\
-  \ a path AND is known to the\n            # package database: the property is structural, no lists of\
-  \ names.\n            exe = \"\"\n            for tok in cmd.replace(\":\", \" \").split():\n      \
-  \          if not tok.startswith(\"/\"):\n                    continue\n                # /usr/sbin\
-  \ is a symlink to /usr/bin (the merged /usr), and the\n                # package records the file as\
-  \ /usr/bin/sshd while the process\n                # shows /usr/sbin/sshd. We also check the resolved\
-  \ path.\n                if tok in idx:\n                    exe = tok\n                    break\n\
-  \                try:\n                    real = os.path.realpath(tok)\n                except OSError:\n\
-  \                    real = \"\"\n                if real and real in idx:\n                    exe\
-  \ = real\n                    break\n            if not exe:\n                tok = cmd.split(None,\
-  \ 1)[0]\n                exe = tok if tok.startswith(\"/\") else \"\"\n        # UNWRAPPING THE INTERPRETER.\
-  \ tuned runs as \"python3 -Es /usr/sbin/tuned\"\n        # - the exe is python3, and the process was\
-  \ labelled \"python3 / interpreter\"\n        # although it is the tuned daemon. The script matters\
-  \ more than the\n        # interpreter: if the exe is a language interpreter, we look in the command\n\
-  \        # for a PATH ARGUMENT known to the package database and take ITS package.\n        # The set\
-  \ of interpreters is a fact of the method (like /etc/shells for\n        # shells), not a list of \"\
-  bad names\".\n        INTERP = (\"python\", \"python2\", \"python3\", \"perl\", \"ruby\", \"node\",\n\
-  \                  \"php\", \"bash\", \"sh\", \"dash\", \"zsh\", \"java\", \"mono\")\n        base =\
-  \ exe.rsplit(\"/\", 1)[-1] if exe else \"\"\n        base = re.sub(r\"[0-9.]+$\", \"\", base)\n    \
-  \    if base in INTERP:\n            for tok in cmd.split()[1:]:\n                if not tok.startswith(\"\
-  /\") or tok == exe:\n                    continue\n                cand = tok if tok in idx else (\n\
-  \                    os.path.realpath(tok) if os.path.exists(tok) else \"\")\n                if cand\
-  \ and cand in idx:\n                    exe = cand          # this is the script - it is the essence\
-  \ of the process\n                    break\n        hit = idx.get(exe)\n        if hit is None and\
-  \ exe:\n            try:\n                hit = idx.get(os.path.realpath(exe))\n            except OSError:\n\
-  \                hit = None\n        r[\"package\"] = hit[0] if hit else \"\"\n        r[\"title\"]\
-  \ = hit[0] if hit else \"\"\n        r[\"purpose\"] = hit[1] if hit else \"\"\n    return rows\n"
+version: 4.0.0
+title: What a process is and what it is for
+# WHAT A PROCESS IS AND WHAT IT IS FOR, from the system and not from a list of
+# names: the purpose of a process is the description of the package its binary
+# belongs to.
+#
+# VERSION 4: no commands and no /proc reading here any more. The binary is
+# resolved by the processes input (the exe column), the file index comes from
+# the package_files flow and the descriptions from package_meta. An enrichment
+# links what has already been collected (principle 1).
+code: |
+  _CACHE = {}
+
+
+  def _lookup(table, key_col, val_col):
+      """{key: value} from a state table, cached by the mtime of the database."""
+      import os
+      import sqlite3
+      from pathlib import Path
+      db = str(Path.home() / ".local/share/lisin/state.db")
+      try:
+          sig = os.path.getmtime(db)
+      except OSError:
+          sig = 0
+      name = table + ":" + val_col
+      hit = _CACHE.get(name)
+      if hit and hit[0] == sig:
+          return hit[1]
+      out = {}
+      try:
+          con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=5)
+          for k, v in con.execute(
+                  'SELECT "%s", "%s" FROM "%s"' % (key_col, val_col, table)):
+              if k:
+                  out[k] = v or ""
+          con.close()
+      except Exception:
+          pass
+      _CACHE[name] = (sig, out)
+      return out
+
+
+  def enrich(rows):
+      import os
+      import re
+      idx = _lookup("package_files", "path", "package")
+      purpose = _lookup("package_meta", "name", "purpose")
+      summary = _lookup("package_meta", "name", "summary")
+      if not idx:
+          return rows
+
+      def describe(pkg):
+          return purpose.get(pkg, "") or summary.get(pkg, "")
+
+      for r in rows:
+          cmd = str(r.get("command") or "").strip()
+          if not cmd:
+              continue
+          if cmd.startswith("["):
+              r["title"] = "kernel thread"
+              r["purpose"] = "Linux kernel internal task"
+              r["package"] = ""
+              continue
+
+          exe = str(r.get("exe") or "")
+          if not exe or exe not in idx:
+              # The binary of a foreign process is not readable without root, and
+              # some processes REWRITE their own command line:
+              # "sshd: /usr/sbin/sshd -D [listener]" - the first word there is
+              # "sshd:", and parsing by it produced an empty package.
+              # We take the first word that looks like a path AND is known to the
+              # package index: the property is structural, no lists of names.
+              for tok in cmd.replace(":", " ").split():
+                  if not tok.startswith("/"):
+                      continue
+                  # /usr/sbin is a symlink to /usr/bin (the merged /usr), and the
+                  # package records the file as /usr/bin/sshd while the process
+                  # shows /usr/sbin/sshd. We also check the resolved path.
+                  if tok in idx:
+                      exe = tok
+                      break
+                  try:
+                      real = os.path.realpath(tok)
+                  except OSError:
+                      real = ""
+                  if real and real in idx:
+                      exe = real
+                      break
+              if not exe:
+                  tok = cmd.split(None, 1)[0]
+                  exe = tok if tok.startswith("/") else ""
+
+          # UNWRAPPING THE INTERPRETER. tuned runs as "python3 -Es /usr/sbin/tuned"
+          # - the exe is python3, and the process was labelled "python3", although
+          # it is the tuned daemon. The script matters more than the interpreter:
+          # if the exe is a language interpreter, we look in the command for a PATH
+          # ARGUMENT known to the package index and take ITS package. The set of
+          # interpreters is a fact of the method (like /etc/shells for shells), not
+          # a list of "bad names".
+          INTERP = ("python", "python2", "python3", "perl", "ruby", "node",
+                    "php", "bash", "sh", "dash", "zsh", "java", "mono")
+          base = exe.rsplit("/", 1)[-1] if exe else ""
+          base = re.sub(r"[0-9.]+$", "", base)
+          if base in INTERP:
+              for tok in cmd.split()[1:]:
+                  if not tok.startswith("/") or tok == exe:
+                      continue
+                  cand = tok if tok in idx else (
+                      os.path.realpath(tok) if os.path.exists(tok) else "")
+                  if cand and cand in idx:
+                      exe = cand      # this is the script - the essence of the process
+                      break
+
+          pkg = idx.get(exe, "")
+          if not pkg and exe:
+              try:
+                  pkg = idx.get(os.path.realpath(exe), "")
+              except OSError:
+                  pkg = ""
+          r["package"] = pkg
+          r["title"] = pkg
+          r["purpose"] = describe(pkg) if pkg else ""
+      return rows

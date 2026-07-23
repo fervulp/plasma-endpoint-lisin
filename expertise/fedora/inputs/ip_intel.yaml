@@ -1,0 +1,32 @@
+name: ip_intel
+id: LS-I-62
+type: input
+version: 1.1.0
+title: Who is behind an address
+command: "python3 - <<'PY'\nimport os, re, sqlite3, subprocess\nHOME = os.path.expanduser(\"~/.local/share/lisin\"\
+  )\nSTATE, EVENTS = os.path.join(HOME, \"state.db\"), os.path.join(HOME, \"events.db\")\nMAX_NEW = 20\
+  \            # new addresses per run: a timeout must not stall the pipeline\n\ndef rows(db, sql):\n\
+  \    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % db, uri=True, timeout=5)\n        out\
+  \ = list(con.execute(sql))\n        con.close()\n        return out\n    except Exception:\n       \
+  \ return []\n\nknown = {}\nfor ip, asn, org, cc, scope in rows(\n        STATE, \"SELECT ip, as_number,\
+  \ as_org, country, scope FROM ip_intel\"):\n    known[ip] = (asn or \"\", org or \"\", cc or \"\", scope\
+  \ or \"\")\n    # what we already know is re-emitted, otherwise staleness deletes it\n    print(\"\\\
+  t\".join([ip, asn or \"\", org or \"\", cc or \"\", scope or \"\"]))\n\nPRIVATE = re.compile(r\"^(10\\\
+  .|127\\.|169\\.254\\.|192\\.168\\.|172\\.(1[6-9]|2\\d|3[01])\\.|::1$|fe80:|fd)\")\n\ndef cymru(name):\n\
+  \    try:\n        out = subprocess.run([\"dig\", \"+short\", \"+time=2\", \"+tries=1\", \"TXT\", name],\n\
+  \                             capture_output=True, text=True, timeout=5).stdout\n    except Exception:\n\
+  \        return \"\"\n    return out.strip().splitlines()[0].strip('\"') if out.strip() else \"\"\n\n\
+  fresh = 0\nfor (ip,) in rows(EVENTS, \"SELECT DISTINCT destination_ip FROM events \"\n             \
+  \             \"WHERE destination_ip <> '' ORDER BY ts DESC LIMIT 400\"):\n    if not ip or ip in known:\n\
+  \        continue\n    # A PRIVATE ADDRESS NEVER LEAVES THE MACHINE: asking about it would leak the\n\
+  \    # internal topology. We mark it locally instead.\n    if PRIVATE.match(ip):\n        print(\"\\\
+  t\".join([ip, \"\", \"\", \"\", \"private\"]))\n        continue\n    if \":\" in ip:\n        print(\"\
+  \\t\".join([ip, \"\", \"\", \"\", \"unknown\"]))\n        continue\n    if fresh >= MAX_NEW:\n     \
+  \   break\n    fresh += 1\n    txt = cymru(\".\".join(reversed(ip.split(\".\"))) + \".origin.asn.cymru.com\"\
+  )\n    if not txt:\n        print(\"\\t\".join([ip, \"\", \"\", \"\", \"public\"]))\n        continue\n\
+  \    parts = [x.strip() for x in txt.split(\"|\")]\n    asn = parts[0] if parts else \"\"\n    cc =\
+  \ parts[2] if len(parts) > 2 else \"\"\n    org = \"\"\n    if asn:\n        o = cymru(\"AS%s.asn.cymru.com\"\
+  \ % asn)\n        po = [x.strip() for x in o.split(\"|\")]\n        org = po[4] if len(po) > 4 else\
+  \ \"\"\n    print(\"\\t\".join([ip, asn, org, cc, \"public\"]))\nPY\ntrue\n"
+interval: 600
+enabled: true

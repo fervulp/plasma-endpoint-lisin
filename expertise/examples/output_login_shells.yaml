@@ -1,0 +1,11 @@
+name: example_db_login_shells
+id: LS-X-4
+type: statedb
+version: 1.0.0
+title: "Example 4/4: login shells (output)"
+# STEP 4 - THE OUTPUT. It decides WHERE the rows land: the table and the key.
+# The key is what makes a row updated instead of duplicated on the next run.
+table: example_login_shells
+key:
+- path
+icon: utilities-terminal

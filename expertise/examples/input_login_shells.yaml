@@ -1,0 +1,13 @@
+name: example_login_shells
+id: LS-X-1
+type: input
+version: 1.0.0
+title: "Example 1/4: login shells (input)"
+# STEP 1 - THE INPUT. A shell command; its stdout goes to the normalization.
+# /etc/shells is the list the system itself considers usable for logging in:
+# ten lines, so the example stays readable and runs instantly.
+command: |
+  grep -v '^#' /etc/shells 2>/dev/null | grep -v '^$'
+  true
+interval: 3600
+enabled: true

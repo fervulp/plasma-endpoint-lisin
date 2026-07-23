@@ -1,15 +1,62 @@
 name: ip_intel
-id: LS-E-2
+id: LS-E-24
 type: enrichment
-version: 1.0.0
-title: IP → ASN / owner / country / rDNS
-code: "def enrich(rows):\n    from agent import ipintel\n    ips = []\n    for r in rows:\n        ip\
-  \ = r.get(\"destination_ip\") or \"\"\n        if ip:\n            ips.append(ip)\n    if not ips:\n\
-  \        return rows\n    info = ipintel.lookup_many(ips)\n    for r in rows:\n        d = info.get(r.get(\"\
-  destination_ip\") or \"\")\n        if not d:\n            continue\n        if d.get(\"as_number\"\
-  ):\n            r[\"destination_as_number\"] = d[\"as_number\"]\n        if d.get(\"as_org\"):\n   \
-  \         r[\"destination_as_org\"] = d[\"as_org\"]\n        if d.get(\"country\"):\n            r[\"\
-  destination_geo_country\"] = d[\"country\"]\n        if d.get(\"rdns\") and not r.get(\"destination_domain\"\
-  ):\n            r[\"destination_domain\"] = d[\"rdns\"]\n        # a private address is a useful fact\
-  \ too, we mark it explicitly\n        if d.get(\"scope\") == \"private\" and not r.get(\"destination_as_org\"\
-  ):\n            r[\"destination_as_org\"] = \"(private network)\"\n    return rows\n"
+version: 2.0.0
+title: Who is behind the destination address
+# WHO IS BEHIND AN ADDRESS - a join with the ip_intel table, nothing more.
+#
+# VERSION 2: the network access moved out of here into its own input
+# (fedora/inputs/ip_intel). An enrichment that reaches the internet is invisible
+# in the pipeline, cannot be switched off and cannot be run by hand to see what
+# came back - that is exactly what principle 1 forbids. Now the flow is visible
+# as three nodes, and this node only links what has been collected.
+code: |
+  _CACHE = {}
+
+
+  def _table():
+      """ip -> (asn, org, country, scope), cached by the mtime of the database."""
+      import os
+      import sqlite3
+      from pathlib import Path
+      db = str(Path.home() / ".local/share/lisin/state.db")
+      try:
+          sig = os.path.getmtime(db)
+      except OSError:
+          sig = 0
+      hit = _CACHE.get("ip")
+      if hit and hit[0] == sig:
+          return hit[1]
+      out = {}
+      try:
+          con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=5)
+          for ip, asn, org, cc, scope in con.execute(
+                  "SELECT ip, as_number, as_org, country, scope FROM ip_intel"):
+              out[ip] = (asn or "", org or "", cc or "", scope or "")
+          con.close()
+      except Exception:
+          pass
+      _CACHE["ip"] = (sig, out)
+      return out
+
+
+  def enrich(rows):
+      idx = _table()
+      if not idx:
+          return rows
+      for r in rows:
+          ip = str(r.get("destination_ip") or "")
+          hit = idx.get(ip)
+          if not hit:
+              continue
+          asn, org, cc, scope = hit
+          if asn:
+              r["destination_as_number"] = asn
+          if org:
+              r["destination_as_org"] = org
+          if cc:
+              r["destination_geo_country"] = cc
+          # a private address is a useful fact too, we mark it explicitly
+          if scope == "private" and not r.get("destination_as_org"):
+              r["destination_as_org"] = "(private network)"
+      return rows
