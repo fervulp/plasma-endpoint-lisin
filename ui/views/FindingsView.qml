@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "../components"
+import "../components/QueryMatch.js" as QM
 
 // WHAT IS WRONG AND WHAT TO DO ABOUT IT - not "how many of each".
 //
@@ -17,6 +18,10 @@ Item {
     property var d: ({ findings: [], total: 0, high: 0, medium: 0, low: 0 })
     property var sel: null
     property string query: ""
+    // the QueryBar's structured filter (multiple conditions + free text), applied
+    // by the shared matcher - so it filters like Events, not one condition only
+    property var qconds: []
+    property string qquick: ""
 
     // one description of the columns, read by the header and by the rows
     readonly property var cols: [
@@ -68,27 +73,12 @@ Item {
     // Python and never touch a database - there is nothing to hand an SQL
     // string to. The syntax is the same one the query bar produces.
     readonly property var shown: {
-        var q = (view.query || "").trim()
-        if (q === "") return view.rows
-        var m = q.match(/^\s*(\w+)\s*(=|<>|!=|LIKE|NOT LIKE)\s*'?([^']*)'?\s*$/i)
+        var _ = [view.qconds, view.qquick, view.rows]   // recompute deps
+        if (!view.qquick && (!view.qconds || !view.qconds.length)) return view.rows
         var out = []
-        for (var i = 0; i < view.rows.length; i++) {
-            var r = view.rows[i]
-            if (m) {
-                var v = String(r[m[1]] === undefined ? "" : r[m[1]]).toLowerCase()
-                var want = m[3].toLowerCase()
-                var op = m[2].toUpperCase()
-                var hit = op === "=" ? v === want
-                        : (op === "<>" || op === "!=") ? v !== want
-                        : op === "LIKE" ? v.indexOf(want.replace(/%/g, "")) >= 0
-                        : v.indexOf(want.replace(/%/g, "")) < 0
-                if (hit) out.push(r)
-            } else {
-                var hay = (r.title + " " + r.severity + " " + r.rule + " " +
-                           (r._f.why || "") + " " + (r._f.action || "")).toLowerCase()
-                if (hay.indexOf(q.toLowerCase()) >= 0) out.push(r)
-            }
-        }
+        for (var i = 0; i < view.rows.length; i++)
+            if (QM.rowMatches(view.rows[i], view.qconds, view.qquick, view.cols))
+                out.push(view.rows[i])
         return out
     }
 
@@ -153,7 +143,9 @@ Item {
                             if (spec.select.indexOf(view.cols[i].k) < 0)
                                 hide.push(view.cols[i].k)
                     view.hiddenCols = hide
-                    view.query = qbar.builderMode ? qbar.buildSql() : qbar.manualWhere()
+                    view.qquick = qbar.builderMode ? qbar.quickText : ""
+                    view.qconds = qbar.builderMode ? (spec.where || [])
+                                                   : QM.parseWhere(qbar.manualWhere())
                 }
             }
             Kirigami.Separator { Layout.fillWidth: true }

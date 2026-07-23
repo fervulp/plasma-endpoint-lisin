@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "../components"
 import "../components/Fmt.js" as Fmt
+import "../components/QueryMatch.js" as QM
 
 // FILE ACTIVITY: what was created, changed, deleted - and by whom.
 //
@@ -17,6 +18,8 @@ Item {
     property var d: ({ events: [], by_action: [], by_dir: [], by_package: [], total: 0 })
     property var sel: null
     property string query: ""
+    property var qconds: []
+    property string qquick: ""
 
     readonly property var cols: [
         { k: "ts", t: "Time", w: 10, mono: true },
@@ -59,26 +62,12 @@ Item {
 
     readonly property var rows: d.events || []
     readonly property var shown: {
-        var q = (view.query || "").trim()
-        if (q === "") return view.rows
-        var m = q.match(/^\s*(\w+)\s*(=|<>|!=|LIKE|NOT LIKE)\s*'?([^']*)'?\s*$/i)
+        var _ = [view.qconds, view.qquick, view.rows]
+        if (!view.qquick && (!view.qconds || !view.qconds.length)) return view.rows
         var out = []
-        for (var i = 0; i < view.rows.length; i++) {
-            var r = view.rows[i]
-            if (m) {
-                var v = String(r[m[1]] === undefined ? "" : r[m[1]]).toLowerCase()
-                var want = m[3].toLowerCase(), op = m[2].toUpperCase()
-                var hit = op === "=" ? v === want
-                        : (op === "<>" || op === "!=") ? v !== want
-                        : op === "LIKE" ? v.indexOf(want.replace(/%/g, "")) >= 0
-                        : v.indexOf(want.replace(/%/g, "")) < 0
-                if (hit) out.push(r)
-            } else {
-                var hay = ""
-                for (var k in r) hay += " " + r[k]
-                if (hay.toLowerCase().indexOf(q.toLowerCase()) >= 0) out.push(r)
-            }
-        }
+        for (var i = 0; i < view.rows.length; i++)
+            if (QM.rowMatches(view.rows[i], view.qconds, view.qquick, view.cols))
+                out.push(view.rows[i])
         return out
     }
 
@@ -131,7 +120,9 @@ Item {
                             if (spec.select.indexOf(view.cols[i].k) < 0)
                                 hide.push(view.cols[i].k)
                     view.hiddenCols = hide
-                    view.query = qbar.builderMode ? qbar.buildSql() : qbar.manualWhere()
+                    view.qquick = qbar.builderMode ? qbar.quickText : ""
+                    view.qconds = qbar.builderMode ? (spec.where || [])
+                                                   : QM.parseWhere(qbar.manualWhere())
                 }
             }
             Kirigami.Separator { Layout.fillWidth: true }
