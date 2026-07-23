@@ -296,9 +296,16 @@ CAT_META = {
     "privesc":     ("Privileges",    "#d35400", 10),
     "vulns":       ("Vulnerabilities","#c0392b", 11),
     "events":      ("",             "#7f8c8d", 12),
+    # the chronological timeline: shown as ONE block, its steps open in the side
+    # panel (not expanded into nodes), because a history is read in order, not
+    # scattered across the canvas
+    "activity":    ("Activity history", "#b7950b", 11.5),
     "kmod":        ("Kernel Modules","#7d3c98", 13),
     "location":    ("Working directory", "#5d6d7e", 4.5),
 }
+# categories that do NOT expand into member nodes but open in the side panel
+# (a timeline is read in order; scattering it across the canvas helps nobody)
+SIDEBAR_CATS = {"activity"}
 # WHAT TO WRITE ON THE SECOND LINE of a satellite node. It used to be the TABLE
 # NAME ("app_config", "services") - that is about the storage layout, not about
 # the substance. We take the field that actually explains the object.
@@ -374,32 +381,36 @@ def _emit_categories(add, link, anchor_id, ax, ay, cats, expanded,
             seen_m.add(m["id"])
             members.append(m)
         label, color, _o = CAT_META.get(cat, (cat, "#888888", 99))
-        # ALL categories are collapsed by default: an arrow goes from the anchor
-        # to the BLOCK ("Application", "Files", "Network"), and its contents are
-        # expanded by a click. Overview first, details on demand.
-        collapsed = cat not in expanded
+        rep = members[0]
+        # A SIDEBAR block (the timeline) never expands into nodes and shows its
+        # own real step count; a click opens it in the side panel. Ordinary blocks
+        # collapse/expand on the canvas.
+        sidebar = cat in SIDEBAR_CATS
+        cnt = rep.get("block_count", len(members)) if sidebar else len(members)
+        collapsed = sidebar or cat not in expanded
         summary.append({"id": cat, "label": label, "color": color,
-                        "count": len(members), "collapsed": collapsed})
+                        "count": cnt, "collapsed": collapsed})
         cx, cy = LEFT, y
         # THE CATEGORY HEADER IS ALWAYS THERE (a meta node). Collapsed: "+N
         # expand"; expanded: "-N collapse". Clicking it always sends
         # toggleCategory, so the COLLAPSE path is reachable (the header used to
         # disappear on expansion and there was nothing left to collapse with).
         gid = "group:" + cat
-        rep = members[0]
         add(gid, "group", label,
-            ("%d — expand" % len(members)) if collapsed
-            else ("%d — collapse" % len(members)),
-            rep.get("table", ""), "", "", category=cat, color=color,
-            count=len(members), collapsed=collapsed,
+            ("%d steps · open" % cnt) if sidebar
+            else (("%d — expand" % cnt) if collapsed else ("%d — collapse" % cnt)),
+            rep.get("table", ""), rep.get("col", "") if sidebar else "",
+            rep.get("val", "") if sidebar else "", category=cat, color=color,
+            count=cnt, collapsed=collapsed,
             # THE BLOCK ICON = the icon of its contents. The labels "Processes"
             # and "Events" were removed as extra words, but the type must still be
             # readable - otherwise with a user anchor two unnamed blocks
             # (processes and events) cannot be told apart.
             icon_kind=rep.get("kind", ""),
-            badge=("+%d" % len(members)) if collapsed else "−",
-            drill="toggle", x=_snap(cx), y=_snap(cy))
-        link(anchor_id, gid, label, rel="member", count=len(members),
+            badge=("+%d" % cnt) if (collapsed and not sidebar) else ("" if sidebar else "−"),
+            drill=("timeline" if sidebar else "toggle"),
+            pid=rep.get("pid", ""), x=_snap(cx), y=_snap(cy))
+        link(anchor_id, gid, label, rel="member", count=cnt,
              via_x=round(LEFT - COLUMN_GAP / 2))
         if collapsed:
             y += ROW_H + BAND_GAP
@@ -1295,33 +1306,13 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
         except Exception:
             pass
 
-    # THE WORKING DIRECTORY - where the process runs from. Prefer the pipeline
-    # (open_files carries fd='cwd', collected as a source) over reading /proc
-    # directly, per principle 1; /proc is the fallback for a live process whose
-    # snapshot has not caught up. Shown as a node attached DIRECTLY to the process
-    # (not a collapsed block), next to boot and session, so "where does it run
-    # from" is answered at a glance - it catches a process running out of /tmp.
-    cwd = ""
-    try:
-        for r in _q(con, "SELECT path FROM open_files WHERE pid=? AND fd='cwd' "
-                         "LIMIT 1", (pid,)):
-            cwd = str(r.get("path") or "")
-    except Exception:
-        cwd = ""
-    if not cwd:
-        try:
-            cwd = os.readlink("/proc/%s/cwd" % pid)
-        except OSError:
-            cwd = ""
-    if cwd:
-        add("cwd:" + pid, "dir", cwd.rsplit("/", 1)[-1] or "/", cwd,
-            "open_files", "dir", cwd, drill="state",
-            risk=cwd.startswith(("/tmp", "/dev/shm", "/var/tmp")))
-        # directly BELOW the anchor, not in the child column (that put it on top
-        # of a child process); _declutter clears any remaining overlap
-        nodes[-1]["x"] = ax
-        nodes[-1]["y"] = ay + STEP_Y
-        link(root, "cwd:" + pid, "runs in", rel="runs_in")
+    # THE WORKING-DIRECTORY NODE WAS REMOVED. It was shown directly under the
+    # process, but its path could be wrong: when open_files had no fd='cwd' row it
+    # fell back to reading /proc/<pid>/cwd LIVE, and a pid reused since the
+    # snapshot pointed it at a completely different process's directory. Where the
+    # process works is already answered honestly by the "Files" block, which comes
+    # from open_files (the right pid), so the standalone node only added risk of a
+    # wrong path.
 
     # events - what the process did (drill: events by pid)
     if eventsdb is not None:
@@ -1337,6 +1328,21 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
                  "%s times" % e_["n"],
                  "events", "event_action", str(e_["a"]),
                  rel="did", drill="events", pid=pid, when=str(e_["last"] or ""))
+
+        # THE ACTIVITY-HISTORY BLOCK. One block whose count is the number of
+        # recorded steps; a click opens the chronological timeline in the side
+        # panel (drill="timeline"), it does NOT expand into nodes on the canvas
+        # (SIDEBAR_CATS). A history is read in order, not scattered around.
+        try:
+            hn = eventsdb.query(
+                "SELECT COUNT(*) n FROM events WHERE process_pid = ? "
+                "OR parent_pid = ?", (pid, pid)).get("rows", [{}])[0].get("n", 0)
+        except Exception:
+            hn = 0
+        if hn:
+            push("activity", "hist:" + pid, "action", "Activity history",
+                 "%d steps" % int(hn), "events", "process_pid", pid,
+                 rel="did", drill="timeline", pid=pid, block_count=int(hn))
 
     # ---- THE REMAINING SATELLITES FROM THE DISCOVERED MAP (config/vuln/persist/...) ----
     try:

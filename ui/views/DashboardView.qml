@@ -81,6 +81,16 @@ Item {
         view.sideInfo = backend.nodeInfo(n)
     }
     function graphToggle(cat) {
+        // THE ACTIVITY-HISTORY BLOCK opens the TIMELINE in the side panel instead
+        // of expanding into nodes: a history is read in order, not scattered on
+        // the canvas. The pid is the anchored process.
+        if (cat === "activity") {
+            var pid = view.deep ? view.deep.pid : view.anchorVal
+            view.sideNode = { label: "Activity history", kind: "action",
+                              table: "", col: "", val: "" }
+            view.sideInfo = backend.processHistory(String(pid))
+            return
+        }
         var e = view.expandedCats.slice()
         var i = e.indexOf(cat)
         if (i >= 0) e.splice(i, 1); else e.push(cat)
@@ -670,6 +680,28 @@ Item {
                             cacheBuffer: Kirigami.Units.gridUnit * 40
                             QQC2.ScrollBar.vertical: QQC2.ScrollBar { id: procScroll }
 
+                            // SCROLL THE LIST, NOT THE PAGE. The table sits inside
+                            // the page ScrollView, so the wheel used to scroll the
+                            // whole page and the 400-row table could not be paged
+                            // through while hovered. This handler scrolls the list
+                            // and hands the wheel to the page ONLY at the top/bottom
+                            // edge, so the page still scrolls past the table.
+                            WheelHandler {
+                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                onWheel: function (ev) {
+                                    var d = ev.pixelDelta.y !== 0 ? ev.pixelDelta.y
+                                                                  : ev.angleDelta.y
+                                    var maxY = Math.max(0, procList.contentHeight - procList.height)
+                                    var ny = Math.max(0, Math.min(maxY, procList.contentY - d))
+                                    if (ny !== procList.contentY) {
+                                        procList.contentY = ny
+                                        ev.accepted = true
+                                    } else {
+                                        ev.accepted = false   // edge -> let the page scroll
+                                    }
+                                }
+                            }
+
                             delegate: QQC2.ItemDelegate {
                                 id: procRow
                                 required property var modelData
@@ -800,6 +832,18 @@ Item {
                             clip: true
                             model: view.listShown
                             QQC2.ScrollBar.vertical: QQC2.ScrollBar {}
+                            WheelHandler {
+                                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                                onWheel: function (ev) {
+                                    var d = ev.pixelDelta.y !== 0 ? ev.pixelDelta.y
+                                                                  : ev.angleDelta.y
+                                    var maxY = Math.max(0, entList.contentHeight - entList.height)
+                                    var ny = Math.max(0, Math.min(maxY, entList.contentY - d))
+                                    if (ny !== entList.contentY) {
+                                        entList.contentY = ny; ev.accepted = true
+                                    } else { ev.accepted = false }
+                                }
+                            }
                             delegate: QQC2.ItemDelegate {
                                 required property var modelData
                                 width: entList.width

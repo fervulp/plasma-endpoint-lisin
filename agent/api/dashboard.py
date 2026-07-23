@@ -66,6 +66,16 @@ class DashboardApi:
         except Exception as e:
             return {"error": str(e)}
 
+    @Slot(str, result="QVariant")
+    def processHistory(self, pid):
+        """The process activity as a TIMELINE (sidebar sections grouped by day) -
+        what the Activity-history block in the graph shows when clicked."""
+        from agent.analysis import dashboard
+        try:
+            return dashboard.history_sections(self.pipe.events(), pid)
+        except Exception as e:
+            return {"sections": [], "error": str(e)}
+
     # -------- Process context: aggregating processes into entities --------
     @Slot(result="QVariant")
     def processEntities(self):
