@@ -43,7 +43,7 @@ class EventsApi:
     # there is no process, by user, which is marked as such).
     @Slot(result="QVariant")
     def eventChains(self):
-        from agent import chains
+        from agent.analysis import chains
         try:
             return chains.build(self.pipe.events(), statedb=self.db)
         except Exception as e:
@@ -51,7 +51,7 @@ class EventsApi:
 
     @Slot(str, result="QVariant")
     def chainDetail(self, cid):
-        from agent import chains
+        from agent.analysis import chains
         try:
             return chains.detail(self.pipe.events(), str(cid), statedb=self.db)
         except Exception as e:
@@ -129,7 +129,7 @@ class EventsApi:
 
     def _safe_order(self, order):
         """Parsing ORDER BY: only known fields and ASC/DESC."""
-        from agent import taxonomy as tx
+        from agent.core import taxonomy as tx
         names = set(tx.names(tx.load())) | {"_id"}
         out = []
         for part in str(order or "").split(","):
@@ -149,7 +149,7 @@ class EventsApi:
             self._sql_hist_add(s)
 
     def _sql_hist_add(self, sql: str):
-        from agent import config
+        from agent.core import config
         hist = config.get("events_sql_history", []) or []
         hist = [h for h in hist if h != sql]
         hist.insert(0, sql)
@@ -157,7 +157,7 @@ class EventsApi:
 
     @Slot(int, result="QVariant")
     def eventSqlHistory(self, limit):
-        from agent import config
+        from agent.core import config
         hist = config.get("events_sql_history", []) or []
         return hist[:max(1, int(limit or 10))]
 
@@ -166,7 +166,7 @@ class EventsApi:
         """Similar queries from the WHOLE history (not only from the top 10): type
         something close to a query from 200 steps back and it will be suggested."""
         import difflib
-        from agent import config
+        from agent.core import config
         t = (text or "").strip().lower()
         hist = config.get("events_sql_history", []) or []
         if not t:
@@ -192,7 +192,7 @@ class EventsApi:
         `value` is a readable join of the values and `parts` are the values
         themselves per field (the filter condition is built from them).
         """
-        from agent import taxonomy as tx
+        from agent.core import taxonomy as tx
         names = set(tx.names(tx.load()))
         fields = [f.strip() for f in str(field or "").split(",") if f.strip()]
         fields = [f for f in fields if f in names]
@@ -226,7 +226,7 @@ class EventsApi:
         that is faster and the selection limit is shown honestly (the `truncated`
         field).
         """
-        from agent import taxonomy as tx
+        from agent.core import taxonomy as tx
         names = tx.names(tx.load())
         where = _rql_cidr(where or "")
         sql = "SELECT * FROM events"
@@ -272,7 +272,7 @@ class EventsApi:
     @Slot(result="QVariant")
     def eventFields(self):
     # the taxonomy by groups - for the event details panel
-        from agent import taxonomy as tx
+        from agent.core import taxonomy as tx
         try:
             return tx.groups(tx.load())
         except Exception:

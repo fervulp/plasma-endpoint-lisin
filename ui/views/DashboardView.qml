@@ -2,7 +2,10 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import "Fmt.js" as Fmt
+import "../components/Fmt.js" as Fmt
+import "../components"
+import "../pages"
+import "."
 
 // The "State" dashboard: in one window what is otherwise scattered across the
 // tables - the process launch graph (as in a SIEM/EDR), consumption,

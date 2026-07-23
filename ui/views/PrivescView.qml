@@ -2,7 +2,10 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import "Fmt.js" as Fmt
+import "../components/Fmt.js" as Fmt
+import "../components"
+import "../pages"
+import "."
 
 // Privilege escalation: both the EVENTS (who did what through sudo, failed
 // logins) and the STANDING VECTORS (capabilities, NOPASSWD, SUID, polkit).

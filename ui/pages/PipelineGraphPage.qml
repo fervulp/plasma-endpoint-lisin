@@ -2,6 +2,9 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import "../components"
+import "../views"
+import "."
 
 // The full-screen pipeline graph editor: a space with zoom (Ctrl+wheel),
 // panning, live edges while dragging and a preview panel for the expertise

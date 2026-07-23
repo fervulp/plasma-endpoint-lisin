@@ -24,7 +24,7 @@ The format of the tests in the rule's YAML:
           contains: {kind: rpm}        # such a row is among the results
           row0: {name: bash}           # checking a specific row by index
 """
-from . import pipeline as P
+from .core import pipeline as P
 
 
 def _rule(pipe, ref: str) -> dict:

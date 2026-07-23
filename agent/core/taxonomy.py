@@ -10,8 +10,7 @@ from pathlib import Path
 
 import yaml
 
-TAXONOMY_FILE = (Path(__file__).resolve().parent.parent
-                 / "expertise" / "taxonomy" / "events.yaml")
+from ..paths import TAXONOMY_FILE
 
 # taxonomy type -> SQLite column type
 SQL_TYPE = {"text": "TEXT", "int": "INTEGER", "float": "REAL", "json": "TEXT"}

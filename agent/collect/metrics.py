@@ -5,6 +5,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from ..paths import ROOT as _ROOT
+
 
 class Sampler:
     """CPU/RAM sampler: a sliding 30 minute window sampled every 10 seconds."""
@@ -77,7 +79,7 @@ def system_metrics(series: list) -> dict:
         "series": list(series),
         "load": load,
         "disk": {
-            "app_mb": _du_mb(Path(__file__).resolve().parent.parent),
+            "app_mb": _du_mb(_ROOT),
             "db_mb": round(db.stat().st_size / 1e6) if db.exists() else 0,
         },
     }

@@ -13,7 +13,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from . import state as coll
+from ..collect import state as coll
 
 DB_PATH = Path.home() / ".local/share/lisin/state.db"
 

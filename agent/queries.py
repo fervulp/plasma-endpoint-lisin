@@ -11,7 +11,7 @@ from pathlib import Path
 
 import yaml
 
-EXPERTISE = Path(__file__).resolve().parent.parent / "expertise"
+from .paths import EXPERTISE
 ROOT = EXPERTISE / "queries"
 
 

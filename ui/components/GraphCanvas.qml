@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "Fmt.js" as Fmt
+import "."
 
 // THE GRAPH CANVAS - a reusable investigation component.
 //

@@ -3,6 +3,9 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import "../components"
+import "../views"
+import "."
 
 // Expertise: directories (including custom ones) -> the table of objects
 // (ID, title, type, version) -> a click on a row = the YAML code.

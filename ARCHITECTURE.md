@@ -63,35 +63,68 @@ input. Importing someone else's expertise means running their code.
 
 ---
 
-## 3. Modules in `agent/` — who is responsible for what
+## 3. Layout of the sources
 
-| File | Lines | Responsible for | Key functions |
+```
+lisin_app.py            the entry point: the scheduler, error collection, main()
+agent/
+  paths.py              where things live on disk - computed in ONE place
+  core/                 the engine: pipeline, statedb, eventsdb, taxonomy, config
+  analysis/             reading what was collected: links, entities, dashboard,
+                        findings, correlate, chains, panels
+  collect/              the few places that touch the live system directly:
+                        procinfo, metrics, state, ipintel
+  api/                  the slots QML calls, one module per section
+  queries.py            saved queries as expertise objects
+  ruletest.py           running and testing a rule from the UI
+ui/
+  Main.qml              the window and the navigation
+  components/           reusable bricks: QueryBar, DataTable, FieldPicker,
+                        SidePanel, GraphCanvas, Fmt.js
+  pages/                the sections: State, Events, SQL, Pipelines, Expertise,
+                        Dashboards, Settings, Process
+  views/                what lives inside a section: DashboardView, VulnView,
+                        NetFlowView, FileActivityView, PrivescView, FindingsView,
+                        ErrorsView, GeneralSettings
+expertise/              all the domain logic (see section 6)
+packaging/              spec, launcher, RPM build, the access-extension script
+```
+
+The split of `agent/` follows what a module is allowed to do:
+
+* **core** knows nothing about specific packages, ports or paths - it executes
+  rules and stores rows;
+* **analysis** is read-only with respect to the stores: it never collects
+  anything, it only reads state.db and events.db;
+* **collect** is the only place that touches the live system outside the
+  pipeline, and it is deliberately small: an interactive WHOIS, the EDR
+  breakdown of one process, the resource metrics of the application itself.
+
+| Module | Lines | Responsible for | Key functions |
 |---|---:|---|---|
-| `pipeline.py` | 895 | **Pipeline engine**: loading expertise, scheduling inputs, walking the graph, running plugins, emitting events about state changes | `run_python`, `run_enrich`, `StatePipeline` |
-| `links.py` | 973 | **Links and the investigation graph**: discovering links between tables, pivot graph around any entity | `model`, `anchor_graph`, `around`, `node_detail` |
-| `entities.py` | 809 | Collapsing raw processes into **entities**; classifying the inventory into programs and dependencies | `build`, `programs`, `files_for` |
-| `dashboard.py` | 563 | Data for the "State" dashboard: process tree with risk, EDR breakdown of one PID | `build`, `process_detail` |
-| `chains.py` | 325 | **Event chains** (cascade of linking: ancestry → socket → object → time). Hidden from the UI, the mechanism works | `build`, `detail` |
-| `panels.py` | 310 | Investigation panels: file activity, privileges, network flows | `file_activity`, `privesc_activity`, `network_flows`, `flow_detail` |
-| `statedb.py` | 279 | **State database** (SQLite WAL). Upsert by key, staleness, user columns | `ensure_table`, `upsert`, `snapshot`, `query` |
-| `ipintel.py` | 214 | Who is behind an IP: ASN over DNS (Team Cymru), WHOIS, reverse DNS. **Private addresses never leave the machine** | `lookup`, `whois_details` |
-| `eventsdb.py` | 186 | **Event database** (append-only, WAL). The schema is built from the taxonomy, dedup by `event_id`, retention | `append`, `recent`, `stats`, `query` |
+| `core/pipeline.py` | 900 | **Pipeline engine**: loading expertise, scheduling inputs, walking the graph, running plugins, emitting events about state changes | `run_python`, `run_enrich`, `StatePipeline` |
+| `analysis/links.py` | 980 | **Links and the investigation graph**: discovering links between tables, pivot graph around any entity | `model`, `anchor_graph`, `around`, `node_detail` |
+| `analysis/entities.py` | 809 | Collapsing raw processes into **entities**; classifying the inventory into programs and dependencies | `build`, `programs`, `files_for` |
+| `analysis/dashboard.py` | 565 | Data for the "State" dashboard: process tree with risk, EDR breakdown of one PID | `build`, `process_detail` |
+| `analysis/chains.py` | 325 | **Event chains** (ancestry → socket → object → time). Hidden from the UI, the mechanism works | `build`, `detail` |
+| `analysis/panels.py` | 312 | Investigation panels: file activity, privileges, network flows | `file_activity`, `privesc_activity`, `network_flows`, `flow_detail` |
+| `core/statedb.py` | 283 | **State database** (SQLite WAL). Upsert by key, staleness, user columns | `ensure_table`, `upsert`, `snapshot`, `query` |
+| `collect/ipintel.py` | 214 | Interactive WHOIS for one address from the interface. The bulk ASN lookup is a pipeline flow now | `whois_details` |
+| `core/eventsdb.py` | 188 | **Event database** (append-only, WAL). The schema is built from the taxonomy, dedup by `event_id`, retention | `append`, `recent`, `stats`, `query` |
 | `ruletest.py` | 158 | Running and testing a rule from the UI (the `tests:` section inside the rule) | `run_now`, `run_tests`, `input_for` |
-| `procinfo.py` | 127 | Details of a live process from `/proc` | `details` |
-| `correlate.py` | 117 | **Detection engine**: where → group_by → threshold → window; a hit produces an `event_kind=alert` event | `run` |
-| `findings.py` | 115 | **Findings engine**: executes the SQL of the rules in `expertise/findings/` | `build` |
-| `metrics.py` | 83 | CPU/RAM sampler, disk usage | `system_metrics`, `resource_usage` |
+| `collect/procinfo.py` | 127 | Details of a live process from `/proc` | `details` |
+| `analysis/correlate.py` | 117 | **Correlation engine**: where → group_by → threshold → window; a hit produces an `event_kind=alert` event | `run` |
+| `analysis/findings.py` | 115 | **Findings engine**: executes the SQL of the rules in `expertise/findings/` | `build` |
+| `collect/metrics.py` | 85 | CPU/RAM sampler, disk usage | `system_metrics`, `resource_usage` |
 | `queries.py` | 76 | Saved SQL queries as expertise objects | `save`, `listing`, `delete` |
-| `taxonomy.py` | 58 | Loading the event taxonomy; **the schema of `events.db` is built from it** | `load`, `names`, `groups` |
-| `state.py` | 56 | `os_info()` for the system card | `os_info` |
-| `config.py` | 27 | Settings in `~/.config/lisin/settings.json` | `get`, `set_` |
+| `core/taxonomy.py` | 58 | Loading the event taxonomy; **the schema of `events.db` is built from it** | `load`, `names`, `groups` |
+| `collect/state.py` | 56 | `os_info()` for the system card | `os_info` |
+| `core/config.py` | 27 | Settings in `~/.config/lisin/settings.json` | `get`, `set_` |
 
 ### Separating the engine from the data
 `findings.py`, `correlate.py` and `pipeline.py` are **engines**: they know
 nothing about specific packages, ports or paths. Every specific fact lives in
 `expertise/`. Breaking this is the main defect to look for during a review.
-
----
 
 ## 4. The API for QML — `agent/api/`
 
@@ -179,16 +212,16 @@ Settings**. Navigation goes only through `root.open(name)`.
 
 | File | Lines | Role |
 |---|---:|---|
-| `EventsPage.qml` | 1330 | the event feed, filters expressed as SQL, grouping, saved queries |
-| `DashboardView.qml` | 1285 | **the dashboard**: a switchable list (processes/applications/ports/users/configs/files), the graph, the process panel |
-| `PipelineGraphPage.qml` | 877 | the pipeline graph editor |
-| `StatePage.qml` | 750 | state tables, columns, filters |
-| `ExpertisePage.qml` | 644 | object catalogue, YAML editor, Run/Tests |
-| `GraphCanvas.qml` | 412 | **the reusable graph canvas** |
-| `NetFlowView.qml` | 430 | network flows, WHOIS |
-| `SqlPage.qml` | 372 | read-only SQL |
-| `VulnView.qml` | 314 | vulnerabilities |
-| others | — | `ProcessPage`, `FindingsView`, `PrivescView`, `FileActivityView`, `SidePanel`, `Settings*` |
+| `pages/EventsPage.qml` | 1330 | the event feed, filters expressed as SQL, grouping, saved queries |
+| `views/DashboardView.qml` | 1285 | **the dashboard**: a switchable list (processes/applications/ports/users/configs/files), the graph, the process panel |
+| `pages/PipelineGraphPage.qml` | 877 | the pipeline graph editor |
+| `pages/StatePage.qml` | 750 | state tables, columns, filters |
+| `pages/ExpertisePage.qml` | 644 | object catalogue, YAML editor, Run/Tests |
+| `components/GraphCanvas.qml` | 412 | **the reusable graph canvas** |
+| `views/NetFlowView.qml` | 430 | network flows, WHOIS |
+| `pages/SqlPage.qml` | 372 | read-only SQL |
+| `views/VulnView.qml` | 314 | vulnerabilities |
+| others | — | `pages/ProcessPage`, `views/FindingsView`, `views/PrivescView`, `views/FileActivityView`, `components/SidePanel`, `components/QueryBar`, `components/DataTable`, `components/FieldPicker` |
 
 ### How the investigation graph works (the core of the UX)
 - **The anchor** is an entity of any type: a process, an application, a port,

@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import "."
 
 // Unified right sidebar: View-tinted background, icon header, collapse
 // button and slide animation. Usage:

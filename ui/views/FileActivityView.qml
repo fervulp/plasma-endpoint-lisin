@@ -2,7 +2,10 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import "Fmt.js" as Fmt
+import "../components/Fmt.js" as Fmt
+import "../components"
+import "../pages"
+import "."
 
 // File activity: what was created, changed, deleted. On the left the facets
 // (action, directory, package), on the right the events themselves. Clicking a

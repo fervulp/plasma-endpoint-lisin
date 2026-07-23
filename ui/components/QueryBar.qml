@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC2
 // the month grid: the org.kde.desktop style has none, we take it from the basic set
 import QtQuick.Controls.Basic as CB
 import org.kde.kirigami as Kirigami
+import "."
 
 // THE SINGLE QUERY BAR for every table of the application.
 //

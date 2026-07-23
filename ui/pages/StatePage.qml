@@ -2,7 +2,10 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import "Fmt.js" as Fmt
+import "../components/Fmt.js" as Fmt
+import "../components"
+import "../views"
+import "."
 
 // System state: read-only tables view. Table/field/record management
 // lives in the SQL tab. Right sidebars (details, columns) are full height.

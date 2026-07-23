@@ -153,7 +153,7 @@ class StateApi:
     # -------- pipelines --------
     @Slot(str, result="QVariant")
     def processDetails(self, pid):
-        from agent import procinfo
+        from agent.collect import procinfo
         rows = next((t["rows"] for t in self.db.snapshot()["tabs"]
                      if t["name"] == "processes"), [])
         return procinfo.details(pid, rows)

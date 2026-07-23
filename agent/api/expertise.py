@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 from PySide6.QtCore import Slot
 
-from agent.pipeline import EXPERTISE
+from agent.core.pipeline import EXPERTISE
 
 
 class ExpertiseApi:
@@ -150,7 +150,7 @@ class ExpertiseApi:
 
     @Slot(str, str, str, result=str)
     def createExpertise(self, dirpath, category, name):
-        from agent.pipeline import TEMPLATES
+        from agent.core.pipeline import TEMPLATES
         if category not in TEMPLATES:
             return "unknown category"
         name = name.strip().replace(" ", "_")

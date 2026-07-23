@@ -20,8 +20,8 @@ from PySide6.QtQml import QQmlApplicationEngine
 
 from agent.api import (DashboardApi, EventsApi, ExpertiseApi, StateApi,
                        SystemApi)
-from agent.pipeline import StatePipeline
-from agent.statedb import StateDB
+from agent.core.pipeline import StatePipeline
+from agent.core.statedb import StateDB
 
 
 class Backend(QObject, StateApi, EventsApi, DashboardApi, ExpertiseApi,
@@ -39,7 +39,7 @@ class Backend(QObject, StateApi, EventsApi, DashboardApi, ExpertiseApi,
         self.db = StateDB()
         self.pipe = StatePipeline(self.db)
         import collections
-        from agent.metrics import Sampler
+        from agent.collect.metrics import Sampler
         self.sampler = Sampler()
         self.errors_log = collections.deque(maxlen=200)
         self._err_seen = set()

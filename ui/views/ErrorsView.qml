@@ -2,6 +2,9 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import "../components"
+import "../pages"
+import "."
 
 // EDR module error stream — surfaces failing inputs / normalization /
 // expertise YAML so modules can be tracked and fixed.

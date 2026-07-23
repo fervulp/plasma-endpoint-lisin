@@ -2,6 +2,9 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import "../components"
+import "../views"
+import "."
 
 // EDR-style process drill-down: everything related to one PID —
 // lineage, sockets, owning package + deps, open files.

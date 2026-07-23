@@ -3,6 +3,9 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.formcard as FormCard
+import "../components"
+import "../pages"
+import "."
 
 // Settings in the modern KDE FormCard style (Kirigami Addons).
 FormCard.FormCardPage {

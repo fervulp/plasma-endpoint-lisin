@@ -56,7 +56,7 @@ def _run(rule: dict, con) -> list:
 def build(db, eventsdb=None, rules: dict | None = None) -> dict:
     """rules - expertise objects of the findings category (ref -> yaml)."""
     if rules is None:                       # standalone call (tests, CLI)
-        from .pipeline import StatePipeline
+        from ..core.pipeline import StatePipeline
         rules = StatePipeline(db).objects.get("findings", {})
 
     out, errors = [], []

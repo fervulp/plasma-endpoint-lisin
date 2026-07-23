@@ -8,7 +8,7 @@ class DashboardApi:
 
     @Slot(result="QVariant")
     def dashboardState(self):
-        from agent import dashboard
+        from agent.analysis import dashboard
         try:
             return dashboard.build(self.db, self.pipe.events())
         except Exception as e:
@@ -20,7 +20,7 @@ class DashboardApi:
     def processDeep(self, pid):
         """The EDR breakdown of a process for the dashboard: consumption, how it
         started, what it did, the package and its dependencies, the systemd unit."""
-        from agent import dashboard
+        from agent.analysis import dashboard
         try:
             return dashboard.process_detail(self.db, self.pipe.events(), pid)
         except Exception as e:
@@ -32,7 +32,7 @@ class DashboardApi:
         # collapses raw processes into ENTITIES (a vendor set of 6 processes ->
         # one row) with aggregated context from ports/unix_sockets/persistence/
         # config/applications. Open files are loaded lazily.
-        from agent import entities
+        from agent.analysis import entities
         try:
             return entities.build(self.db)
         except Exception as e:
@@ -41,7 +41,7 @@ class DashboardApi:
     @Slot("QVariant", result="QVariant")
     def entityFiles(self, pids):
         # lazy loading of the open files of an entity when it is expanded
-        from agent import entities
+        from agent.analysis import entities
         try:
             return entities.files_for([str(p) for p in pids])
         except Exception:
@@ -52,7 +52,7 @@ class DashboardApi:
     def programsInventory(self):
         # classifying applications into PROGRAMS vs dependencies
         # (3000 packages -> ~200 programs, the rest are dependencies under them)
-        from agent import entities
+        from agent.analysis import entities
         try:
             return entities.programs(self.db)
         except Exception as e:
@@ -61,7 +61,7 @@ class DashboardApi:
     @Slot(result="QVariant")
     def systemFindings(self):
         """Findings: what looks wrong in the system and what to do about it."""
-        from agent import findings
+        from agent.analysis import findings
         try:
             # the rules come from the EXPERTISE, not from the code: they are visible
             # in the "Expertise" section (the "Findings" category) and editable in YAML
@@ -165,7 +165,7 @@ class DashboardApi:
     @Slot(str, "QVariant", result="QVariant")
     def processLinks(self, pid, expanded=None):
         """The graph around a process; expanded is which categories are open."""
-        from agent import links
+        from agent.analysis import links
         try:
             return links.around(self.db, self.pipe.events(), str(pid),
                                 expanded=self._str_list(expanded))
@@ -179,7 +179,7 @@ class DashboardApi:
         """THE PIVOT: a graph around an entity of any type (process|application|port|
         user|config|open_file). The layout is computed in Python, expanded holds the
         open categories. The return contract is the same for every anchor."""
-        from agent import links
+        from agent.analysis import links
         try:
             return links.anchor_graph(self.db, self.pipe.events(),
                                       str(kind), str(val),
@@ -203,7 +203,7 @@ class DashboardApi:
             return self._event_node_info(n)
         if not table:
             return {"sections": [], "error": "this node has no data source"}
-        from agent import links
+        from agent.analysis import links
         return links.node_detail(self.db, self.pipe.events(), table,
                                  str(n.get("col") or ""), str(n.get("val") or ""))
 
@@ -224,7 +224,7 @@ class DashboardApi:
             return {"sections": [], "error": "event not found"}
         row = rows[0]
         try:
-            from agent import taxonomy
+            from agent.core import taxonomy
             spec = taxonomy.load()
             grouped = taxonomy.groups(spec)
         except Exception:
@@ -253,7 +253,7 @@ class DashboardApi:
     def anchorList(self, kind):
         """The list of entities of the chosen type for "view by" - to pick what to
         build the graph from. Read only, the values are escaped."""
-        from agent import links
+        from agent.analysis import links
         SRC = {"process": ("processes", "pid", "command"),
                "application": ("applications", "name", "description"),
                "port": ("ports", "port", "process"),
@@ -305,7 +305,7 @@ class DashboardApi:
     def nodeDetail(self, table, col, val):
         """Everything known about the object of a graph node: its own row + the
         related tables (by the discovered link map) + its latest events."""
-        from agent import links
+        from agent.analysis import links
         try:
             return links.node_detail(self.db, self.pipe.events(),
                                      str(table), str(col), str(val))
@@ -316,7 +316,7 @@ class DashboardApi:
     def linkModel(self):
         """The map of links between tables - discovered by measuring the overlap of
         column values, not hard-coded."""
-        from agent import links
+        from agent.analysis import links
         try:
             return links.model(self.db)
         except Exception as e:
@@ -324,7 +324,7 @@ class DashboardApi:
     # -------- thematic investigation panels --------
     @Slot(result="QVariant")
     def fileActivity(self):
-        from agent import panels
+        from agent.analysis import panels
         try:
             return panels.file_activity(self.db, self.pipe.events())
         except Exception as e:
@@ -332,7 +332,7 @@ class DashboardApi:
 
     @Slot(result="QVariant")
     def privescActivity(self):
-        from agent import panels
+        from agent.analysis import panels
         try:
             return panels.privesc_activity(self.db, self.pipe.events())
         except Exception as e:
@@ -340,7 +340,7 @@ class DashboardApi:
 
     @Slot(result="QVariant")
     def networkFlows(self):
-        from agent import panels
+        from agent.analysis import panels
         try:
             return panels.network_flows(self.db, self.pipe.events())
         except Exception as e:
@@ -349,7 +349,7 @@ class DashboardApi:
     @Slot(str, result="QVariant")
     def flowDetail(self, ip):
         """A click on a session: who talked, when, with what and where to look next."""
-        from agent import panels
+        from agent.analysis import panels
         try:
             return panels.flow_detail(self.db, self.pipe.events(), str(ip))
         except Exception as e:
@@ -358,7 +358,7 @@ class DashboardApi:
     @Slot(str, result="QVariant")
     def whoisLookup(self, ip):
         """Interactive WHOIS on a click on an address."""
-        from agent import ipintel
+        from agent.collect import ipintel
         try:
             return ipintel.whois_details(str(ip))
         except Exception as e:
@@ -367,7 +367,7 @@ class DashboardApi:
     @Slot(str, result="QVariant")
     def whoisLookup(self, ip):
         """Interactive WHOIS on a click on an address."""
-        from agent import ipintel
+        from agent.collect import ipintel
         try:
             return ipintel.whois_details(str(ip))
         except Exception as e:

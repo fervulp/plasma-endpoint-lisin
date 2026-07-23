@@ -23,7 +23,7 @@ import yaml
 
 
 
-EXPERTISE = Path(__file__).resolve().parent.parent / "expertise"
+from ..paths import EXPERTISE
 
 
 _PY_CACHE = {}   # sha1(code) -> the compiled normalize(text)
@@ -520,7 +520,7 @@ class StatePipeline:
                     # whatever the node pointed at, so four rules out of five hung
                     # in the catalogue as orphans while silently being executed -
                     # the graph did not show what was really running.
-                    from . import correlate
+                    from ..analysis import correlate
                     all_rules = self.objects["correlation"]
                     rules = ({n["ref"]: all_rules[n["ref"]]}
                              if n.get("ref") in all_rules else all_rules)

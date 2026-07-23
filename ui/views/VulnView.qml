@@ -2,6 +2,9 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import "../components"
+import "../pages"
+import "."
 
 // Vulnerabilities are not an inventory of "what exists" but a list of tasks,
 // "what to patch". So a row shows at once: the status (open/closed), the CVSS

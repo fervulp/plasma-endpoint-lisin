@@ -2,6 +2,9 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import "../components"
+import "../views"
+import "."
 
 // SQL workbench: read-only queries over the state DB + table management
 // (create tables/fields/records, delete). Bottom toolbar holds the

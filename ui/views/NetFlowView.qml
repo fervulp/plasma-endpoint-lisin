@@ -2,7 +2,10 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
-import "Fmt.js" as Fmt
+import "../components/Fmt.js" as Fmt
+import "../components"
+import "../pages"
+import "."
 
 // Who the machine talks to: directions by the number of SESSIONS (the volume in
 // bytes is unavailable without root - we say so honestly in the caption), the

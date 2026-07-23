@@ -2,6 +2,9 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import "../components"
+import "../pages"
+import "."
 
 // The "What is wrong" dashboard: not "how many of each" but concrete problems -
 // why they matter and what to do about them. Clicking a finding leads into

@@ -2,6 +2,9 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
+import "../components"
+import "../views"
+import "."
 
 // The "Dashboards" section - a separate top-level tab (not inside State).
 // There may be several dashboards; the default one is "State".
