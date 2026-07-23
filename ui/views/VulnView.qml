@@ -363,93 +363,30 @@ Item {
         }
 
         // ---- ADVISORY TABLE ----
-        // Many rows of the same shape are a table, like State and Events.
-        // Header and rows read one column list, so widths cannot drift apart.
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.largeSpacing
-            Layout.rightMargin: Kirigami.Units.largeSpacing
-            Layout.topMargin: Kirigami.Units.smallSpacing
-            spacing: Kirigami.Units.smallSpacing
-            Repeater {
-                model: view.shownCols
-                delegate: QQC2.Label {
-                    required property var modelData
-                    Layout.preferredWidth: modelData.fill === true
-                        ? -1 : Kirigami.Units.gridUnit * modelData.w
-                    Layout.fillWidth: modelData.fill === true
-                    text: modelData.t
-                    opacity: 0.6
-                    font.bold: true
-                    elide: Text.ElideRight
-                    horizontalAlignment: modelData.right === true
-                        ? Text.AlignRight : Text.AlignLeft
-                    font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
-                }
-            }
-        }
-        Kirigami.Separator { Layout.fillWidth: true }
-
-        QQC2.ScrollView {
-            id: scroller
+        // The shared table (principle 15): one column description read by the
+        // header and by the rows, a pinned header, zebra, recycling, "+"/"-" on
+        // a cell writing into the same query bar. This section used to carry its
+        // own copy of all that.
+        DataTable {
+            id: table
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.leftMargin: Kirigami.Units.largeSpacing
             Layout.rightMargin: Kirigami.Units.largeSpacing
-            clip: true
-
-            ListView {
-                id: vulnList
-                model: view.shown
-                reuseItems: true
-                cacheBuffer: Kirigami.Units.gridUnit * 40
-
-                delegate: QQC2.ItemDelegate {
-                    id: row
-                    required property var modelData
-                    required property int index
-                    width: ListView.view.width
-                    height: Kirigami.Units.gridUnit * 2
-                    onClicked: view.openKey =
-                        (view.openKey === modelData.advisory) ? "" : modelData.advisory
-                    background: Rectangle {
-                        color: row.hovered
-                               ? Qt.alpha(Kirigami.Theme.textColor, 0.06)
-                               : (row.index % 2 ? Qt.alpha(Kirigami.Theme.textColor, 0.03)
-                                                : "transparent")
-                        // severity reads as a left accent, so type and
-                        // urgency stay visually separate
-                        Rectangle {
-                            anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
-                            width: 3
-                            color: view.sevColor(row.modelData)
-                            visible: row.modelData.status === "open"
-                        }
-                    }
-                    contentItem: RowLayout {
-                        spacing: Kirigami.Units.smallSpacing
-                        Repeater {
-                            model: view.shownCols
-                            delegate: QQC2.Label {
-                                required property var modelData
-                                Layout.preferredWidth: modelData.fill === true
-                                    ? -1 : Kirigami.Units.gridUnit * modelData.w
-                                Layout.fillWidth: modelData.fill === true
-                                text: view.cell(row.modelData, modelData.k)
-                                elide: Text.ElideRight
-                                opacity: text === "" ? 0 : 0.9
-                                horizontalAlignment: modelData.right === true
-                                    ? Text.AlignRight : Text.AlignLeft
-                                font.family: modelData.mono === true
-                                    ? "monospace" : Kirigami.Theme.defaultFont.family
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                color: modelData.k === "status" && row.modelData.status === "open"
-                                       ? view.sevColor(row.modelData)
-                                       : Kirigami.Theme.textColor
-                            }
-                        }
-                    }
-                }
+            columns: view.cols
+            rows: view.shown
+            hidden: view.hiddenCols
+            // the severity is an accent on the row, not an extra line of text
+            accent: function (r) { return r ? view.sevColor(r) : "" }
+            onRowActivated: function (row) {
+                view.openKey = (row && row.advisory === view.openKey) ? "" : (row ? row.advisory : "")
+            }
+            onSortRequested: function (field, desc) {
+                qbar.addSort(field, desc)
+                qbar.apply()
+            }
+            onConditionRequested: function (field, op, value) {
+                qbar.addCondition(field, op, value)
             }
         }
 
