@@ -192,6 +192,12 @@ fields:
   type: text
   group: user
   desc: The target user (su/sudo -u)
+- name: user_logon_type
+  ecs: user.logon_type
+  type: text
+  group: user
+  index: true
+  desc: How the user authenticated (ssh-key, ssh-password, sudo, su, interactive, systemd)
 - name: user_audit_id
   ecs: user.audit.id
   type: text

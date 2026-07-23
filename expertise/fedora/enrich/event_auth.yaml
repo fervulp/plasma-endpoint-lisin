@@ -1,0 +1,96 @@
+name: event_auth
+id: LS-E-33
+type: enrichment
+version: 1.0.0
+title: Authentication events - the logon TYPE and the target user
+# The authentication events are already there (from the journal), but they are
+# flat: user_logon_type, user_target_name, process_tty and the outcome are empty.
+# This reads the MESSAGE that is already on the event (no command, principle 1)
+# and fills them, the way a SIEM shows "who authenticated, HOW, as whom, from
+# where, success or failure". The logon type is derived STRUCTURALLY from the
+# PAM service and the phrasing - not from a list of hosts or users:
+#   pam_unix(<service>:session): session opened for user <target> by <src>
+#   sudo:  <user> : TTY=<tty> ; PWD=<..> ; USER=<target> ; COMMAND=<..>
+#   sshd:  Accepted publickey|password for <user> from <ip>
+#   *:     "authentication failure" / "a password is required" -> failure
+code: |
+  import re
+
+  # PAM service -> how the user got in. A fact of the mechanism, not a guess.
+  SERVICE_TYPE = {"sshd": "ssh", "sudo": "sudo", "su": "su", "su-l": "su",
+                  "login": "interactive", "systemd-user": "systemd",
+                  "gdm-password": "interactive", "kde": "interactive",
+                  "polkit-1": "polkit", "sddm": "interactive", "runuser": "runuser"}
+
+  _pam = re.compile(r"pam_\w+\((?P<svc>[\w.-]+):session\):\s*session opened "
+                    r"for user\s+(?P<target>[\w.-]+)(?:\(uid=\d+\))?"
+                    r"(?:\s+by\s+(?P<by>[\w.-]+))?", re.I)
+  _sudo = re.compile(r"^\s*(?P<user>[\w.-]+)\s*:\s*(?P<rest>.*TTY=|.*USER=|.*a password)", re.I)
+  _tty = re.compile(r"TTY=(?P<tty>\S+)")
+  _user_eq = re.compile(r"USER=(?P<u>[\w.-]+)")
+  _sshd = re.compile(r"Accepted\s+(?P<method>publickey|password|keyboard-interactive)"
+                     r"\s+for\s+(?P<user>[\w.-]+)\s+from\s+(?P<ip>[0-9a-fA-F:.]+)", re.I)
+  _sshfail = re.compile(r"Failed\s+(?P<method>password|publickey)\s+for\s+"
+                        r"(?:invalid user\s+)?(?P<user>[\w.-]+)\s+from\s+(?P<ip>[0-9a-fA-F:.]+)", re.I)
+
+  FAIL = ("authentication failure", "a password is required",
+          "incorrect password", "auth could not identify", "failed password",
+          "permission denied", "conversation failed")
+
+  def enrich(rows):
+      for r in rows:
+          if str(r.get("event_category") or "") != "authentication":
+              continue
+          msg = str(r.get("message") or "")
+          low = msg.lower()
+
+          def setd(field, val):
+              if val and not str(r.get(field) or "").strip():
+                  r[field] = val
+
+          # sshd accepted / failed - carries the method, the user and the source IP
+          m = _sshd.search(msg)
+          if m:
+              setd("user_logon_type", "ssh-key" if m.group("method").lower()
+                   == "publickey" else "ssh-password")
+              setd("user_name", m.group("user"))
+              setd("source_ip", m.group("ip"))
+              setd("event_outcome", "success")
+          m = _sshfail.search(msg)
+          if m:
+              setd("user_logon_type", "ssh-" + m.group("method").lower())
+              setd("user_name", m.group("user"))
+              setd("source_ip", m.group("ip"))
+              setd("event_outcome", "failure")
+
+          # a PAM session line - the service tells the type, "for user X" the target
+          m = _pam.search(msg)
+          if m:
+              setd("user_logon_type", SERVICE_TYPE.get(m.group("svc").lower(),
+                                                        m.group("svc").lower()))
+              setd("user_target_name", m.group("target"))
+              if m.group("by"):
+                  setd("user_name", m.group("by"))
+
+          # a sudo command line: USER= is the target, TTY= the terminal
+          if "sudo" in low or _user_eq.search(msg):
+              mt = _tty.search(msg)
+              if mt:
+                  setd("process_tty", mt.group("tty"))
+              mu = _user_eq.search(msg)
+              if mu:
+                  setd("user_logon_type", "sudo")
+                  setd("user_target_name", mu.group("u"))
+
+          # the outcome, if the phrasing shows a failure
+          if any(f in low for f in FAIL):
+              r["event_outcome"] = "failure"
+          elif not str(r.get("event_outcome") or "").strip():
+              r["event_outcome"] = "success"
+      return rows
+
+tests:
+  - name: no rows in, no rows out
+    input: []
+    expect:
+      rows: 0

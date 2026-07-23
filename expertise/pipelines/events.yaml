@@ -96,6 +96,11 @@ nodes:
   ref: fedora/enrich/event_context
   x: 2120
   y: 520
+- id: en_auth
+  kind: enrich
+  ref: fedora/enrich/event_auth
+  x: 2200
+  y: 520
 - id: en_proc_link
   kind: enrich
   ref: fedora/enrich/event_process_link
@@ -152,6 +157,8 @@ edges:
 - - en_session
   - en_context
 - - en_context
+  - en_auth
+- - en_auth
   - out_events
 - - en_proc_link
   - en_session
