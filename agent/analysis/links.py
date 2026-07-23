@@ -1314,25 +1314,14 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
     # from open_files (the right pid), so the standalone node only added risk of a
     # wrong path.
 
-    # events - what the process did (drill: events by pid)
+    # WHAT THE PROCESS DID - as a chronological ACTIVITY HISTORY, not a heap of
+    # aggregated event nodes. The old "events" block scattered "connection_opened
+    # x40" nodes on the canvas; what an analyst needs is the ORDER: it started,
+    # then it launched X, then it connected to Y, then it wrote Z. So there is ONE
+    # "Activity history" block, and a click opens that timeline in the side panel.
+    # Its count includes events attributed BOTH to this process (process_pid) and
+    # to it as a PARENT (parent_pid) - what it did and what it launched.
     if eventsdb is not None:
-        try:
-            acts = eventsdb.query(
-                "SELECT event_action a, COUNT(*) n, MAX(ts) last FROM events "
-                "WHERE process_pid = ? GROUP BY event_action "
-                "ORDER BY n DESC LIMIT 100", (pid,)).get("rows", [])
-        except Exception:
-            acts = []
-        for e_ in acts:
-            push("events", "act:%s:%s" % (pid, e_["a"]), "action", str(e_["a"]),
-                 "%s times" % e_["n"],
-                 "events", "event_action", str(e_["a"]),
-                 rel="did", drill="events", pid=pid, when=str(e_["last"] or ""))
-
-        # THE ACTIVITY-HISTORY BLOCK. One block whose count is the number of
-        # recorded steps; a click opens the chronological timeline in the side
-        # panel (drill="timeline"), it does NOT expand into nodes on the canvas
-        # (SIDEBAR_CATS). A history is read in order, not scattered around.
         try:
             hn = eventsdb.query(
                 "SELECT COUNT(*) n FROM events WHERE process_pid = ? "
