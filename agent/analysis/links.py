@@ -93,6 +93,11 @@ def _is_counter(values: set) -> bool:
     return span and len(nums) / span > 0.7
 
 
+def _all_numeric(values: set) -> bool:
+    """Every value is an integer - so the column is a number, not a name/path."""
+    return bool(values) and all(v.isdigit() for v in values)
+
+
 def model(db, min_overlap: float = 0.5, min_values: int = 3) -> dict:
     """The map of links: which columns of which tables refer to each other.
 
@@ -121,6 +126,16 @@ def model(db, min_overlap: float = 0.5, min_values: int = 3) -> dict:
             if a[0] == b[0]:
                 continue                    # links inside a table do not count
             va, vb = vals[a], vals[b]
+            # A LINK BETWEEN TWO NUMERIC COLUMNS is only real when the columns
+            # MEAN THE SAME THING - i.e. carry the same name: pid<->pid,
+            # mtu<->mtu, uid<->uid. Two DIFFERENT numeric columns overlap on the
+            # small integers 0,1,2,3,... by coincidence, not by reference: a file
+            # descriptor (open_files.fd) was "linking" to a visit count
+            # (browser_history.visits) and an install counter (pkg_history.altered)
+            # purely because both contain small numbers. Names are compared, the
+            # values are not - a real key link has the same column on both sides.
+            if _all_numeric(va) and _all_numeric(vb) and a[1].lower() != b[1].lower():
+                continue
             inter = va & vb
             if len(inter) < min_values:
                 continue
@@ -1412,12 +1427,16 @@ def node_detail(db, eventsdb, table: str, col: str, val: str) -> dict:
         if table not in tabs:
             return {"sections": [], "error": "no such table"}
         cols = _columns(con, table)
+        # EXACT MATCH ONLY. A substring fallback (LIKE '%val%') used to run when
+        # nothing matched exactly, and it was actively misleading: a working
+        # directory node for /home/local found NO row with dir='/home/local'
+        # (files live in sub-directories), fell back to LIKE '%/home/local%' and
+        # showed the first file it happened to contain - a Telegram log under it.
+        # A node stands for a SPECIFIC value; a different row that merely contains
+        # it as a substring is a different thing.
         if col and col in cols:
             rows = _q(con, 'SELECT * FROM "%s" WHERE "%s"=? LIMIT 5'
                       % (table, col), (val,))
-            if not rows:
-                rows = _q(con, 'SELECT * FROM "%s" WHERE "%s" LIKE ? LIMIT 5'
-                          % (table, col), ("%" + val + "%",))
         else:
             rows = []
 
@@ -1429,7 +1448,13 @@ def node_detail(db, eventsdb, table: str, col: str, val: str) -> dict:
                 "rows": [{"k": k, "v": str(v)} for k, v in main.items()
                          if not k.startswith("_") and str(v).strip()][:24]})
         else:
-            main = {}
+            # no row is exactly this value (e.g. a directory that holds files but
+            # is not itself an open file) - show the value itself honestly instead
+            # of guessing a substring match
+            main = {col: val} if col and val else {}
+            if main:
+                sections.append({"title": "What This Is",
+                                 "rows": [{"k": col, "v": val}]})
 
         # the linked tables - from the discovered map of links
         rel = []
