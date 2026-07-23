@@ -9,6 +9,7 @@ dashboards, expertise, system. Only the core stays here - the pipeline
 scheduler, error collection and starting the window. To add a slot, edit the
 relevant mixin, not this file.
 """
+import os
 import sys
 import ctypes
 import threading
@@ -45,7 +46,11 @@ class Backend(QObject, StateApi, EventsApi, DashboardApi, ExpertiseApi,
         self.errors_log = collections.deque(maxlen=200)
         self._err_seen = set()
         self._last_sample = 0.0
-        threading.Thread(target=self._scheduler, daemon=True).start()
+        # LISIN_NO_COLLECT lets the UI run against a fixed database without the
+        # collectors touching it - used by tests and by the documentation
+        # screenshots, which must show a synthetic dataset, never the real system.
+        if not os.environ.get("LISIN_NO_COLLECT"):
+            threading.Thread(target=self._scheduler, daemon=True).start()
 
     # -------- the input scheduler + the metrics sampler --------
     # RETURN FREED MEMORY TO THE OS. Building row lists every tick leaves the C

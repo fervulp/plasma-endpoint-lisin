@@ -22,6 +22,30 @@ Everything runs as your normal user. No root, no kernel module, no daemon.
 
 ---
 
+## Screenshots
+
+*The data below is synthetic (a fictional user `alice`, RFC 5737 example
+addresses) — generated for the documentation, not a real machine.*
+
+The investigation graph around a process. It reads as a timeline, left to
+right: the computer was **turned on**, then **the user logged in** (the session
+resolved by time — the login whose window contains the process start), then the
+ancestry down to the process, with its working directory and its context
+(application, startup, network, files, user) as collapsible blocks.
+
+![Process graph](docs/screenshots/graph.png)
+
+The same graph inside the State dashboard, next to the process tree:
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+The event feed with a plain SQL query — the query bar takes either a click-built
+filter or SQL typed by hand:
+
+![Events with an SQL query](docs/screenshots/events-sql.png)
+
+---
+
 ## How it works
 
 The whole system is one pipeline, and every piece of it is an object in

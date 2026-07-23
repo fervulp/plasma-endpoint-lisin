@@ -1179,21 +1179,31 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
         except Exception:
             pass
 
-    # THE WORKING DIRECTORY - where the process runs from (live from /proc; only
-    # ours is readable without root). It catches a process running out of /tmp.
-    # Shown as a node attached DIRECTLY to the process (not a collapsed block), so
-    # "where does it run from" is answered at a glance, next to boot and session.
+    # THE WORKING DIRECTORY - where the process runs from. Prefer the pipeline
+    # (open_files carries fd='cwd', collected as a source) over reading /proc
+    # directly, per principle 1; /proc is the fallback for a live process whose
+    # snapshot has not caught up. Shown as a node attached DIRECTLY to the process
+    # (not a collapsed block), next to boot and session, so "where does it run
+    # from" is answered at a glance - it catches a process running out of /tmp.
+    cwd = ""
     try:
-        cwd = os.readlink("/proc/%s/cwd" % pid)
-        if cwd:
-            add("cwd:" + pid, "dir", cwd.rsplit("/", 1)[-1] or "/", cwd,
-                "open_files", "dir", cwd, drill="state",
-                risk=cwd.startswith(("/tmp", "/dev/shm", "/var/tmp")))
-            nodes[-1]["x"] = ax + STEP_X
-            nodes[-1]["y"] = ay + STEP_Y
-            link(root, "cwd:" + pid, "runs in", rel="runs_in")
-    except OSError:
-        pass
+        for r in _q(con, "SELECT path FROM open_files WHERE pid=? AND fd='cwd' "
+                         "LIMIT 1", (pid,)):
+            cwd = str(r.get("path") or "")
+    except Exception:
+        cwd = ""
+    if not cwd:
+        try:
+            cwd = os.readlink("/proc/%s/cwd" % pid)
+        except OSError:
+            cwd = ""
+    if cwd:
+        add("cwd:" + pid, "dir", cwd.rsplit("/", 1)[-1] or "/", cwd,
+            "open_files", "dir", cwd, drill="state",
+            risk=cwd.startswith(("/tmp", "/dev/shm", "/var/tmp")))
+        nodes[-1]["x"] = ax + STEP_X
+        nodes[-1]["y"] = ay + STEP_Y
+        link(root, "cwd:" + pid, "runs in", rel="runs_in")
 
     # events - what the process did (drill: events by pid)
     if eventsdb is not None:
