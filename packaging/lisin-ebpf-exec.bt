@@ -1,0 +1,30 @@
+#!/usr/bin/env bpftrace
+/*
+ * LiSin eBPF collector - process EXECVE and EXIT, the events polling can never
+ * catch. `ps`/procmon sample every ~20 s, so a process that starts and dies in
+ * between is INVISIBLE (a dropper, a reverse shell, a build step). This catches
+ * EVERY execve at the moment it happens, with the FULL command line, the real
+ * parent and the uid - exactly what a poller misses.
+ *
+ * Output is one TAB-separated line per event, appended to a spool the LiSin
+ * input reads (fedora/inputs/ebpf_exec). Times are `nsecs` (monotonic since
+ * boot); the input prepends the boot epoch and the normalizer converts to UTC.
+ *
+ *   E <nsecs> <pid> <ppid> <uid> <comm> <arg0> <arg1> ...
+ *   X <nsecs> <pid> <exit_code>
+ *
+ * Run it as root (needs CAP_BPF/CAP_PERFMON), usually via the systemd unit that
+ * packaging/lisin-grant-access installs. Requires the `bpftrace` package.
+ */
+
+tracepoint:syscalls:sys_enter_execve
+{
+    $task = (struct task_struct *)curtask;
+    printf("E\t%llu\t%d\t%d\t%d\t%s\t", nsecs, pid, $task->real_parent->tgid, uid, comm);
+    join(args->argv);
+}
+
+tracepoint:syscalls:sys_enter_exit_group
+{
+    printf("X\t%llu\t%d\t%d\n", nsecs, pid, args->error_code);
+}

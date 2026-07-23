@@ -1,0 +1,20 @@
+name: ebpf_exec
+id: LS-I-40
+type: input
+version: 1.0.0
+title: eBPF process exec/exit (spool)
+# Reads the spool the eBPF collector (packaging/lisin-ebpf-exec.bt) appends to.
+# The collector runs as root via systemd and catches EVERY execve/exit - the
+# short-lived processes polling misses. If the collector is not installed the
+# spool does not exist and this simply returns the boot line and no events, so
+# the input is harmless when eBPF is not set up.
+#
+# The first line gives the boot epoch (btime) so the normalizer can turn the
+# collector's monotonic nsecs into a UTC timestamp. We tail the last chunk with
+# an OVERLAP; dedup by event_id (nsecs+pid) means no loss and no duplicates, the
+# same trick as the journald window.
+command: |
+  echo "BTIME $(awk '/^btime/{print $2}' /proc/stat 2>/dev/null)"
+  tail -c 3000000 "$HOME/.local/share/lisin/ebpf-exec.log" 2>/dev/null || true
+interval: 10
+enabled: true

@@ -1,0 +1,142 @@
+name: ebpf_exec
+id: LS-N-40
+type: normalization_rule
+version: 1.0.0
+title: eBPF process exec/exit -> event taxonomy
+# Turns the eBPF collector's lines into events. This is the source polling can
+# never match: every execve with its FULL command line and real parent, and the
+# matching exit with the code - so a process that lived a few milliseconds is a
+# first-class event. From a complete exec/exit stream the process STATE can later
+# be rebuilt (start -> alive -> exit), which is the point of collecting it.
+#   E <nsecs> <pid> <ppid> <uid> <comm> <argv...>
+#   X <nsecs> <pid> <exit_code>
+code: |
+  import pwd
+
+  _UID = {}
+
+  def _user(uid):
+      uid = str(uid)
+      if uid not in _UID:
+          try:
+              _UID[uid] = pwd.getpwuid(int(uid)).pw_name
+          except (KeyError, ValueError):
+              _UID[uid] = ""
+      return _UID[uid]
+
+  def normalize(text):
+      rows = []
+      btime = 0          # boot epoch, from the input's first line
+      from datetime import datetime, timezone
+
+      def when(nsecs):
+          if not btime:
+              return ""
+          try:
+              t = btime + int(nsecs) / 1e9
+              return datetime.fromtimestamp(t, timezone.utc).strftime(
+                  "%Y-%m-%dT%H:%M:%SZ")
+          except (ValueError, OverflowError):
+              return ""
+
+      for line in text.splitlines():
+          if line.startswith("BTIME "):
+              try:
+                  btime = int(line.split(None, 1)[1].strip() or 0)
+              except (ValueError, IndexError):
+                  btime = 0
+              continue
+          if not line or "\t" not in line:
+              continue
+          f = line.split("\t")
+          kind = f[0]
+
+          if kind == "E" and len(f) >= 6:
+              nsecs, pid, ppid, uid, comm = f[1], f[2], f[3], f[4], f[5]
+              argv = "\t".join(f[6:]).strip() if len(f) > 6 else ""
+              exe = argv.split(" ")[0] if argv else comm
+              user = _user(uid)
+              rows.append({
+                  "ts": when(nsecs),
+                  "event_id": "ebpf:exec:%s:%s" % (nsecs, pid),
+                  "event_kind": "event",
+                  "event_category": "process",
+                  "event_type": "start",
+                  "event_action": "process_started",
+                  "event_outcome": "success",
+                  "event_severity": 25,
+                  "event_module": "ebpf",
+                  "event_provider": "ebpf",
+                  "event_dataset": "syscalls.execve",
+                  "process_pid": pid,
+                  "parent_pid": ppid,
+                  "process_name": comm,
+                  "process_executable": exe,
+                  "process_command_line": argv or comm,
+                  "user_id": uid,
+                  "user_name": user,
+                  "process_source": "ebpf (execve)",
+                  "subject_type": "process",
+                  "subject_name": comm,
+                  "object_type": "process",
+                  "object_name": exe.rsplit("/", 1)[-1] if exe else comm,
+                  # a binary run out of a world-writable/temp path is the classic
+                  # dropper - flag it by the path, structurally, not by a name list
+                  "tags": "temp_exec" if exe.startswith(
+                      ("/tmp", "/dev/shm", "/var/tmp", "/run/user")) else "",
+                  "message": "exec %s (pid %s, parent %s)" % (
+                      argv or comm, pid, ppid),
+              })
+          elif kind == "X" and len(f) >= 4:
+              nsecs, pid, code = f[1], f[2], f[3]
+              rows.append({
+                  "ts": when(nsecs),
+                  "event_id": "ebpf:exit:%s:%s" % (nsecs, pid),
+                  "event_kind": "event",
+                  "event_category": "process",
+                  "event_type": "end",
+                  "event_action": "process_ended",
+                  "event_outcome": "success" if code in ("0", "") else "failure",
+                  "event_severity": 10,
+                  "event_module": "ebpf",
+                  "event_provider": "ebpf",
+                  "event_dataset": "syscalls.exit",
+                  "process_pid": pid,
+                  "process_exit_code": code,
+                  "process_source": "ebpf (exit)",
+                  "subject_type": "process",
+                  "object_type": "process",
+                  "message": "exit pid %s code %s" % (pid, code),
+              })
+      return rows
+
+tests:
+  - name: an execve line becomes a process_started event with the full command
+    input: |
+      BTIME 1750000000
+      E	123456789	4242	4200	1000	curl	/usr/bin/curl -fsSL http://198.51.100.9/x
+    expect:
+      rows: 1
+      row0:
+        event_action: process_started
+        process_pid: "4242"
+        parent_pid: "4200"
+        process_command_line: /usr/bin/curl -fsSL http://198.51.100.9/x
+        event_module: ebpf
+  - name: an exit line becomes a process_ended event with the code
+    input: |
+      BTIME 1750000000
+      X	123999999	4242	1
+    expect:
+      rows: 1
+      row0:
+        event_action: process_ended
+        process_exit_code: "1"
+        event_outcome: failure
+  - name: a binary from /tmp is tagged temp_exec
+    input: |
+      BTIME 1750000000
+      E	1	9	1	1000	evil	/tmp/evil --run
+    expect:
+      rows: 1
+      contains: {tags: temp_exec}

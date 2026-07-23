@@ -46,6 +46,16 @@ nodes:
   ref: fedora/normalize/proc_events
   x: 360
   y: 360
+- id: in_ebpf_exec
+  kind: input
+  ref: fedora/inputs/ebpf_exec
+  x: 40
+  y: 240
+- id: no_ebpf_exec
+  kind: normalize
+  ref: fedora/normalize/ebpf_exec
+  x: 360
+  y: 240
 - id: in_fim
   kind: input
   ref: fedora/inputs/file_integrity
@@ -134,6 +144,10 @@ edges:
   - en_proc_link
 - - in_proc_events
   - no_proc_events
+- - in_ebpf_exec
+  - no_ebpf_exec
+- - no_ebpf_exec
+  - flt_noise
 - - in_fim
   - no_fim
 - - in_net

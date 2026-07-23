@@ -71,7 +71,48 @@ WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
 echo "    unit created. Enable it with: systemctl enable --now lisin-agent"
+
+echo "==> 4/4 eBPF process collector (catches EVERY execve, the short-lived ones polling misses)"
+SPOOL="/home/$USER_NAME/.local/share/lisin/ebpf-exec.log"
+if command -v bpftrace >/dev/null 2>&1; then
+  install -D -m 0755 "$(pwd)/packaging/lisin-ebpf-exec.bt" /usr/local/lib/lisin/lisin-ebpf-exec.bt
+  # the spool lives in the user's home so the (user-run) input can read it;
+  # bpftrace runs as root and APPENDS to it (append keeps the file's owner)
+  install -d -o "$USER_NAME" -m 0755 "/home/$USER_NAME/.local/share/lisin"
+  install -o "$USER_NAME" -m 0640 /dev/null "$SPOOL"
+  cat > /etc/systemd/system/lisin-ebpf.service <<UNIT
+[Unit]
+Description=LiSin eBPF process collector (execve/exit)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bpftrace -q /usr/local/lib/lisin/lisin-ebpf-exec.bt
+StandardOutput=append:$SPOOL
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  # keep the spool bounded - the input only reads the tail, dedup handles overlap
+  cat > /etc/logrotate.d/lisin-ebpf <<ROT
+$SPOOL {
+    size 20M
+    rotate 1
+    missingok
+    notifempty
+    copytruncate
+}
+ROT
+  systemctl daemon-reload
+  echo "    unit created. Start it with: systemctl enable --now lisin-ebpf"
+  echo "    (eBPF needs no re-login; events appear within one input interval)"
+else
+  echo "    bpftrace is not installed - skipping. Install it with: dnf install bpftrace"
+fi
 echo
 echo "DONE. Log out and back in so that the audit group applies, then check:"
 echo "  auditctl -l | head        # the rules are in place"
 echo "  head -1 /var/log/audit/audit.log   # the log is readable"
+echo "  systemctl status lisin-ebpf        # the eBPF collector is running"
