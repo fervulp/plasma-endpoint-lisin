@@ -1421,14 +1421,20 @@ Kirigami.Page {
                                                    : Kirigami.Theme.textColor
                                         }
                                         HoverHandler { id: cellHover }
-                                        // A click on a CELL selects the row - the
-                                        // selection used to depend on whether the
-                                        // click missed the content.
-                                        // A double click COPIES the value.
-                                        TapHandler {
+                                        // A click on a CELL selects the row
+                                        // IMMEDIATELY. It used to be a TapHandler
+                                        // whose onSingleTapped waits ~400 ms to
+                                        // rule out a double tap, so every selection
+                                        // felt delayed and unreliable. A MouseArea
+                                        // fires onClicked on release with no wait;
+                                        // a double click also copies. The +/−
+                                        // action buttons sit in a Loader ON TOP of
+                                        // this area, so they still receive clicks.
+                                        MouseArea {
+                                            anchors.fill: parent
                                             acceptedButtons: Qt.LeftButton
-                                            onSingleTapped: page.sel = rowDel.rowData
-                                            onDoubleTapped: {
+                                            onClicked: page.sel = rowDel.rowData
+                                            onDoubleClicked: {
                                                 page.sel = rowDel.rowData
                                                 page.copyValue(cell.val)
                                             }
