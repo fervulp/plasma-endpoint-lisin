@@ -19,13 +19,13 @@ Item {
     property string query: ""
 
     readonly property var cols: [
-        { k: "ts", t: "Time", w: 11, mono: true },
-        { k: "event_action", t: "Action", w: 10 },
-        { k: "file_path", t: "File", w: 30, fill: true, mono: true },
-        { k: "package_name", t: "Package", w: 12 },
-        { k: "changed_by", t: "Changed by", w: 12 },
-        { k: "file_mode", t: "Mode", w: 6, mono: true },
-        { k: "file_owner", t: "Owner", w: 8 }
+        { k: "ts", t: "Time", w: 10, mono: true },
+        { k: "event_action", t: "Action", w: 9 },
+        { k: "file_path", t: "File", w: 20, fill: true, mono: true },
+        { k: "package_name", t: "Package", w: 9 },
+        { k: "changed_by", t: "Changed by", w: 9 },
+        { k: "file_mode", t: "Mode", w: 4, mono: true },
+        { k: "file_owner", t: "Owner", w: 6 }
     ]
     property var hiddenCols: []
 

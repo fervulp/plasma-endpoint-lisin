@@ -408,6 +408,17 @@ Kirigami.Page {
     // database: the process of yesterday's event has long been dead.
     property var livePids: ({})
     function reloadLive() { livePids = backend.livePids() }
+    // WHAT THE EVENT POINTS AT, so its details can offer the right graph jump.
+    // This function was referenced by the "Open process graph" button but never
+    // defined - so the button was permanently invisible and no event could be
+    // opened on the graph. It returns whether the process is still alive (only a
+    // live pid can build a process graph) and the address the event talked to.
+    function eventProcess(ev) {
+        if (!ev) return { pid: "", alive: false }
+        var pid = String(ev.process_pid || "")
+        return { pid: pid, alive: pid !== "" && page.livePids[pid] !== undefined,
+                 command: page.liveCommand(pid) }
+    }
     function liveCommandOf(pid) { return page.liveCommand(pid) }
     function liveCommand(pid) {
         var p = String(pid || "")
@@ -1764,8 +1775,10 @@ Kirigami.Page {
             open: page.sel !== null && !colPanel.open
             onCloseRequested: page.sel = null
 
-            // THE PROCESS OF THE EVENT IS STILL ALIVE - it can be looked at in the
-            // graph: who started it, what it opened, where it goes.
+            // LOOK AT THE EVENT ON THE GRAPH. The engine anchors on any entity,
+            // so an event offers the jumps that fit it: its process (while it is
+            // alive - only a live pid builds the tree) and the address it talked
+            // to. It reads as "see who did this, or who they talked to".
             QQC2.Button {
                 Layout.fillWidth: true
                 visible: page.sel && page.eventProcess(page.sel).alive
@@ -1776,12 +1789,23 @@ Kirigami.Page {
                       + page.liveCommand(page.sel.process_pid)
                     : ""
                 QQC2.ToolTip.visible: hovered
-                onClicked: root.focusProcess(page.sel.process_pid)
+                onClicked: root.focusGraph("process", page.sel.process_pid)
+            }
+            QQC2.Button {
+                Layout.fillWidth: true
+                visible: page.sel && String(page.sel.destination_ip || "") !== ""
+                icon.name: "network-connect"
+                text: "Open address graph"
+                QQC2.ToolTip.text: page.sel
+                    ? "who talked to " + page.sel.destination_ip : ""
+                QQC2.ToolTip.visible: hovered
+                onClicked: root.focusGraph("address", page.sel.destination_ip)
             }
             QQC2.Label {
                 Layout.fillWidth: true
                 visible: page.sel && String(page.sel.process_pid || "") !== ""
                          && !page.eventProcess(page.sel).alive
+                         && String(page.sel.destination_ip || "") === ""
                 text: "Process " + (page.sel ? page.sel.process_pid : "")
                       + (page.sel && page.sel.process_name
                          ? " (" + page.sel.process_name + ")" : "") + " is gone"

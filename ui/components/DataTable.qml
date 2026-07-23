@@ -24,10 +24,36 @@ Item {
     id: table
 
     // [{ k, t, w, fill, right, mono }] - key, header, width in gridUnit
+    //
+    // HORIZONTAL SCROLL, LIKE STATE AND EVENTS. Views with many columns (the
+    // network panel has nine) do not fit the width; without a scroll the fill
+    // column collapsed to "/..." and the rest was squeezed. The header and the
+    // rows share one contentWidth and scroll together, so a dashboard table
+    // looks and behaves exactly like the State and Events tables.
     property var columns: []
     property var rows: []
     property var selected: null
     property int rowHeight: Kirigami.Units.gridUnit * 2.4
+    // the fixed part of the width; the fill column takes whatever is left of the
+    // viewport, and if the fixed part already exceeds it the table scrolls
+    readonly property real gu: Kirigami.Units.gridUnit
+    readonly property real fixedW: {
+        var w = 0
+        for (var i = 0; i < shownCols.length; i++)
+            if (shownCols[i].fill !== true) w += (shownCols[i].w || 6) * gu
+        return w
+    }
+    readonly property bool hasFill: {
+        for (var i = 0; i < shownCols.length; i++)
+            if (shownCols[i].fill === true) return true
+        return false
+    }
+    property real viewportW: width
+    readonly property real fillW: Math.max(gu * 12, viewportW - fixedW
+                                           - shownCols.length * Kirigami.Units.smallSpacing)
+    readonly property real contentW: hasFill ? Math.max(viewportW, fixedW + fillW)
+                                             : Math.max(viewportW, fixedW)
+    function colW(cd) { return cd.fill === true ? fillW : (cd.w || 6) * gu }
     // the keys of the hidden columns and the order - the state of the view
     property var hidden: []
     property var order: []
@@ -103,57 +129,69 @@ Item {
         spacing: 0
 
         // ---- header ----
-        RowLayout {
+        Item {
             Layout.fillWidth: true
-            Layout.leftMargin: Kirigami.Units.smallSpacing
-            Layout.rightMargin: Kirigami.Units.smallSpacing
-            spacing: Kirigami.Units.smallSpacing
-            Repeater {
-                model: table.shownCols
-                delegate: Item {
-                    required property var modelData
-                    Layout.preferredWidth: modelData.fill === true
-                        ? -1 : Kirigami.Units.gridUnit * (modelData.w || 6)
-                    Layout.fillWidth: modelData.fill === true
-                    Layout.preferredHeight: hdrLbl.implicitHeight
-                    QQC2.Label {
-                        id: hdrLbl
-                        anchors.fill: parent
-                        anchors.rightMargin: hdrSort.visible ? 20 : 0
-                        text: modelData.t
-                        opacity: 0.6
-                        font.bold: true
-                        elide: Text.ElideRight
-                        horizontalAlignment: modelData.right === true
-                            ? Text.AlignRight : Text.AlignLeft
-                        font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
+            Layout.preferredHeight: hdrRow.implicitHeight
+            clip: true
+            Row {
+                id: hdrRow
+                x: -hflick.contentX          // scrolls in step with the rows
+                leftPadding: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.smallSpacing
+                Repeater {
+                    model: table.shownCols
+                    delegate: Item {
+                        required property var modelData
+                        width: table.colW(modelData)
+                        height: hdrLbl.implicitHeight
+                        QQC2.Label {
+                            id: hdrLbl
+                            anchors.fill: parent
+                            anchors.rightMargin: hdrSort.visible ? 20 : 0
+                            text: modelData.t
+                            opacity: 0.6
+                            font.bold: true
+                            elide: Text.ElideRight
+                            horizontalAlignment: modelData.right === true
+                                ? Text.AlignRight : Text.AlignLeft
+                            font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
+                        }
+                        Kirigami.Icon {
+                            id: hdrSort
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: Kirigami.Units.iconSizes.small
+                            height: Kirigami.Units.iconSizes.small
+                            visible: table.sortCol === modelData.k
+                            source: table.sortDesc ? "view-sort-descending"
+                                                   : "view-sort-ascending"
+                        }
+                        TapHandler { onTapped: table.sortBy(modelData.k) }
                     }
-                    Kirigami.Icon {
-                        id: hdrSort
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: Kirigami.Units.iconSizes.small
-                        height: Kirigami.Units.iconSizes.small
-                        visible: table.sortCol === modelData.k
-                        source: table.sortDesc ? "view-sort-descending"
-                                               : "view-sort-ascending"
-                    }
-                    TapHandler { onTapped: table.sortBy(modelData.k) }
                 }
             }
-            // THE COLUMN CHOICE WAS REMOVED: the columns are set by SELECT in the query bar
         }
         Kirigami.Separator { Layout.fillWidth: true }
 
         // ---- rows ----
-        QQC2.ScrollView {
-            id: scroller
+        Flickable {
+            id: hflick
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
+            contentWidth: table.contentW
+            contentHeight: height
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
+            QQC2.ScrollBar.horizontal: QQC2.ScrollBar { policy: table.contentW > hflick.width
+                                                        ? QQC2.ScrollBar.AsNeeded
+                                                        : QQC2.ScrollBar.AlwaysOff }
+            onWidthChanged: table.viewportW = width
 
             ListView {
                 id: list
+                width: table.contentW
+                height: hflick.height
                 model: table.rows
                 reuseItems: true
                 // new rows fade in rather than appearing abruptly; the animator
@@ -172,8 +210,10 @@ Item {
                     id: row
                     required property var modelData
                     required property int index
-                    width: ListView.view.width
+                    width: table.contentW
                     height: table.rowHeight
+                    padding: 0
+                    leftPadding: Kirigami.Units.smallSpacing
                     onClicked: { table.selected = modelData; table.rowActivated(modelData) }
                     background: Rectangle {
                         color: table.selected === row.modelData
@@ -195,17 +235,15 @@ Item {
                             color: table.accent ? table.accent(row.modelData) : "transparent"
                         }
                     }
-                    contentItem: RowLayout {
+                    contentItem: Row {
                         spacing: Kirigami.Units.smallSpacing
                         Repeater {
                             model: table.shownCols
                             delegate: Item {
                                 required property var modelData
                                 property var colDef: modelData
-                                Layout.preferredWidth: colDef.fill === true
-                                    ? -1 : Kirigami.Units.gridUnit * (colDef.w || 6)
-                                Layout.fillWidth: colDef.fill === true
-                                Layout.preferredHeight: table.rowHeight
+                                width: table.colW(colDef)
+                                height: table.rowHeight
                                 property string val: table.cellText(row.modelData, colDef.k)
 
                                 QQC2.Label {

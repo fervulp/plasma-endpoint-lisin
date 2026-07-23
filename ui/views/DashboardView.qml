@@ -34,9 +34,9 @@ Item {
     // arrival from "Events": show this process in the graph
     Connections {
         target: root
-        function onProcessFocusChanged() {
-            if (!root.processFocus) return
-            view.setAnchor("process", String(root.processFocus.pid), false)
+        function onGraphFocusChanged() {
+            if (!root.graphFocus) return
+            view.setAnchor(root.graphFocus.kind, root.graphFocus.val, false)
             openTimer.restart()
         }
     }
@@ -386,8 +386,8 @@ Item {
     Component.onCompleted: {
         refresh()
         // we came from an event - put its process into the centre of the graph at once
-        if (root.processFocus) {
-            view.setAnchor("process", String(root.processFocus.pid), false)
+        if (root.graphFocus) {
+            view.setAnchor(root.graphFocus.kind, root.graphFocus.val, false)
             openTimer.start()
         }
     }

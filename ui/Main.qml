@@ -50,15 +50,21 @@ Kirigami.ApplicationWindow {
         open("events")
     }
 
-    // The "show the process in the graph" jump: from an event to the dashboard
-    // where this process is in the centre. It works only while the process is
-    // alive; the check is done by the caller (livePids).
-    property var processFocus: null
-    function focusProcess(pid) {
-        processFocus = { pid: String(pid),
-                         n: (processFocus ? processFocus.n + 1 : 1) }
+    // SHOW AN ENTITY IN THE GRAPH. From an event (or anywhere) to the dashboard
+    // with this entity at the centre. The graph engine anchors on any kind -
+    // process, address, application, port, user, config, open_file - so an event
+    // can be looked at by its process OR by the address it talked to. The n
+    // counter makes a repeat click on the same value still fire the handler.
+    property var graphFocus: null
+    function focusGraph(kind, val) {
+        graphFocus = { kind: String(kind), val: String(val),
+                       n: (graphFocus ? graphFocus.n + 1 : 1) }
         open("dashboards")
     }
+    // kept for callers that jump straight to a process (the check that it is
+    // alive is done by the caller via livePids)
+    property var processFocus: null
+    function focusProcess(pid) { focusGraph("process", pid) }
 
     // A SECTION IS BUILT ON EVERY NAVIGATION, from its Component.
     //
