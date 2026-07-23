@@ -87,7 +87,8 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/bpftrace -q -B line -o $SPOOL /usr/local/lib/lisin/lisin-ebpf-exec.bt
+ExecStart=/usr/bin/stdbuf -oL -eL /usr/bin/bpftrace -q -B line /usr/local/lib/lisin/lisin-ebpf-exec.bt
+StandardOutput=append:$SPOOL
 Restart=on-failure
 RestartSec=3
 
