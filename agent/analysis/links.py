@@ -467,12 +467,16 @@ def _declutter(nodes, w=240, h=120, rounds=80):
             break
 
 
-def _normalize_xy(nodes, pad=120):
+def _normalize_xy(nodes, edges=None, pad=120):
     """Shift all nodes so that the minimum x/y is a positive margin.
 
     The categories used to be laid out in a semicircle, and the upper clusters got
     a NEGATIVE y - Flickable will not scroll to it (contentY >= 0), so they went
     off the top of the canvas. One shift fixes that for any anchor.
+
+    CRITICAL: the edges carry via_x (a routing-corridor X coordinate), which must
+    be shifted by the SAME dx - otherwise every corridor ends up to the wrong side
+    of its nodes and the edge hooks backwards ("the tail goes the other way").
     """
     if not nodes:
         return
@@ -487,6 +491,9 @@ def _normalize_xy(nodes, pad=120):
         for nd in nodes:
             nd["x"] += dx
             nd["y"] += dy
+        for ed in (edges or []):
+            if ed.get("via_x"):
+                ed["via_x"] += dx
 
 
 def _owner_pid(db, kind: str, val: str, eventsdb=None) -> str:
@@ -834,7 +841,7 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
 
     categories = _emit_categories(add, link, root, ax, ay, cats, expanded)
     _declutter(nodes)
-    _normalize_xy(nodes)
+    _normalize_xy(nodes, edges)
     width = max((n["x"] for n in nodes), default=800) + 300
     height = max((n["y"] for n in nodes), default=600) + 200
     return {"nodes": nodes, "edges": edges, "width": width, "height": height,
@@ -1374,7 +1381,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
                                   tree_bottom=tree_bottom)
 
     _declutter(nodes)
-    _normalize_xy(nodes)
+    _normalize_xy(nodes, edges)
     width = max((n["x"] for n in nodes), default=800) + 300
     height = max((n["y"] for n in nodes), default=600) + 200
     return {"nodes": nodes, "edges": edges, "pid": pid,

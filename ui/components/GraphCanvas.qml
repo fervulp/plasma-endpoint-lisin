@@ -267,19 +267,17 @@ Item {
                         var e = edges[j]
                         var a = pos[e.a], b = pos[e.b]
                         if (!a || !b) continue
-                        // WHEN A CATEGORY IS EXPANDED, its members are shown as a
-                        // tidy grid next to the block header - a wire from the
-                        // header to every one of them turned that into a hairball.
-                        // The members read as a cluster (same colour, grouped in
-                        // place); the wires appear only when the block or one of
-                        // its members is hovered, to confirm what belongs where.
-                        if (a.kind === "group" && hov !== e.a && hov !== e.b)
-                            continue
                         var lit = hov === "" || e.a === hov || e.b === hov
+                        // edges leaving a block header (to its members) are drawn
+                        // thin and faint: they confirm grouping without competing
+                        // with the tree; hover brings them forward
+                        var fromGroup = a.kind === "group"
                         var member = e.rel === "member"
                         var conn = e.rel === "connected"
                         // the edge colour follows the meaning of the link
                         var col = conn ? Qt.rgba(0.90, 0.49, 0.13, lit ? 0.75 : 0.2)
+                                       : fromGroup ? Qt.alpha(Kirigami.Theme.textColor,
+                                                              lit && hov !== "" ? 0.45 : 0.22)
                                        : Qt.alpha(Kirigami.Theme.textColor, lit ? 0.5 : 0.1)
                         ctx.strokeStyle = col
                         ctx.fillStyle = col
@@ -287,6 +285,7 @@ Item {
                         // were removed (they shimmered and read as "the link is not
                         // real"); the thickness still tells a bundle from a single link.
                         ctx.lineWidth = member ? Math.min(5, 1.6 + (e.count || 1) / 5)
+                                               : fromGroup ? (hov === e.a || hov === e.b ? 1.8 : 1.0)
                                                : (lit && hov !== "" ? 2.2 : 1.5)
                         ctx.setLineDash([])
                         // A cubic curve with the control points ALONG the main
