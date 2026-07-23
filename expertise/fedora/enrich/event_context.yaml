@@ -1,0 +1,116 @@
+name: event_context
+id: LS-E-32
+type: enrichment
+version: 1.0.0
+title: Fill event context from state (parent, working dir, host)
+# FILLS THE TAXONOMY FIELDS THAT THE NORMALIZERS LEAVE EMPTY, from the state that
+# has ALREADY been collected - no command is run here (principle 1). It is what
+# turns a bare "process X did Y" into a lineage the way a SIEM shows it:
+#   * the PARENT of the process (pid, name, path, command line) - lineage;
+#   * the process's own command line and WORKING DIRECTORY;
+#   * the HOST this machine is (its primary IP and OS), so every event is
+#     self-describing (as event_src.* / sourceDeviceOS are in other schemas).
+# Everything is looked up in state.db, read-only. Runs AFTER event_process_link,
+# which has resolved process_pid, so a parent can be found for it.
+code: |
+  import sqlite3
+  from pathlib import Path
+
+  _DB = str(Path.home() / ".local/share/lisin/state.db")
+
+  def _load():
+      by_pid, cwd = {}, {}
+      host_ip, host_os = "", ""
+      try:
+          con = sqlite3.connect("file:%s?mode=ro" % _DB, uri=True)
+          con.row_factory = sqlite3.Row
+          try:
+              for r in con.execute("SELECT pid, ppid, command FROM processes"):
+                  pid = str(r["pid"] or "").strip()
+                  if pid:
+                      by_pid[pid] = {"ppid": str(r["ppid"] or "").strip(),
+                                     "command": str(r["command"] or "")}
+          except sqlite3.Error:
+              pass
+          try:
+              for r in con.execute("SELECT pid, path FROM open_files "
+                                   "WHERE fd='cwd'"):
+                  p = str(r["pid"] or "").strip()
+                  if p:
+                      cwd[p] = str(r["path"] or "")
+          except sqlite3.Error:
+              pass
+          try:
+              # the machine's OS - self-describing events, like sourceDeviceOS
+              row = con.execute("SELECT value FROM system WHERE item='pretty_name'"
+                                ).fetchone()
+              if row:
+                  host_os = str(row["value"] or "")
+          except sqlite3.Error:
+              pass
+          try:
+              # the primary IPv4 of this host (first non-loopback interface)
+              for r in con.execute("SELECT ipv4 FROM network "
+                                   "WHERE COALESCE(ipv4,'') <> ''"):
+                  ip = str(r["ipv4"] or "").split("/")[0].split()[0]
+                  if ip and not ip.startswith("127."):
+                      host_ip = ip
+                      break
+          except sqlite3.Error:
+              pass
+          con.close()
+      except Exception:
+          pass
+      return by_pid, cwd, host_ip, host_os
+
+  def _base(cmd):
+      return cmd.split(" ")[0].rsplit("/", 1)[-1]
+
+  def enrich(rows):
+      by_pid, cwd, host_ip, host_os = _load()
+      # a service event carries its resulting STATE, derived from the action -
+      # it was empty although service_start/service_stop events exist in their
+      # thousands (a normalized field, filled here to avoid a fragile edit of the
+      # journal rule; still expertise, still no command)
+      state_of = {"service_start": "running", "service_stop": "stopped",
+                  "service_fail": "failed", "service_failed": "failed"}
+
+      for r in rows:
+          # every event is self-describing about the host it came from
+          if host_ip and not str(r.get("host_ip") or "").strip():
+              r["host_ip"] = host_ip
+          if host_os and not str(r.get("host_os") or "").strip():
+              r["host_os"] = host_os
+          st = state_of.get(str(r.get("event_action") or ""))
+          if st and not str(r.get("service_state") or "").strip():
+              r["service_state"] = st
+
+          pid = str(r.get("process_pid") or "").strip()
+          info = by_pid.get(pid)
+          if not info:
+              continue
+          # the process's own command line and working directory
+          if info["command"] and not str(r.get("process_command_line") or "").strip():
+              r["process_command_line"] = info["command"]
+          if pid in cwd and not str(r.get("process_working_directory") or "").strip():
+              r["process_working_directory"] = cwd[pid]
+
+          # THE PARENT - lineage, the way an EDR shows it
+          ppid = info["ppid"]
+          if ppid and not str(r.get("parent_pid") or "").strip():
+              r["parent_pid"] = ppid
+          par = by_pid.get(ppid)
+          if par and par["command"]:
+              if not str(r.get("parent_command_line") or "").strip():
+                  r["parent_command_line"] = par["command"]
+              if not str(r.get("parent_executable") or "").strip():
+                  r["parent_executable"] = par["command"].split(" ")[0]
+              if not str(r.get("parent_name") or "").strip():
+                  r["parent_name"] = _base(par["command"])
+      return rows
+
+tests:
+  - name: parent and host are filled from state
+    input: []
+    expect:
+      rows: 0
