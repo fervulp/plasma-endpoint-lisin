@@ -638,13 +638,27 @@ Item {
                     flick.contentX = Math.max(0, fx * next - w.x)
                     flick.contentY = Math.max(0, fy * next - w.y)
                 } else {
-                    // PLAIN WHEEL ALWAYS SCROLLS THE PAGE. Hovering the graph used
-                    // to trap the wheel and scroll the graph instead of the
-                    // dashboard, so the page would not move until the pointer was
-                    // off the graph. The graph is panned by DRAGGING (the
-                    // Flickable) and zoomed with Ctrl+wheel; the wheel belongs to
-                    // the page.
-                    w.accepted = false
+                    // TWO-FINGER SCROLL PANS THE GRAPH (up/down/left/right). A
+                    // touchpad reports pixelDelta, a mouse angleDelta. We move the
+                    // Flickable within its bounds and accept the event. BUT once
+                    // the graph reaches an edge (or the whole graph already fits),
+                    // the event is handed to the PAGE instead - so the dashboard
+                    // still scrolls past the graph and the wheel is never trapped.
+                    var pd = w.pixelDelta
+                    var touch = (pd.x !== 0 || pd.y !== 0)
+                    var dx = touch ? pd.x : w.angleDelta.x
+                    var dy = touch ? pd.y : w.angleDelta.y
+                    var maxX = Math.max(0, flick.contentWidth - flick.width)
+                    var maxY = Math.max(0, flick.contentHeight - flick.height)
+                    var nx = Math.max(0, Math.min(maxX, flick.contentX - dx))
+                    var ny = Math.max(0, Math.min(maxY, flick.contentY - dy))
+                    if (nx !== flick.contentX || ny !== flick.contentY) {
+                        flick.contentX = nx
+                        flick.contentY = ny
+                        w.accepted = true
+                    } else {
+                        w.accepted = false        // at the edge -> let the page scroll
+                    }
                 }
             }
         }
