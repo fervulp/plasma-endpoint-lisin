@@ -5,382 +5,382 @@ nodes:
   kind: input
   ref: fedora/inputs/system
   x: 40
-  y: 40
+  y: 520
 - id: no_system
   kind: normalize
   ref: fedora/normalize/system
   x: 360
-  y: 40
+  y: 520
 - id: out_system
   kind: output
   ref: fedora/outputs/system
   x: 1320
-  y: 40
+  y: 520
 - id: in_cpu
   kind: input
   ref: fedora/inputs/cpu
   x: 40
-  y: 200
+  y: 1320
 - id: no_cpu
   kind: normalize
   ref: fedora/normalize/cpu
   x: 360
-  y: 200
+  y: 1320
 - id: out_cpu
   kind: output
   ref: fedora/outputs/cpu
   x: 1320
-  y: 200
+  y: 1320
 - id: in_memory
   kind: input
   ref: fedora/inputs/memory
   x: 40
-  y: 520
+  y: 1800
 - id: no_memory
   kind: normalize
   ref: fedora/normalize/memory
   x: 360
-  y: 520
+  y: 1800
 - id: out_memory
   kind: output
   ref: fedora/outputs/memory
   x: 1320
-  y: 520
+  y: 1960
 - id: in_storage
   kind: input
   ref: fedora/inputs/storage
   x: 40
-  y: 840
+  y: 3080
 - id: no_storage
   kind: normalize
   ref: fedora/normalize/storage
   x: 360
-  y: 840
+  y: 3080
 - id: out_storage
   kind: output
   ref: fedora/outputs/storage
   x: 1320
-  y: 840
+  y: 3240
 - id: in_network
   kind: input
   ref: fedora/inputs/network
   x: 40
-  y: 1320
+  y: 3400
 - id: no_network
   kind: normalize
   ref: fedora/normalize/network
   x: 360
-  y: 1320
+  y: 3400
 - id: out_network
   kind: output
   ref: fedora/outputs/network
   x: 1320
-  y: 1320
+  y: 3560
 - id: in_processes
   kind: input
   ref: fedora/inputs/processes
   x: 40
-  y: 3080
+  y: 40
 - id: no_processes
   kind: normalize
   ref: fedora/normalize/processes
   x: 360
-  y: 3080
+  y: 40
 - id: out_processes
   kind: output
   ref: fedora/outputs/processes
-  x: 1320
-  y: 2920
+  x: 1960
+  y: 40
 - id: in_ports
   kind: input
   ref: fedora/inputs/ports
   x: 40
-  y: 3880
+  y: 200
 - id: no_ports
   kind: normalize
   ref: fedora/normalize/ports
   x: 360
-  y: 3880
+  y: 200
 - id: out_ports
   kind: output
   ref: fedora/outputs/ports
-  x: 1320
-  y: 4680
+  x: 1960
+  y: 200
 - id: in_services
   kind: input
   ref: fedora/inputs/services
   x: 40
-  y: 1640
+  y: 1480
 - id: no_services
   kind: normalize
   ref: fedora/normalize/services
   x: 360
-  y: 1640
+  y: 1480
 - id: out_services
   kind: output
   ref: fedora/outputs/services
   x: 1320
-  y: 1800
+  y: 1640
 - id: in_autostart
   kind: input
   ref: fedora/inputs/autostart
   x: 40
-  y: 1800
+  y: 1640
 - id: no_autostart
   kind: normalize
   ref: fedora/normalize/autostart
   x: 360
-  y: 1800
+  y: 1640
 - id: out_autostart
   kind: output
   ref: fedora/outputs/scheduled
   x: 1320
-  y: 2120
+  y: 1800
 - id: in_users
   kind: input
   ref: fedora/inputs/users
   x: 40
-  y: 2120
+  y: 1960
 - id: no_users
   kind: normalize
   ref: fedora/normalize/users
   x: 360
-  y: 2120
+  y: 1960
 - id: out_users
   kind: output
   ref: fedora/outputs/users
   x: 1320
-  y: 2280
+  y: 2120
 - id: in_packages
   kind: input
   ref: fedora/inputs/packages
   x: 40
-  y: 3400
+  y: 360
 - id: no_packages
   kind: normalize
   ref: fedora/normalize/packages
   x: 360
-  y: 3400
+  y: 360
 - id: out_packages
   kind: output
   ref: fedora/outputs/packages
-  x: 1320
-  y: 4040
+  x: 1640
+  y: 360
 - id: in_applications
   kind: input
   ref: fedora/inputs/applications
   x: 40
-  y: 1000
+  y: 680
 - id: no_applications
   kind: normalize
   ref: fedora/normalize/applications
   x: 360
-  y: 1000
+  y: 680
 - id: out_applications
   kind: output
   ref: fedora/outputs/applications
   x: 1320
-  y: 1000
+  y: 680
 - id: in_config_files
   kind: input
   ref: fedora/inputs/config_files
   x: 40
-  y: 1480
+  y: 4040
 - id: no_config_files
   kind: normalize
   ref: fedora/normalize/config_files
   x: 360
-  y: 1480
+  y: 4040
 - id: out_config_files
   kind: output
   ref: fedora/outputs/config_files
   x: 1320
-  y: 1480
+  y: 4200
 - id: in_containers
   kind: input
   ref: fedora/inputs/containers
   x: 40
-  y: 1960
+  y: 4200
 - id: no_containers
   kind: normalize
   ref: fedora/normalize/containers
   x: 360
-  y: 1960
+  y: 4200
 - id: out_containers
   kind: output
   ref: fedora/outputs/containers
   x: 1320
-  y: 1960
+  y: 4360
 - id: in_vms
   kind: input
   ref: fedora/inputs/vms
   x: 40
-  y: 2280
+  y: 4360
 - id: no_vms
   kind: normalize
   ref: fedora/normalize/vms
   x: 360
-  y: 2280
+  y: 4360
 - id: out_vms
   kind: output
   ref: fedora/outputs/vms
   x: 1320
-  y: 2440
+  y: 4520
 - id: in_devices
   kind: input
   ref: fedora/inputs/devices
   x: 40
-  y: 2440
+  y: 4520
 - id: no_devices
   kind: normalize
   ref: fedora/normalize/devices
   x: 360
-  y: 2440
+  y: 4520
 - id: out_devices
   kind: output
   ref: fedora/outputs/devices
   x: 1320
-  y: 2600
+  y: 4680
 - id: in_firewall
   kind: input
   ref: fedora/inputs/firewall
   x: 40
-  y: 2600
+  y: 4680
 - id: no_firewall
   kind: normalize
   ref: fedora/normalize/firewall
   x: 360
-  y: 2600
+  y: 4680
 - id: out_firewall
   kind: output
   ref: fedora/outputs/firewall
   x: 1320
-  y: 2760
+  y: 4840
 - id: in_kmods
   kind: input
   ref: fedora/inputs/kmods
   x: 40
-  y: 3240
+  y: 3720
 - id: no_kmods
   kind: normalize
   ref: fedora/normalize/kmods
   x: 360
-  y: 3240
+  y: 3720
 - id: out_kmods
   kind: output
   ref: fedora/outputs/kernel_modules
   x: 1320
-  y: 3560
+  y: 3880
 - id: in_timers
   kind: input
   ref: fedora/inputs/timers
   x: 40
-  y: 3720
+  y: 2120
 - id: no_timers
   kind: normalize
   ref: fedora/normalize/timers
   x: 360
-  y: 3720
+  y: 2120
 - id: out_timers
   kind: output
   ref: fedora/outputs/scheduled
   x: 1320
-  y: 4200
+  y: 2280
 - id: in_cron
   kind: input
   ref: fedora/inputs/cron
   x: 40
-  y: 4520
+  y: 2280
 - id: no_cron
   kind: normalize
   ref: fedora/normalize/cron
   x: 360
-  y: 4520
+  y: 2280
 - id: out_cron
   kind: output
   ref: fedora/outputs/scheduled
   x: 1320
-  y: 5160
+  y: 2440
 - id: in_suid
   kind: input
   ref: fedora/inputs/suid
   x: 40
-  y: 4680
+  y: 2440
 - id: no_suid
   kind: normalize
   ref: fedora/normalize/suid
   x: 360
-  y: 4680
+  y: 2440
 - id: out_suid
   kind: output
   ref: fedora/outputs/suid_binaries
   x: 1320
-  y: 5320
+  y: 2600
 - id: in_logins
   kind: input
   ref: fedora/inputs/logins
   x: 40
-  y: 2920
+  y: 4840
 - id: no_logins
   kind: normalize
   ref: fedora/normalize/logins
   x: 360
-  y: 2920
+  y: 4840
 - id: out_logins
   kind: output
   ref: fedora/outputs/logins
   x: 1320
-  y: 3080
+  y: 5000
 - id: in_net_config
   kind: input
   ref: fedora/inputs/net_config
   x: 40
-  y: 3560
+  y: 5000
 - id: no_net_config
   kind: normalize
   ref: fedora/normalize/net_config
   x: 360
-  y: 3560
+  y: 5000
 - id: out_net_config
   kind: output
   ref: fedora/outputs/net_config
   x: 1320
-  y: 3720
+  y: 5160
 - id: in_security
   kind: input
   ref: fedora/inputs/security
   x: 40
-  y: 4200
+  y: 5160
 - id: no_security
   kind: normalize
   ref: fedora/normalize/security
   x: 360
-  y: 4200
+  y: 5160
 - id: out_security
   kind: output
   ref: fedora/outputs/security
   x: 1320
-  y: 4360
+  y: 5320
 - id: in_ssh_keys
   kind: input
   ref: fedora/inputs/ssh_keys
   x: 40
-  y: 5000
+  y: 5320
 - id: no_ssh_keys
   kind: normalize
   ref: fedora/normalize/ssh_keys
   x: 360
-  y: 5000
+  y: 5320
 - id: out_ssh_keys
   kind: output
   ref: fedora/outputs/ssh_keys
   x: 1320
-  y: 5000
+  y: 5480
 - id: enr_ports
   kind: enrich
   ref: fedora/enrich/port_process
-  x: 680
-  y: 4360
+  x: 1000
+  y: 200
 - id: in_shell_history
   kind: input
   ref: fedora/inputs/shell_history
@@ -400,617 +400,617 @@ nodes:
   kind: input
   ref: fedora/inputs/sessions
   x: 40
-  y: 5960
+  y: 5640
 - id: no_sessions
   kind: normalize
   ref: fedora/normalize/sessions
   x: 360
-  y: 5960
+  y: 5640
 - id: out_sessions
   kind: output
   ref: fedora/outputs/sessions
   x: 1320
-  y: 6280
+  y: 5800
 - id: in_dev_packages
   kind: input
   ref: fedora/inputs/dev_packages
   x: 40
-  y: 1160
+  y: 840
 - id: no_dev_packages
   kind: normalize
   ref: fedora/normalize/dev_packages
   x: 360
-  y: 1160
+  y: 840
 - id: out_dev_packages
   kind: output
   ref: fedora/outputs/dev_packages
   x: 1320
-  y: 1160
+  y: 840
 - id: in_kernel_params
   kind: input
   ref: fedora/inputs/kernel_params
   x: 40
-  y: 6120
+  y: 5800
 - id: no_kernel_params
   kind: normalize
   ref: fedora/normalize/kernel_params
   x: 360
-  y: 6120
+  y: 5800
 - id: out_kernel_params
   kind: output
   ref: fedora/outputs/kernel_params
   x: 1320
-  y: 6600
+  y: 5960
 - id: in_boot
   kind: input
   ref: fedora/inputs/boot
   x: 40
-  y: 6280
+  y: 5960
 - id: no_boot
   kind: normalize
   ref: fedora/normalize/boot
   x: 360
-  y: 6280
+  y: 5960
 - id: out_boot
   kind: output
   ref: fedora/outputs/boot
   x: 1320
-  y: 6760
+  y: 6120
 - id: in_mounts
   kind: input
   ref: fedora/inputs/mounts
   x: 40
-  y: 4840
+  y: 2600
 - id: no_mounts
   kind: normalize
   ref: fedora/normalize/mounts
   x: 360
-  y: 4840
+  y: 2600
 - id: out_mounts
   kind: output
   ref: fedora/outputs/mounts
   x: 1320
-  y: 5480
+  y: 2760
 - id: in_audit
   kind: input
   ref: fedora/inputs/audit
   x: 40
-  y: 6440
+  y: 6120
 - id: no_audit
   kind: normalize
   ref: fedora/normalize/audit
   x: 360
-  y: 6440
+  y: 6120
 - id: out_audit
   kind: output
   ref: fedora/outputs/audit
   x: 1320
-  y: 6920
+  y: 6280
 - id: in_at_jobs
   kind: input
   ref: fedora/inputs/at_jobs
   x: 40
-  y: 6600
+  y: 6280
 - id: no_at_jobs
   kind: normalize
   ref: fedora/normalize/at_jobs
   x: 360
-  y: 6600
+  y: 6280
 - id: out_at_jobs
   kind: output
   ref: fedora/outputs/at_jobs
   x: 1320
-  y: 7080
+  y: 6440
 - id: in_hardware
   kind: input
   ref: fedora/inputs/hardware
   x: 40
-  y: 6760
+  y: 6440
 - id: no_hardware
   kind: normalize
   ref: fedora/normalize/hardware
   x: 360
-  y: 6760
+  y: 6440
 - id: out_hardware
   kind: output
   ref: fedora/outputs/hardware
   x: 1320
-  y: 7240
+  y: 6600
 - id: in_unix_sockets
   kind: input
   ref: fedora/inputs/unix_sockets
   x: 40
-  y: 5160
+  y: 2760
 - id: no_unix_sockets
   kind: normalize
   ref: fedora/normalize/unix_sockets
   x: 360
-  y: 5160
+  y: 2760
 - id: out_unix_sockets
   kind: output
   ref: fedora/outputs/unix_sockets
   x: 1320
-  y: 5800
+  y: 2920
 - id: in_dns
   kind: input
   ref: fedora/inputs/dns
   x: 40
-  y: 6920
+  y: 6600
 - id: no_dns
   kind: normalize
   ref: fedora/normalize/dns
   x: 360
-  y: 6920
+  y: 6600
 - id: out_dns
   kind: output
   ref: fedora/outputs/dns
   x: 1320
-  y: 7400
+  y: 6760
 - id: in_persistence
   kind: input
   ref: fedora/inputs/persistence
   x: 40
-  y: 5320
+  y: 2920
 - id: no_persistence
   kind: normalize
   ref: fedora/normalize/persistence
   x: 360
-  y: 5320
+  y: 2920
 - id: out_persistence
   kind: output
   ref: fedora/outputs/persistence
   x: 1320
-  y: 5960
+  y: 3080
 - id: in_privesc
   kind: input
   ref: fedora/inputs/privesc
   x: 40
-  y: 5640
+  y: 3240
 - id: no_privesc
   kind: normalize
   ref: fedora/normalize/privesc
   x: 360
-  y: 5640
+  y: 3240
 - id: out_privesc
   kind: output
   ref: fedora/outputs/privesc
   x: 1320
-  y: 6120
+  y: 3400
 - id: en_deps_packages
   kind: enrich
   ref: fedora/enrich/app_deps
-  x: 680
-  y: 3880
+  x: 1000
+  y: 360
 - id: en_deps_applications
   kind: enrich
   ref: fedora/enrich/app_deps
   x: 680
-  y: 1000
+  y: 680
 - id: en_deps_dev_packages
   kind: enrich
   ref: fedora/enrich/app_deps
   x: 680
-  y: 1320
+  y: 840
 - id: en_meta_packages
   kind: enrich
   ref: fedora/enrich/app_meta
-  x: 680
-  y: 4040
+  x: 1320
+  y: 360
 - id: en_meta_applications
   kind: enrich
   ref: fedora/enrich/app_meta
-  x: 680
-  y: 840
+  x: 1000
+  y: 680
 - id: en_meta_dev_packages
   kind: enrich
   ref: fedora/enrich/app_meta
-  x: 680
-  y: 1160
+  x: 1000
+  y: 840
 - id: en_port_purpose
   kind: enrich
   ref: fedora/enrich/port_purpose
-  x: 680
-  y: 4840
+  x: 1320
+  y: 200
 - id: en_proc_purpose
   kind: enrich
   ref: fedora/enrich/proc_purpose
-  x: 680
-  y: 2920
+  x: 1320
+  y: 40
 - id: in_failed_units
   kind: input
   ref: fedora/inputs/failed_units
   x: 40
-  y: 7080
+  y: 6760
 - id: no_failed_units
   kind: normalize
   ref: fedora/normalize/failed_units
   x: 360
-  y: 7080
+  y: 6760
 - id: out_failed_units
   kind: output
   ref: fedora/outputs/failed_units
   x: 1320
-  y: 7560
+  y: 6920
 - id: in_pkg_history
   kind: input
   ref: fedora/inputs/pkg_history
   x: 40
-  y: 7240
+  y: 6920
 - id: no_pkg_history
   kind: normalize
   ref: fedora/normalize/pkg_history
   x: 360
-  y: 7240
+  y: 6920
 - id: out_pkg_history
   kind: output
   ref: fedora/outputs/pkg_history
   x: 1320
-  y: 7720
+  y: 7080
 - id: in_flatpak_perms
   kind: input
   ref: fedora/inputs/flatpak_perms
   x: 40
-  y: 7400
+  y: 7080
 - id: no_flatpak_perms
   kind: normalize
   ref: fedora/normalize/flatpak_perms
   x: 360
-  y: 7400
+  y: 7080
 - id: out_flatpak_perms
   kind: output
   ref: fedora/outputs/flatpak_perms
   x: 1320
-  y: 7880
+  y: 7240
 - id: in_polkit_actions
   kind: input
   ref: fedora/inputs/polkit_actions
   x: 40
-  y: 7560
+  y: 7240
 - id: no_polkit_actions
   kind: normalize
   ref: fedora/normalize/polkit_actions
   x: 360
-  y: 7560
+  y: 7240
 - id: out_polkit_actions
   kind: output
   ref: fedora/outputs/polkit_actions
   x: 1320
-  y: 8040
+  y: 7400
 - id: in_pam_config
   kind: input
   ref: fedora/inputs/pam_config
   x: 40
-  y: 7720
+  y: 7400
 - id: no_pam_config
   kind: normalize
   ref: fedora/normalize/pam_config
   x: 360
-  y: 7720
+  y: 7400
 - id: out_pam_config
   kind: output
   ref: fedora/outputs/pam_config
   x: 1320
-  y: 8200
+  y: 7560
 - id: in_iface_stats
   kind: input
   ref: fedora/inputs/iface_stats
   x: 40
-  y: 7880
+  y: 7560
 - id: no_iface_stats
   kind: normalize
   ref: fedora/normalize/iface_stats
   x: 360
-  y: 7880
+  y: 7560
 - id: out_iface_stats
   kind: output
   ref: fedora/outputs/iface_stats
   x: 1320
-  y: 8360
+  y: 7720
 - id: in_boot_perf
   kind: input
   ref: fedora/inputs/boot_perf
   x: 40
-  y: 5800
+  y: 3560
 - id: no_boot_perf
   kind: normalize
   ref: fedora/normalize/boot_perf
   x: 360
-  y: 5800
+  y: 3560
 - id: out_boot_perf
   kind: output
   ref: fedora/outputs/boot_perf
   x: 1320
-  y: 6440
+  y: 3720
 - id: in_swap_info
   kind: input
   ref: fedora/inputs/swap_info
   x: 40
-  y: 8040
+  y: 7720
 - id: no_swap_info
   kind: normalize
   ref: fedora/normalize/swap_info
   x: 360
-  y: 8040
+  y: 7720
 - id: out_swap_info
   kind: output
   ref: fedora/outputs/swap_info
   x: 1320
-  y: 8520
+  y: 7880
 - id: in_journal_health
   kind: input
   ref: fedora/inputs/journal_health
   x: 40
-  y: 8200
+  y: 7880
 - id: no_journal_health
   kind: normalize
   ref: fedora/normalize/journal_health
   x: 360
-  y: 8200
+  y: 7880
 - id: out_journal_health
   kind: output
   ref: fedora/outputs/journal_health
   x: 1320
-  y: 8680
+  y: 8040
 - id: en_proc_ancestry
   kind: enrich
   ref: fedora/enrich/proc_ancestry
-  x: 680
-  y: 3080
+  x: 1000
+  y: 40
 - id: en_proc_cmd_risk
   kind: enrich
   ref: fedora/enrich/proc_cmd_risk
   x: 680
-  y: 3240
+  y: 40
 - id: en_app_age
   kind: enrich
   ref: fedora/enrich/app_age
   x: 680
-  y: 3720
+  y: 360
 - id: en_unit_health
   kind: enrich
   ref: fedora/enrich/unit_health
   x: 680
-  y: 1640
+  y: 1480
 - id: en_user_privileges
   kind: enrich
   ref: fedora/enrich/user_privileges
   x: 680
-  y: 2120
+  y: 1960
 - id: en_port_owner_pkg
   kind: enrich
   ref: fedora/enrich/port_owner_pkg
   x: 680
-  y: 4520
+  y: 200
 - id: en_boot_impact
   kind: enrich
   ref: fedora/enrich/boot_impact
   x: 680
-  y: 5960
+  y: 3560
 - id: in_vulnerabilities
   kind: input
   ref: fedora/inputs/vulnerabilities
   x: 40
-  y: 8360
+  y: 8040
 - id: no_vulnerabilities
   kind: normalize
   ref: fedora/normalize/vulnerabilities
   x: 360
-  y: 8360
+  y: 8040
 - id: out_vulnerabilities
   kind: output
   ref: fedora/outputs/vulnerabilities
   x: 1320
-  y: 8840
+  y: 8200
 - id: in_browsers
   kind: input
   ref: fedora/inputs/browsers
   x: 40
-  y: 8680
+  y: 8360
 - id: no_browser_hist
   kind: normalize
   ref: fedora/normalize/browser_history
   x: 360
-  y: 8680
+  y: 8520
 - id: out_browser_hist
   kind: output
   ref: fedora/outputs/browser_history
   x: 1320
-  y: 9000
+  y: 8520
 - id: en_mount_access
   kind: enrich
   ref: fedora/enrich/mount_access
   x: 680
-  y: 5320
+  y: 2600
 - id: en_persist_owner
   kind: enrich
   ref: fedora/enrich/persistence_owner
   x: 680
-  y: 5640
+  y: 2920
 - id: no_browser_extensions
   kind: normalize
   ref: fedora/normalize/browser_extensions
   x: 360
-  y: 8840
+  y: 8360
 - id: out_browser_extensions
   kind: output
   ref: fedora/outputs/browser_extensions
   x: 1320
-  y: 9160
+  y: 8360
 - id: in_open_files
   kind: input
   ref: fedora/inputs/open_files
   x: 40
-  y: 8840
+  y: 8520
 - id: no_open_files
   kind: normalize
   ref: fedora/normalize/open_files
   x: 360
-  y: 9000
+  y: 8680
 - id: out_open_files
   kind: output
   ref: fedora/outputs/open_files
   x: 1320
-  y: 9320
+  y: 8680
 - id: in_unpkg_conf
   kind: input
   ref: fedora/inputs/unpackaged_config
   x: 40
-  y: 9000
+  y: 8680
 - id: no_unpkg_conf
   kind: normalize
   ref: fedora/normalize/unpackaged_config
   x: 360
-  y: 9160
+  y: 8840
 - id: out_unpkg_conf
   kind: output
   ref: fedora/outputs/unpackaged_config
   x: 1320
-  y: 9480
+  y: 8840
 - id: in_app_config
   kind: input
   ref: fedora/inputs/app_config
   x: 40
-  y: 9160
+  y: 8840
 - id: no_app_config
   kind: normalize
   ref: fedora/normalize/app_config
   x: 360
-  y: 9320
+  y: 9000
 - id: out_app_config
   kind: output
   ref: fedora/outputs/app_config
   x: 1320
-  y: 9640
+  y: 9000
 - id: en_pkg_privesc
   kind: enrich
   ref: fedora/enrich/attach_package
   x: 680
-  y: 5800
+  y: 3240
 - id: en_pkg_services
   kind: enrich
   ref: fedora/enrich/attach_package
   x: 680
-  y: 1800
+  y: 1640
 - id: en_pkg_suid
   kind: enrich
   ref: fedora/enrich/attach_package
   x: 680
-  y: 5160
+  y: 2440
 - id: en_pkg_kmods
   kind: enrich
   ref: fedora/enrich/attach_package
   x: 680
-  y: 3400
+  y: 3720
 - id: en_pkg_autostart
   kind: enrich
   ref: fedora/enrich/attach_package
   x: 680
-  y: 1960
+  y: 1800
 - id: en_pkg_timers
   kind: enrich
   ref: fedora/enrich/attach_package
   x: 680
-  y: 4200
+  y: 2120
 - id: en_pkg_cron
   kind: enrich
   ref: fedora/enrich/attach_package
   x: 680
-  y: 5000
+  y: 2280
 - id: en_pid_unix
   kind: enrich
   ref: fedora/enrich/extract_pid
   x: 680
-  y: 5480
+  y: 2760
 - id: en_port_owner_cmd
   kind: enrich
   ref: fedora/enrich/port_owner_cmdline
-  x: 680
-  y: 4680
+  x: 1640
+  y: 200
 - id: en_proc_argfiles
   kind: enrich
   ref: fedora/enrich/proc_arg_files
-  x: 680
-  y: 2760
+  x: 1640
+  y: 40
 - id: in_boot_sessions
   kind: input
   ref: fedora/inputs/boot_sessions
-  x: 120
-  y: 9800
+  x: 40
+  y: 9000
 - id: no_boot_sessions
   kind: normalize
   ref: fedora/normalize/boot_sessions
-  x: 480
-  y: 9800
+  x: 360
+  y: 9160
 - id: out_boot_sessions
   kind: output
   ref: fedora/outputs/boot_sessions
-  x: 840
-  y: 9800
+  x: 1320
+  y: 9160
 - id: in_package_files
   kind: input
   ref: fedora/inputs/package_files
   x: 40
-  y: 9960
+  y: 9160
 - id: no_package_files
   kind: normalize
   ref: fedora/normalize/package_files
   x: 360
-  y: 9960
+  y: 9320
 - id: out_package_files
   kind: output
   ref: fedora/outputs/package_files
   x: 1320
-  y: 9960
+  y: 9320
 - id: in_package_meta
   kind: input
   ref: fedora/inputs/package_meta
   x: 40
-  y: 10120
+  y: 9320
 - id: no_package_meta
   kind: normalize
   ref: fedora/normalize/package_meta
   x: 360
-  y: 10120
+  y: 9480
 - id: out_package_meta
   kind: output
   ref: fedora/outputs/package_meta
   x: 1320
-  y: 10120
+  y: 9480
 - id: in_ip_intel
   kind: input
   ref: fedora/inputs/ip_intel
   x: 40
-  y: 10280
+  y: 9480
 - id: no_ip_intel
   kind: normalize
   ref: fedora/normalize/ip_intel
   x: 360
-  y: 10280
+  y: 9640
 - id: out_ip_intel
   kind: output
   ref: fedora/outputs/ip_intel
   x: 1320
-  y: 10280
+  y: 9640
 - id: in_example_shells
   kind: input
   ref: examples/input_login_shells
   x: 40
-  y: 10480
+  y: 3880
 - id: no_example_shells
   kind: normalize
   ref: examples/normalize_login_shells
   x: 360
-  y: 10480
+  y: 3880
 - id: en_example_shells
   kind: enrich
   ref: examples/enrich_login_shells
   x: 680
-  y: 10480
+  y: 3880
 - id: out_example_shells
   kind: output
   ref: examples/output_login_shells
   x: 1320
-  y: 10480
+  y: 4040
 edges:
 - - in_system
   - no_system

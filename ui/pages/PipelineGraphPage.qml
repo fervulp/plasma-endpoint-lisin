@@ -153,8 +153,9 @@ Kirigami.Page {
     // A free "corridor" for an edge: if the straight path crosses cards, we look
     // for the nearest horizontal ABOVE or BELOW them that can be passed through.
     // Returns the Y offset for the control points of the curve (0 - the path is clear).
-    function channelFor(a, b) {
-        var y1 = a.y + cardH / 2, y2 = b.y + cardH / 2
+    function channelFor(a, b, y1, y2) {
+        if (y1 === undefined) y1 = a.y + cardH / 2
+        if (y2 === undefined) y2 = b.y + cardH / 2
         var xa = a.x + cardW, xb = b.x
         if (xb <= xa) return 0                     // backwards - we do not route
         var hit = []
@@ -180,24 +181,10 @@ Kirigami.Page {
     }
 
     function tidyLayout() {
-        var order = { input: 0, normalize: 1, enrich: 2,
+        var floor = { input: 0, normalize: 1, enrich: 2,
                       filter: 3, correlation: 3, output: 4 }
         var nodes = page.graph.nodes, edges = page.graph.edges
 
-        // --- 1. columns by kind ---
-        var cols = {}, colOf = {}
-        for (var i = 0; i < nodes.length; i++) {
-            var c = order[nodes[i].kind] !== undefined ? order[nodes[i].kind] : 5
-            colOf[nodes[i].id] = c
-            if (!cols[c]) cols[c] = []
-            cols[c].push(nodes[i])
-        }
-
-        // --- 2. UNTANGLE THE EDGES (barycentre / Sugiyama ordering) ---
-        // Without this, a normalize node in row 3 connects to an input in row
-        // 40 and the canvas turns into a web. Each node is pulled towards the
-        // average row of the nodes it is joined to, sweeping left-to-right and
-        // back; a few passes is enough and it is deterministic.
         var succ = {}, pred = {}
         for (var e = 0; e < edges.length; e++) {
             var a = edges[e][0], b = edges[e][1]
@@ -205,6 +192,44 @@ Kirigami.Page {
             if (!pred[b]) pred[b] = []
             succ[a].push(b); pred[b].push(a)
         }
+
+        // --- 1. LAYERS BY LONGEST PATH (not by kind alone) ---
+        // A fixed column per kind put a correlation that READS an output one
+        // column to the LEFT of that output, so the edge ran right-to-left across
+        // the whole graph - the main source of the tangle. Instead every node is
+        // placed one column to the right of its furthest predecessor (floored by
+        // its kind so inputs still start at 0). Now every edge points forward.
+        var colOf = {}
+        for (var i = 0; i < nodes.length; i++)
+            colOf[nodes[i].id] = floor[nodes[i].kind] !== undefined
+                                 ? floor[nodes[i].kind] : 5
+        var changed = true, guard = 0
+        while (changed && guard++ < nodes.length + 4) {
+            changed = false
+            for (var e2 = 0; e2 < edges.length; e2++) {
+                var s = edges[e2][0], d = edges[e2][1]
+                if (colOf[d] === undefined || colOf[s] === undefined) continue
+                if (colOf[d] < colOf[s] + 1) { colOf[d] = colOf[s] + 1; changed = true }
+            }
+        }
+        // compact away empty columns so there are no wide horizontal gaps
+        var used = {}
+        for (i = 0; i < nodes.length; i++) used[colOf[nodes[i].id]] = true
+        var uniq = Object.keys(used).map(Number).sort(function (x, y) { return x - y })
+        var remap = {}
+        for (i = 0; i < uniq.length; i++) remap[uniq[i]] = i
+        var cols = {}
+        for (i = 0; i < nodes.length; i++) {
+            var c = remap[colOf[nodes[i].id]]
+            colOf[nodes[i].id] = c
+            if (!cols[c]) cols[c] = []
+            cols[c].push(nodes[i])
+        }
+
+        // --- 2. UNTANGLE THE EDGES (barycentre / Sugiyama ordering) ---
+        // Each node is pulled towards the average row of the nodes it is joined
+        // to, sweeping left-to-right and back; a few passes is enough and it is
+        // deterministic.
         var keys = Object.keys(cols).map(Number).sort(function (x, y) { return x - y })
         var pos = {}
         function reindex() {
@@ -278,6 +303,16 @@ Kirigami.Page {
                 for (var g2 = 0; g2 < lst.length; g2++)
                     lst[g2].y = Math.max(page.grid, page.snap(lst[g2].y))
             }
+        }
+        // PULL THE WHOLE GRAPH BACK TO THE TOP. The median-Y alignment only ever
+        // pushes rows DOWN to keep the gap, so the layout drifts far from the top
+        // edge (min y ~ 800). Shift everything up so the topmost node sits one
+        // cell from the top - otherwise it opens scrolled into empty space.
+        var minY = Infinity
+        for (var mi = 0; mi < nodes.length; mi++) minY = Math.min(minY, nodes[mi].y)
+        if (isFinite(minY) && minY > page.grid) {
+            var shift = minY - page.grid
+            for (var mj = 0; mj < nodes.length; mj++) nodes[mj].y -= shift
         }
         page.graphChanged()
         canvas.requestPaint()
@@ -499,30 +534,64 @@ Kirigami.Page {
                     onPaint: {
                         const ctx = getContext("2d")
                         ctx.clearRect(0, 0, width, height)
-                        ctx.lineWidth = 2.4
                         ctx.lineCap = "round"
-                        for (const e of page.graph.edges) {
-                            const a = page.nodeById(e[0]), b = page.nodeById(e[1])
+                        const edges = page.graph.edges
+                        // a fast id -> node map (nodeById is O(n); here it would
+                        // be called inside sorts, so build the lookup once)
+                        const byId = {}
+                        for (const n of page.graph.nodes) byId[n.id] = n
+                        // DISTRIBUTE THE ANCHOR POINTS (PORTS). When several edges
+                        // meet at one node they used to start/end at the exact same
+                        // point - a bundle that reads as a hairball. Instead each
+                        // node's edges are spread along its side, and ORDERED by the
+                        // other end's height, so lines fan out without crossing at
+                        // the card. srcSlot/dstSlot give each edge its port index.
+                        const outs = {}, ins = {}
+                        for (let i = 0; i < edges.length; i++) {
+                            (outs[edges[i][0]] = outs[edges[i][0]] || []).push(i)
+                            ;(ins[edges[i][1]] = ins[edges[i][1]] || []).push(i)
+                        }
+                        const srcSlot = {}, srcN = {}, dstSlot = {}, dstN = {}
+                        for (const k in outs) {
+                            const arr = outs[k]
+                            arr.sort(function (p, q) {
+                                const a = byId[edges[p][1]], b = byId[edges[q][1]]
+                                return (a ? a.y : 0) - (b ? b.y : 0)
+                            })
+                            for (let j = 0; j < arr.length; j++) {
+                                srcSlot[arr[j]] = j; srcN[arr[j]] = arr.length
+                            }
+                        }
+                        for (const k2 in ins) {
+                            const arr2 = ins[k2]
+                            arr2.sort(function (p, q) {
+                                const a = byId[edges[p][0]], b = byId[edges[q][0]]
+                                return (a ? a.y : 0) - (b ? b.y : 0)
+                            })
+                            for (let j2 = 0; j2 < arr2.length; j2++) {
+                                dstSlot[arr2[j2]] = j2; dstN[arr2[j2]] = arr2.length
+                            }
+                        }
+                        for (let i = 0; i < edges.length; i++) {
+                            const e = edges[i]
+                            const a = byId[e[0]], b = byId[e[1]]
                             if (!a || !b) continue
                             const sel = (e[0] === page.selected || e[1] === page.selected)
                             ctx.strokeStyle = sel ? Kirigami.Theme.highlightColor
-                                                  : Qt.alpha(Kirigami.Theme.textColor, 0.4)
+                                                  : Qt.alpha(Kirigami.Theme.textColor, 0.35)
                             ctx.fillStyle = ctx.strokeStyle
-                            ctx.lineWidth = sel ? 3.2 : 2.2
-                            // anchor points follow the card size,
-                            // so edges stay glued when it changes
-                            const x1 = a.x + page.cardW, y1 = a.y + page.cardH / 2
-                            const x2 = b.x, y2 = b.y + page.cardH / 2
-                            // ROUTE AROUND CARDS. A straight run between two
-                            // distant columns passed straight over the blocks
-                            // in between. We look for cards the segment would
-                            // cross and bend the curve into the free channel
-                            // above or below them.
-                            const detour = page.channelFor(a, b)
-                            // a smooth S bend: the control points are halfway, the
-                            // line enters and leaves horizontally - it looks good
-                            // whatever the mutual position of the nodes
-                            const dx = Math.max(60, Math.abs(x2 - x1) * 0.5)
+                            ctx.lineWidth = sel ? 3.2 : 2.0
+                            // the port position on each side (evenly spaced)
+                            const y1 = a.y + page.cardH * (srcSlot[i] + 1) / (srcN[i] + 1)
+                            const y2 = b.y + page.cardH * (dstSlot[i] + 1) / (dstN[i] + 1)
+                            const x1 = a.x + page.cardW, x2 = b.x
+                            // ROUTE AROUND CARDS the straight path would cross,
+                            // bending into the free channel above or below them
+                            const detour = page.channelFor(a, b, y1, y2)
+                            // leave and arrive horizontally: the control points sit
+                            // a third of the way across, so short forward edges are
+                            // nearly straight and long ones bend gently
+                            const dx = Math.max(40, Math.abs(x2 - x1) * 0.35)
                             ctx.beginPath()
                             ctx.moveTo(x1, y1)
                             ctx.bezierCurveTo(x1 + dx, y1 + detour,

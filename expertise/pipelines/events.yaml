@@ -5,57 +5,57 @@ nodes:
   kind: input
   ref: fedora/inputs/journal
   x: 40
-  y: 360
+  y: 40
 - id: no_journal
   kind: normalize
   ref: fedora/normalize/journal
   x: 360
-  y: 360
+  y: 40
 - id: en_ipintel
   kind: enrich
   ref: fedora/enrich/ip_intel
-  x: 640
-  y: 840
+  x: 1000
+  y: 680
 - id: out_events
   kind: output
   ref: fedora/outputs/events
-  x: 1320
+  x: 2280
   y: 520
 - id: in_pkg_events
   kind: input
   ref: fedora/inputs/pkg_events
   x: 40
-  y: 40
+  y: 200
 - id: no_pkg_events
   kind: normalize
   ref: fedora/normalize/pkg_events
   x: 360
-  y: 40
+  y: 200
 - id: flt_noise
   kind: filter
   ref: noise/event_noise
-  x: 1000
-  y: 560
+  x: 1320
+  y: 520
 - id: in_proc_events
   kind: input
   ref: fedora/inputs/proc_events
   x: 40
-  y: 520
+  y: 360
 - id: no_proc_events
   kind: normalize
   ref: fedora/normalize/proc_events
   x: 360
-  y: 520
+  y: 360
 - id: in_fim
   kind: input
   ref: fedora/inputs/file_integrity
   x: 40
-  y: 200
+  y: 520
 - id: no_fim
   kind: normalize
   ref: fedora/normalize/file_integrity
   x: 360
-  y: 200
+  y: 520
 - id: in_net
   kind: input
   ref: fedora/inputs/net_events
@@ -69,18 +69,18 @@ nodes:
 - id: cor_detect
   kind: correlation
   ref: correlation/exec_from_temp
-  x: 680
-  y: 40
+  x: 2600
+  y: 520
 - id: en_file_pkg
   kind: enrich
   ref: fedora/enrich/file_pkg_owner
   x: 680
-  y: 200
+  y: 520
 - id: en_alive
   kind: enrich
   ref: fedora/enrich/event_process_alive
   x: 680
-  y: 520
+  y: 360
 - id: en_net_owner
   kind: enrich
   ref: fedora/enrich/net_owner
@@ -89,28 +89,28 @@ nodes:
 - id: en_session
   kind: enrich
   ref: fedora/enrich/event_session
-  x: 960
-  y: 920
+  x: 1960
+  y: 520
 - id: en_proc_link
   kind: enrich
   ref: fedora/enrich/event_process_link
-  x: 1080
-  y: 1080
+  x: 1640
+  y: 520
 - id: co_auth_bruteforce
   kind: correlation
   ref: correlation/auth_bruteforce
-  x: 1000
-  y: 120
+  x: 2600
+  y: 680
 - id: co_external_beacon
   kind: correlation
   ref: correlation/external_beacon
-  x: 1320
-  y: 40
+  x: 2600
+  y: 840
 - id: co_file_perm_burst
   kind: correlation
   ref: correlation/file_perm_burst
-  x: 1000
-  y: 400
+  x: 2600
+  y: 1000
 edges:
 - - in_journal
   - no_journal
