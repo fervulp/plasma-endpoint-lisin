@@ -4,8 +4,8 @@ import QtQuick.Dialogs
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 
-// Экспертиза: каталоги (включая кастомные) → таблица элементов
-// (ID, наименование, тип, версия) → клик по строке = YAML-код.
+// Expertise: directories (including custom ones) -> the table of objects
+// (ID, title, type, version) -> a click on a row = the YAML code.
 Kirigami.Page {
     id: page
     title: "Expertise"
@@ -14,7 +14,7 @@ Kirigami.Page {
     property var dirs: backend.expertiseDirs()
     property string curDir: "fedora"
     property var allElements: backend.expertiseElements(curDir)
-    property int typeFilter: 0    // 0 = все
+    property int typeFilter: 0    // 0 = all
     readonly property var typeNames: ["All types", "Inputs", "Normalization",
                                       "Enrichment", "Filters", "Correlation", "Outputs"]
     readonly property var typeVals: [[], ["input"], ["normalization_rule"],
@@ -35,13 +35,13 @@ Kirigami.Page {
     property var pagedElements: elements.slice(pageIndex * pageLimit,
                                                (pageIndex + 1) * pageLimit)
     onElementsChanged: pageIndex = 0
-    property string editing: ""      // rel-путь открытого файла
-    // «Выполнить сейчас» и «Тесты» для открытого правила
+    property string editing: ""      // the relative path of the open file
+    // "Run now" and "Tests" for the open rule
     property var runResult: null
     function refOf(rel) { return rel.slice(-5) === ".yaml" ? rel.slice(0, -5) : rel }
     property string saveError: ""
 
-    // колонки таблицы элементов: видимость и ширины (ресайз перетаскиванием)
+    // the columns of the object table: visibility and widths (resized by dragging)
     property var colW: ({ id: 90, type: 160, version: 60 })
     property var colHide: ({ id: false, type: false, version: false })
     function setW(c, w) {
@@ -51,7 +51,7 @@ Kirigami.Page {
         const o = Object.assign({}, colHide); o[c] = !o[c]; colHide = o
     }
 
-    property var collapsed: []          // свёрнутые директории
+    property var collapsed: []          // collapsed directories
     function hasChildren(path) {
         return dirs.some(d => d.path.startsWith(path + "/"))
     }
@@ -150,7 +150,7 @@ Kirigami.Page {
                 onClicked: page.pageIndex++
             }
             QQC2.ComboBox {
-                // сколько строк показывать; «all» = без ограничения
+                // how many rows to show; "all" = no limit
                 model: [{ t: "50", v: 50 }, { t: "100", v: 100 }, { t: "200", v: 200 },
                         { t: "500", v: 500 }, { t: "1000", v: 1000 },
                         { t: "all", v: 0 }]
@@ -166,12 +166,12 @@ Kirigami.Page {
         anchors.fill: parent
         spacing: 0
 
-        // -------- каталоги (сворачиваемые) --------
+        // -------- directories (collapsible) --------
         QQC2.ScrollView {
             Layout.preferredWidth: Kirigami.Units.gridUnit * 13
             Layout.fillHeight: true
             ListView {
-                // скрываем детей свёрнутых директорий
+                // hide the children of collapsed directories
                 model: page.dirs.filter(d => {
                     for (const c of page.collapsed)
                         if (d.path !== c && d.path.startsWith(c + "/")) return false
@@ -190,7 +190,7 @@ Kirigami.Page {
                     }
                     contentItem: RowLayout {
                         spacing: 2
-                        QQC2.ToolButton {   // треугольник свернуть/развернуть
+                        QQC2.ToolButton {   // the collapse/expand triangle
                             visible: page.hasChildren(modelData.path)
                             icon.name: page.collapsed.includes(modelData.path)
                                        ? "arrow-right" : "arrow-down"
@@ -220,7 +220,7 @@ Kirigami.Page {
 
         Kirigami.Separator { Layout.fillHeight: true }
 
-        // -------- таблица элементов --------
+        // -------- the table of objects --------
         ColumnLayout {
             visible: page.editing === ""
             Layout.fillWidth: true
@@ -245,7 +245,7 @@ Kirigami.Page {
                         font.bold: true
                         elide: Text.ElideRight
                     }
-                    MouseArea {   // ручка ресайза
+                    MouseArea {   // the resize handle
                         width: 10
                         anchors.right: parent.right
                         anchors.top: parent.top
@@ -393,7 +393,7 @@ Kirigami.Page {
                 }
         }
 
-        // -------- редактор кода --------
+        // -------- the code editor --------
         ColumnLayout {
             visible: page.editing !== ""
             Layout.fillWidth: true
@@ -442,7 +442,7 @@ Kirigami.Page {
         }
     }
 
-    // -------- диалоги --------
+    // -------- dialogs --------
     Kirigami.PromptDialog {
         id: dirDialog
         title: "New folder"
@@ -539,7 +539,7 @@ Kirigami.Page {
         }
     }
 
-    // ---- результат «Run» / «Tests» ----
+    // ---- the result of "Run" / "Tests" ----
     Kirigami.Dialog {
         id: runSheet
         title: "Rule run"
@@ -567,7 +567,7 @@ Kirigami.Page {
                     text: page.runResult ? (page.runResult.hint || "") : ""
                 }
 
-                // --- результат Run ---
+                // --- the Run result ---
                 QQC2.Label {
                     Layout.fillWidth: true
                     visible: page.runResult && page.runResult.count !== undefined
@@ -598,7 +598,7 @@ Kirigami.Page {
                     }
                 }
 
-                // --- результат Tests ---
+                // --- the Tests result ---
                 QQC2.Label {
                     Layout.fillWidth: true
                     visible: page.runResult && page.runResult.total !== undefined

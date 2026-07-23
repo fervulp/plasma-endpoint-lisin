@@ -3,15 +3,15 @@ id: LS-E-23
 type: enrichment
 version: 1.0.0
 title: Link the event to a process
-# СВЯЗЬ СОБЫТИЯ С ПРОЦЕССОМ ДЕЛАЕТСЯ ПРИ ПОСТУПЛЕНИИ, а не при показе.
-# Раньше интерфейс сверял pid события с живыми процессами каждый раз, когда
-# показывал ленту: это работа на каждый просмотр и только для тех процессов,
-# которые ЕЩЁ живы. Здесь связь записывается в само событие один раз:
-#   * есть pid — дополняем имя, путь и пользователя из состояния;
-#   * pid нет — ищем его по имени процесса, по пути бинарника или по сокету
-#     (адрес:порт из события против таблицы сокетов), и если нашли ОДИН
-#     кандидат, записываем; способ фиксируем в process_source, чтобы
-#     догадка не выдавалась за факт.
+# AN EVENT IS LINKED TO A PROCESS AT INGEST, not at display time.
+# The interface used to compare the pid of an event with the live processes every
+# time it showed the feed: that is work per view and only for the processes that
+# are STILL alive. Here the link is written into the event itself once:
+#   * there is a pid - we add the name, the path and the user from the state;
+#   * there is no pid - we look for it by the process name, by the binary path or
+#     by the socket (address:port from the event against the socket table), and if
+#     exactly ONE candidate is found we record it; the method is stored in
+#     process_source so that a guess is not passed off as a fact.
 code: |
   import sqlite3
   from pathlib import Path
@@ -38,7 +38,7 @@ code: |
           except sqlite3.Error:
               pass
           try:
-              # сокет -> процесс: у события есть адрес и порт назначения
+              # socket -> process: the event has a destination address and port
               for r in con.execute("SELECT remote, local, pid FROM ports"):
                   pid = str(r["pid"] or "").strip()
                   if not pid:
@@ -57,13 +57,13 @@ code: |
       by_pid, by_name, by_sock = _load()
 
       def one(pids):
-          """Связь принимаем, только если кандидат ОДИН: иначе это догадка."""
+          """We accept a link only if there is exactly ONE candidate: otherwise it is a guess."""
           return next(iter(pids)) if pids and len(pids) == 1 else ""
 
       for r in rows:
           pid = str(r.get("process_pid") or "").strip()
           if not pid:
-              # ищем по имени/пути процесса из самого события
+              # look by the process name/path from the event itself
               for f in ("process_executable", "process_name", "object_name"):
                   v = str(r.get(f) or "").strip()
                   if not v:
@@ -75,7 +75,7 @@ code: |
                       r["process_source"] = "matched by name"
                       break
           if not pid:
-              # ищем по сокету события
+              # look by the socket of the event
               dst = str(r.get("destination_ip") or "")
               dpt = str(r.get("destination_port") or "")
               key = "%s:%s" % (dst, dpt) if dst and dpt else ""
@@ -87,8 +87,8 @@ code: |
           if not pid:
               continue
           info = by_pid.get(pid)
-          # ЖИВ ЛИ ПРОЦЕСС — записываем сразу: интерфейсу не придётся
-          # сверяться со снимком на каждый показ ленты
+          # IS THE PROCESS ALIVE - we record it right away: the interface will not
+          # have to compare with the snapshot on every render of the feed
           r["process_alive"] = "yes" if info else "no"
           if not info:
               continue

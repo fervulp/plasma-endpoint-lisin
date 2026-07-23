@@ -3,42 +3,44 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 
-// ШАБЛОННАЯ ТАБЛИЦА для всех разделов приложения.
+// THE TEMPLATE TABLE for all sections of the application.
 //
-// Положение 11: много однотипных элементов — это таблица. Раньше каждый
-// раздел писал свою: свои колонки, своя шапка, свой sidebar — и они
-// разъезжались. Здесь одна реализация, у которой:
-//   * ОДНО описание колонок читают и шапка, и строки — ширины не разъедутся;
-//   * выбор видимых колонок и их порядка (кнопка «Columns»);
-//   * закреплённая шапка, зебра, фиксированная высота строки;
-//   * `reuseItems` — без него длинный список подвисает на пересоздании;
-//   * клик по строке = выбор и сигнал наружу (хозяин открывает sidebar);
-//   * наведение на ячейку даёт «+»/«−» — добавить значение в запрос.
+// Principle 11: many elements of the same shape means a table. Every section
+// used to write its own: its own columns, its own header, its own sidebar - and
+// they drifted apart. Here is one implementation, in which:
+//   * ONE description of the columns is read by the header and the rows - the
+//     widths cannot drift;
+//   * a choice of visible columns and their order (the "Columns" button);
+//   * a pinned header, zebra striping, a fixed row height;
+//   * `reuseItems` - without it a long list stalls while recreating delegates;
+//   * a click on a row = selection and a signal outwards (the owner opens the
+//     sidebar);
+//   * hovering a cell gives "+"/"-" - add the value to the query.
 //
-// Компонент ничего не знает о том, откуда пришли строки: это может быть
-// SQL-выборка или список, посчитанный в Python.
+// The component knows nothing about where the rows came from: it may be an SQL
+// result or a list computed in Python.
 Item {
     id: table
 
-    // [{ k, t, w, fill, right, mono }] — ключ, заголовок, ширина в gridUnit
+    // [{ k, t, w, fill, right, mono }] - key, header, width in gridUnit
     property var columns: []
     property var rows: []
     property var selected: null
     property int rowHeight: Kirigami.Units.gridUnit * 2.4
-    // ключи скрытых колонок и порядок — состояние вида
+    // the keys of the hidden columns and the order - the state of the view
     property var hidden: []
     property var order: []
-    // необязательный форматтер: function(row, key) -> string
+    // an optional formatter: function(row, key) -> string
     property var formatter: null
-    // необязательный цвет акцента слева: function(row) -> color | ""
+    // an optional accent colour on the left: function(row) -> color | ""
     property var accent: null
 
     signal rowActivated(var row)
     signal valueCopied(string value)
-    // клик по заголовку: хозяин решает, как применить порядок (SQL или список)
+    // a click on the header: the owner decides how to apply the order (SQL or list)
     signal sortRequested(string field, bool desc)
 
-    // текущая сортировка — показывается иконкой в шапке
+    // the current sorting - shown by an icon in the header
     property string sortCol: ""
     property bool sortDesc: false
     function sortBy(k) {
@@ -63,7 +65,7 @@ Item {
         var v = row[key]
         return (v === undefined || v === null) ? "" : String(v)
     }
-    // В QML нет прямого доступа к буферу обмена — кладём через скрытый TextEdit
+    // QML has no direct access to the clipboard - we go through a hidden TextEdit
     function copyValue(v) {
         if (v === undefined || v === null || v === "") return
         clip.text = String(v); clip.selectAll(); clip.copy()
@@ -130,7 +132,7 @@ Item {
                     TapHandler { onTapped: table.sortBy(modelData.k) }
                 }
             }
-            // ВЫБОР КОЛОНОК УБРАН: колонки задаёт SELECT в строке запроса
+            // THE COLUMN CHOICE WAS REMOVED: the columns are set by SELECT in the query bar
         }
         Kirigami.Separator { Layout.fillWidth: true }
 
@@ -185,8 +187,8 @@ Item {
 
                                 QQC2.Label {
                                     anchors.fill: parent
-                                    // ВОЗДУХ В ЯЧЕЙКЕ: текст не должен лежать
-                                    // вплотную к разделителю колонок
+                                    // AIR INSIDE A CELL: the text must not lie
+                                    // right against the column separator
                                     anchors.leftMargin: Kirigami.Units.smallSpacing
                                     anchors.rightMargin: cellHover.hovered
                                                          ? 34 : Kirigami.Units.smallSpacing
@@ -201,8 +203,8 @@ Item {
                                     font.pointSize: Kirigami.Theme.smallFont.pointSize
                                 }
                                 HoverHandler { id: cellHover }
-                                // Клик по ячейке выделяет строку, двойной —
-                                // копирует значение (как в ленте событий).
+                                // A click on a cell selects the row, a double click
+                                // copies the value (as in the event feed).
                                 TapHandler {
                                     acceptedButtons: Qt.LeftButton
                                     onSingleTapped: {
@@ -211,9 +213,9 @@ Item {
                                     }
                                     onDoubleTapped: table.copyValue(parent.val)
                                 }
-                                // Действия ячейки создаются ЛЕНИВО: строить их
-                                // для каждой ячейки сразу — это тысячи объектов
-                                // и заметное подвисание при обновлении.
+                                // The cell actions are created LAZILY: building them
+                                // for every cell at once means thousands of objects
+                                // and a noticeable stall on refresh.
                                 Loader {
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter

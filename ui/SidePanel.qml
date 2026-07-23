@@ -23,11 +23,11 @@ Rectangle {
 
     Layout.fillHeight: true
     Layout.preferredWidth: open ? panelWidth : 0
-    // ВАЖНО: видимость завязана на open, а не только на Layout.preferredWidth.
-    // Attached-свойство раскладки может ещё не быть посчитано в момент
-    // вычисления биндинга — панель тогда оставалась невидимой при open=true
-    // (событие выделено, а сайдбар не появлялся). Ширина > 1 нужна лишь для
-    // того, чтобы панель не мигала на анимации закрытия.
+    // IMPORTANT: visibility is tied to open, not only to Layout.preferredWidth.
+    // The attached layout property may not have been computed yet at the moment
+    // the binding is evaluated - the panel then stayed invisible with open=true
+    // (an event was selected but the sidebar did not appear). A width > 1 is only
+    // needed so that the panel does not flicker during the closing animation.
     visible: open || Layout.preferredWidth > 1
     clip: true
 
@@ -44,7 +44,7 @@ Rectangle {
         anchors.bottom: parent.bottom
     }
 
-    MouseArea {   // ресайз сайдбара за левый край
+    MouseArea {   // resizing the sidebar by its left edge
         width: 8
         anchors.left: parent.left
         anchors.top: parent.top

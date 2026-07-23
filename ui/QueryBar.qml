@@ -1,58 +1,58 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
-// сетка месяца: в стиле org.kde.desktop её нет, берём из базового набора
+// the month grid: the org.kde.desktop style has none, we take it from the basic set
 import QtQuick.Controls.Basic as CB
 import org.kde.kirigami as Kirigami
 
-// ЕДИНАЯ СТРОКА ЗАПРОСА для всех таблиц приложения.
+// THE SINGLE QUERY BAR for every table of the application.
 //
-// Устройство простое: запрос ВСЕГДА начинается с ВЫБОРКИ (SELECT) — теми
-// полями, которые таблица показывает прямо сейчас. Всё остальное —
-// фильтр, сортировка, группировка, уникальные, вычисляемое поле —
-// ДОБАВЛЯЕТСЯ по одному кнопкой «+» и строится ОТНОСИТЕЛЬНО выборки.
-// Кнопка «Reset» возвращает выборку к исходной.
+// The design is simple: a query ALWAYS starts with a SELECTION (SELECT) - of the
+// fields the table shows right now. Everything else - a filter, a sort, a
+// grouping, DISTINCT, a calculated field - is ADDED one at a time with the
+// "+" button and is built RELATIVE to the selection.
+// The "Reset" button returns the selection to the original one.
 //
-// Два способа задать одно и то же:
-//   * НАКЛИКАТЬ — конструктор (по умолчанию);
-//   * НАБРАТЬ — SQL руками.
-// Переключение запрос не теряет.
+// Two ways to express the same thing:
+//   * CLICK it together - the builder (the default);
+//   * TYPE it - SQL by hand.
+// Switching does not lose the query.
 //
-// Компонент НИЧЕГО не исполняет: собирает спецификацию и отдаёт сигналом.
-// Кто и как применит (SQL к базе или фильтрация в памяти) — дело хозяина
-// таблицы. Поэтому одна строка работает и над state.db, и над списком,
-// посчитанным в Python.
+// The component executes NOTHING: it assembles a specification and emits it as a
+// signal. Who applies it and how (SQL against a database or filtering in memory)
+// is the business of the owner of the table. That is why one bar works both over
+// state.db and over a list computed in Python.
 Item {
     id: bar
     implicitHeight: col.implicitHeight
 
-    // поля таблицы: [{ name, title }] — что вообще можно выбрать
+    // the fields of the table: [{ name, title }] - what can be selected at all
     property var fields: []
-    // поля, которые таблица показывает СЕЙЧАС — с них начинается выборка
+    // the fields the table shows NOW - the selection starts with them
     property var defaultSelect: []
-    // текущая спецификация запроса
-    // where: [{field, op, value, join}] — join связывает с ПРЕДЫДУЩИМ условием
-    // (AND по умолчанию; OR / AND NOT / OR NOT). orderBy: [{field, desc}] —
-    // сортировок и группировок может быть несколько, как в SQL.
+    // the current query specification
+    // where: [{field, op, value, join}] - join binds it to the PREVIOUS condition
+    // (AND by default; OR / AND NOT / OR NOT). orderBy: [{field, desc}] - there
+    // may be several sorts and groupings, as in SQL.
     property var spec: ({ where: [], select: [], groupBy: [],
                           orderBy: [], distinct: false, computed: [] })
-    // какие части запроса добавлены кнопкой «+»
+    // which parts of the query were added with the "+" button
     property var clauses: []
-    property bool builderMode: true      // накликать (по умолчанию) или набрать
-    property string manualText: ""       // то, что набрали руками
+    property bool builderMode: true      // click it together (default) or type it
+    property string manualText: ""       // what was typed by hand
     property string placeholder: "SELECT * WHERE field = 'value'"
 
     signal applied(var spec, string sql)
 
-    // есть несохранённые правки — Run подсвечен
+    // there are unsaved edits - Run is highlighted
     property bool dirty: false
-    // снимок исходного запроса: к нему возвращает сброс
+    // a snapshot of the original query: reset returns to it
     property var initialQuery: null
     function snapshot() {
         var w = []
         for (var i = 0; i < spec.where.length; i++) {
             var c = spec.where[i]
-            // у относительной границы сравниваем смещение, а не саму дату
+            // for a relative bound we compare the offset, not the date itself
             w.push(c.ago ? { field: c.field, op: c.op, join: c.join, ago: c.ago }
                          : c)
         }
@@ -63,7 +63,7 @@ Item {
     }
     function markBaseline() { initialQuery = snapshot() }
 
-    // состояние запроса целиком — для сохранения между переходами
+    // the whole state of the query - for keeping it between navigations
     function exportState() {
         return JSON.stringify({ w: spec.where, s: spec.select, g: spec.groupBy,
                                 o: spec.orderBy, d: spec.distinct,
@@ -84,13 +84,13 @@ Item {
         builderMode = st.b !== false
         initialQuery = st.init || null
         dirty = false
-        apply()                 // вернулись — запрос уже выполнен
+        apply()                 // we are back - the query has already run
         return true
     }
 
-    // запрос отличается от исходного — тогда и только тогда есть что сбрасывать
+    // the query differs from the original - then and only then is there something to reset
     readonly property bool changed: {
-        // перечисляем поля явно, чтобы привязка пересчитывалась при их правке
+        // the fields are listed explicitly so that the binding recomputes when they are edited
         var _ = [spec.where.length, spec.select.length, spec.groupBy.length,
                  spec.orderBy.length, spec.distinct, spec.computed.length,
                  clauses.length, manualText, quickText]
@@ -102,28 +102,31 @@ Item {
         return false
     }
     property bool editingCalc: false
-    // для проверки рендером: сколько условий реально нарисовано
-    readonly property int chipCount: repWhere.count
+    // for verification by rendering: how many conditions the query holds.
+    // It used to read repWhere.count, but that Repeater was removed together with
+    // the chips - the binding stayed and threw a ReferenceError at runtime on
+    // every load. Compiling QML does not catch that; loading the window does.
+    readonly property int chipCount: spec.where.length
 
-    // Поля, ОТНОСИТЕЛЬНО которых строятся фильтр, группировка и сортировка:
-    // те, что в выборке; если выборка пуста — все.
+    // The fields RELATIVE to which the filter, the grouping and the sorting are
+    // built: the ones in the selection; if the selection is empty - all of them.
     readonly property var activeFields: {
         if (spec.select.length) return spec.select
         return fields.map(function (f) { return f.name })
     }
 
-    // ПСЕВДОПОЛЕ «all» — искать во всех полях сразу
+    // THE PSEUDO FIELD "all" - search in every field at once
     readonly property string anyField: "all fields"
-    // имена всех полей — для выбора с поиском; «all» первым
+    // the names of all fields - for the search picker; "all" first
     readonly property var allFieldNames: {
         var out = [anyField]
         var f = fields
         for (var i = 0; i < f.length; i++) out.push(f[i].name)
         return out
     }
-    // СНАЧАЛА ПОЛЯ ВЫБОРКИ, ПОТОМ ОСТАЛЬНЫЕ. Группировать и сортировать можно
-    // по любому полю, даже если его нет в SELECT (в SQL это законно), но
-    // выбранные показываем первыми — по ним группируют чаще всего.
+    // THE SELECTION FIELDS FIRST, THEN THE REST. One may group and sort by any
+    // field even if it is not in SELECT (that is legal in SQL), but the selected
+    // ones are shown first - people group by them most often.
     readonly property var fieldsPreferSelected: {
         var out = spec.select.slice()
         var all = allFieldNames
@@ -131,20 +134,20 @@ Item {
             if (out.indexOf(all[i]) < 0) out.push(all[i])
         return out
     }
-    // поле, выбранное в строке фильтра
+    // the field chosen in the filter row
     property string filterField: ""
-    // БЫСТРЫЙ ПОИСК ПО ВСЕМ ПОЛЯМ: главное действие строки. Это обычное
-    // условие «all fields MATCH …», просто у него своё поле ввода — так
-    // «найти что угодно» не требует ни конструктора, ни знания SQL.
+    // QUICK SEARCH ACROSS ALL FIELDS: the main action of the bar. It is an
+    // ordinary condition "all fields MATCH ...", it simply has its own input -
+    // that way "find anything" requires neither the builder nor knowing SQL.
     property string quickText: ""
-    // ВЫСОТА ДВУХ СТРОК ЧИПОВ: длинный перечень не растягивает панель —
-    // что не поместилось, открывается кнопкой «…» отдельным окном.
+    // THE HEIGHT OF TWO ROWS OF CHIPS: a long list does not stretch the panel -
+    // what did not fit is opened in a separate popup with the "..." button.
     readonly property int twoRows: Kirigami.Units.gridUnit * 4
                                    + Kirigami.Units.smallSpacing
-    // какой перечень открыт в окне «показать всё»
+    // which list is open in the "show all" popup
     property string moreKind: ""
-    // кнопки хозяина страницы (история, сохранить, сохранённые) — слева
-    // в строке управления запросом
+    // the buttons of the page owner (history, save, saved) - on the left of the
+    // query control row
     property alias hostTools: hostToolsRow.data
 
     readonly property var operators: ["MATCH", "NOT MATCH", "=", "<>",
@@ -152,11 +155,11 @@ Item {
                                       ">", "<", ">=", "<=",
                                       "IS NULL", "IS NOT NULL"]
     function noValue(op) { return op === "IS NULL" || op === "IS NOT NULL" }
-    // кавычка в значении не должна разрывать запрос
+    // a quote inside a value must not break the query
     function quote(v) { return "'" + String(v).replace(/'/g, "''") + "'" }
-    // одно условие -> кусок SQL
+    // one condition -> a piece of SQL
     function condSql(field, op, value) {
-        // «all fields» разворачивается в OR по всем полям таблицы
+        // "all fields" expands into an OR over every field of the table
         if (field === anyField) {
             var parts = []
             for (var i = 0; i < fields.length; i++)
@@ -172,17 +175,17 @@ Item {
     }
     readonly property var joiners: ["AND", "OR", "AND NOT", "OR NOT"]
 
-    // ПОЛЕ ВРЕМЕНИ распознаём по имени — признак структурный, не список
-    // конкретных полей: подойдёт любой таблице, где время названо привычно.
+    // A TIME FIELD is recognised by its name - the property is structural, not a
+    // list of specific fields: it fits any table where time is named as usual.
     function isTimeField(n) {
         if (!n) return false
         n = String(n).toLowerCase()
         return n === "ts" || n === "time" || n === "date"
                || /(^|_)(ts|time|date|at|changed|issued|installed|seen|login)$/.test(n)
     }
-    // Готовые промежутки для такого поля. Границу считаем СЕЙЧАС и записываем
-    // абсолютным временем: «за последний час» остаётся тем самым часом и не
-    // уползает при следующем открытии.
+    // Ready ranges for such a field. The bound is computed NOW and written as an
+    // absolute time: "the last hour" stays that very hour and does not creep away
+    // the next time the popup is opened.
     readonly property var timePresets: [
         { t: "Last 5 minutes",  ms: 300000 },
         { t: "Last 15 minutes", ms: 900000 },
@@ -194,13 +197,13 @@ Item {
     function agoIso(ms) {
         return new Date(Date.now() - ms).toISOString().replace(/\.\d+Z$/, "Z")
     }
-    // ПРОИЗВОЛЬНЫЙ ПРОМЕЖУТОК: «столько-то минут/часов/дней/месяцев/лет назад».
-    // Месяцы и годы считаем календарно (в месяце не 30 суток), поэтому не
-    // через миллисекунды, а сдвигом даты.
+    // AN ARBITRARY RANGE: "so many minutes/hours/days/months/years ago".
+    // Months and years are counted by the calendar (a month is not 30 days), so
+    // not through milliseconds but by shifting the date.
     readonly property var timeUnits: ["seconds", "minutes", "hours", "days",
                                       "weeks", "months", "years"]
-    // смещение в миллисекундах — им помечается относительная граница, чтобы
-    // сброс запроса пересчитывал её от «сейчас»
+    // the offset in milliseconds - a relative bound is marked with it so that
+    // resetting the query recomputes it from "now"
     function agoMs(n, unit) {
         n = Math.max(0, Number(n) || 0)
         var k = { seconds: 1000, minutes: 60000, hours: 3600000,
@@ -208,8 +211,8 @@ Item {
                   months: 2592000000, years: 31536000000 }
         return n * (k[unit] || 0)
     }
-    // ЧЕЛОВЕЧЕСКОЕ ВРЕМЯ для кнопок: «22 Jul 2026 17:59» в местной зоне
-    // (в базе UTC — перевод делает граница интерфейса)
+    // HUMAN TIME for the buttons: "22 Jul 2026 17:59" in the local zone
+    // (the database holds UTC - the interface boundary converts it)
     readonly property var monthNames: ["Jan","Feb","Mar","Apr","May","Jun",
                                        "Jul","Aug","Sep","Oct","Nov","Dec"]
     function pad2(n) { return n < 10 ? "0" + n : String(n) }
@@ -220,7 +223,7 @@ Item {
         return d.getDate() + " " + monthNames[d.getMonth()] + " " + d.getFullYear()
                + "  " + pad2(d.getHours()) + ":" + pad2(d.getMinutes())
     }
-    // «за последние N единиц» — задаёт нижнюю границу и снимает верхнюю
+    // "for the last N units" - sets the lower bound and removes the upper one
     function applyLast(n, unit) {
         if (editIndex < 0) return
         setCond(editIndex, "op", ">=")
@@ -241,20 +244,20 @@ Item {
         return d.toISOString().replace(/\.\d+Z$/, "Z")
     }
 
-    // Выборка стартует с того, что таблица показывает сейчас.
+    // The selection starts with what the table shows right now.
     onDefaultSelectChanged: if (!spec.select.length) resetSelect()
     Component.onCompleted: {
         if (!spec.select.length && defaultSelect.length) resetSelect()
-        apply()          // отдать таблице выборку по умолчанию
+        apply()          // hand the default selection to the table
     }
 
-    // ---- сборка запроса ----
+    // ---- assembling the query ----
 
-    // УСЛОВИЕ (WHERE) — это то, что уходит хозяину: он подставляет его
-    // в свой запрос или фильтрует им список в памяти.
+    // THE CONDITION (WHERE) is what goes to the owner: they substitute it into
+    // their query or filter an in-memory list with it.
     function buildSql() {
         var out = ""
-        // быстрый поиск идёт первым условием
+        // the quick search comes as the first condition
         if (quickText.trim() !== "")
             out = condSql(anyField, "MATCH", quickText.trim())
         for (var i = 0; i < spec.where.length; i++) {
@@ -270,7 +273,7 @@ Item {
         }
         return out
     }
-    // ПОЛНЫЙ запрос — то, что видно в строке: начинается с выборки.
+    // THE FULL query - what is visible in the bar: it starts with the selection.
     function fullSql() {
         var out = "SELECT "
         if (spec.distinct) out += "DISTINCT "
@@ -290,8 +293,9 @@ Item {
         }
         return out
     }
-    // Из набранного руками берём условие: всё после WHERE, а если слова
-    // WHERE нет — считаем условием весь текст (так привычнее в фильтрах).
+    // From what was typed by hand we take the condition: everything after WHERE,
+    // and if there is no WHERE word we treat the whole text as the condition (that
+    // is how filters usually behave).
     function manualWhere() {
         var t = manualText.trim()
         var m = t.match(/\bWHERE\b([\s\S]*)$/i)
@@ -302,9 +306,9 @@ Item {
         }
         return /^\s*SELECT\b/i.test(t) ? "" : t
     }
-    // ПОРЯДОК СОРТИРОВКИ для хозяина таблицы: из конструктора или из
-    // набранного текста — источник один, каким бы способом ни задавали.
-    // краткая сводка условий — для подсказки на значке
+    // THE SORT ORDER for the owner of the table: from the builder or from the
+    // typed text - one source, whichever way it was set.
+    // a short summary of the conditions - for the tooltip on the icon
     function conditionSummary() {
         var out = []
         for (var i = 0; i < spec.where.length && i < 4; i++) {
@@ -330,13 +334,13 @@ Item {
         dirty = false
         bar.applied(spec, builderMode ? buildSql() : manualWhere())
     }
-    // ВАЖНО: присвоить `spec = spec` НЕЛЬЗЯ — QML пропускает присваивание
-    // того же объекта, уведомления нет, и всё, что на spec завязано, не
-    // обновляется. Поэтому кладём НОВЫЙ объект: это и есть сигнал «изменилось».
-    // ЗАПРОС НЕ ИСПОЛНЯЕТСЯ САМ. Правки конструктора только обновляют
-    // спецификацию (видно по чипам и по строке запроса); поиск запускает
-    // кнопка Run. Иначе каждый клик бил по базе, и было непонятно, что
-    // именно сейчас выполнено.
+    // IMPORTANT: assigning `spec = spec` is IMPOSSIBLE - QML skips an assignment
+    // of the same object, there is no notification, and everything bound to spec
+    // is not updated. So we put a NEW object: that is the "it changed" signal.
+    // THE QUERY DOES NOT RUN BY ITSELF. Builder edits only update the
+    // specification (visible in the chips and in the query line); the search is
+    // started by the Run button. Otherwise every click hit the database and it was
+    // unclear what exactly is executed right now.
     function touch() {
         spec = { where: spec.where.slice(),
                  select: spec.select.slice(),
@@ -347,12 +351,12 @@ Item {
         dirty = true
     }
 
-    // ---- выборка ----
+    // ---- the selection ----
     function resetSelect() {
         spec.select = defaultSelect.slice()
         touch()
     }
-    // ПОЛЕ МЕНЯЕТСЯ НА МЕСТЕ: и в выборке, и в группировке, и в сортировке.
+    // A FIELD IS CHANGED IN PLACE: in the selection, in the grouping and in the sorting.
     function replaceSelect(i, name) {
         var sl = spec.select.slice()
         if (i < 0 || i >= sl.length || sl.indexOf(name) >= 0) return
@@ -369,8 +373,8 @@ Item {
         o[i] = { field: name, desc: o[i].desc }; spec.orderBy = o; touch()
     }
 
-    // ПОРЯДОК ПОЛЕЙ В ВЫБОРКЕ = порядок колонок в таблице, поэтому его
-    // должно быть можно менять, а не только набирать заново.
+    // THE ORDER OF THE FIELDS IN THE SELECTION = the order of the columns in the
+    // table, so it must be changeable rather than only re-typed.
     function moveSelectTo(from, to) {
         var sl = spec.select.slice()
         if (from === to || from < 0 || from >= sl.length) return
@@ -397,7 +401,7 @@ Item {
         touch()
     }
 
-    // ---- части запроса, добавляемые кнопкой «+» ----
+    // ---- the parts of the query added with the "+" button ----
     function addClause(kind) {
         if (clauses.indexOf(kind) >= 0) return
         var c = clauses.slice()
@@ -419,10 +423,10 @@ Item {
     }
     function hasClause(kind) { return clauses.indexOf(kind) >= 0 }
 
-    // добавить условие извне (кнопка «+» на ячейке таблицы)
-    // ---- дописывание в НАБРАННЫЙ ТЕКСТ (режим SQL) ----
-    // «+» на ячейке и сортировка должны попадать туда же, куда смотрит
-    // пользователь: если он набирает SQL руками — прямо в текст запроса.
+    // add a condition from outside (the "+" button on a table cell)
+    // ---- appending to the TYPED TEXT (SQL mode) ----
+    // "+" on a cell and sorting must land where the user is looking: if they are
+    // typing SQL by hand - straight into the query text.
     function sqlFragment(field, op, value) { return condSql(field, op, value) }
     function appendWhere(text, frag) {
         var t = String(text || "").trim()
@@ -446,7 +450,7 @@ Item {
         return t + " ORDER BY " + piece
     }
 
-    // сортировка снаружи (клик по заголовку колонки)
+    // sorting from outside (a click on a column header)
     function addSort(field, desc) {
         if (!builderMode) {
             manualText = appendOrder(manualText, field, !!desc)
@@ -462,9 +466,9 @@ Item {
         touch()
     }
 
-    // По умолчанию условия соединяются через И — так ждут от фильтра.
+    // By default conditions are joined with AND - that is what people expect.
     function addCondition(field, op, value, join, agoMs) {
-        // в режиме SQL условие дописывается прямо в набранный текст
+        // in SQL mode the condition is appended straight into the typed text
         if (!builderMode) {
             manualText = appendWhere(manualText, sqlFragment(field, op, value))
             dirty = true
@@ -476,7 +480,7 @@ Item {
                 && String(w[i].value) === String(value)) {
                 builderMode = true
                 addClause("where")
-                return                       // такое условие уже есть
+                return                       // such a condition already exists
             }
         w.push({ field: field, op: op, value: String(value),
                  join: join || "AND", ago: agoMs || 0 })
@@ -485,27 +489,27 @@ Item {
         addClause("where")
         touch()
     }
-    // какое условие правим (-1 — не правим)
+    // which condition is being edited (-1 - none)
     property int editIndex: -1
     function editCondition(i) { editIndex = i; condPopup.open() }
     function closeCondEditor() { condPopup.close() }
     function showMore(kind) { moreKind = kind; morePopup.open() }
-    // для проверки рендером
+    // for verification by rendering
     function openCalendar(which) { calPopup.target = which; calPopup.open() }
 
-    // правка одного условия: поле / оператор / значение
+    // editing one condition: field / operator / value
     function setCond(i, key, v) {
         var w = spec.where.slice()
         if (i < 0 || i >= w.length) return
         var c = { field: w[i].field, op: w[i].op, value: w[i].value,
                   join: w[i].join, ago: w[i].ago || 0 }
-        if (key === "value" || key === "field") c.ago = 0   // задали руками
+        if (key === "value" || key === "field") c.ago = 0   // set by hand
         c[key] = v
         w[i] = c
         spec.where = w
         touch()
     }
-    // верхняя граница промежутка: одно условие `<=` на поле, не плодим дубли
+    // the upper bound of a range: one `<=` condition on the field, no duplicates
     function setUpperBound(field, iso) {
         var w = spec.where.slice()
         for (var i = 0; i < w.length; i++)
@@ -520,7 +524,7 @@ Item {
     function clearAll() {
         if (initialQuery !== null) {
             var b = JSON.parse(initialQuery)
-            // относительные границы времени пересчитываем от СЕЙЧАС
+            // relative time bounds are recomputed from NOW
             for (var i = 0; i < b.w.length; i++)
                 if (b.w[i].ago)
                     b.w[i] = { field: b.w[i].field, op: b.w[i].op,
@@ -531,7 +535,7 @@ Item {
             clauses = b.cl
             manualText = b.m
             builderMode = true
-            apply()          // сброс применяется сразу: это возврат к началу
+            apply()          // a reset is applied at once: it is a return to the start
             return
         }
         spec = { where: [], select: defaultSelect.slice(), groupBy: [],
@@ -542,9 +546,9 @@ Item {
         touch()
     }
 
-    // ОКНО ПРАВКИ УСЛОВИЯ. Одно на все условия: клик по условию открывает
-    // его здесь. Поле МОЖНО СМЕНИТЬ — с поиском по всем полям, оператор из
-    // списка, значение вводится; у поля времени предлагаются промежутки.
+    // THE CONDITION EDITOR. One for all conditions: a click on a condition opens
+    // it here. The field CAN BE CHANGED - with a search over all fields, the
+    // operator from a list, the value typed; a time field offers ranges.
     QQC2.Popup {
         id: condPopup
         parent: bar
@@ -555,9 +559,9 @@ Item {
         modal: false
         closePolicy: QQC2.Popup.CloseOnEscape | QQC2.Popup.CloseOnPressOutsideParent
         onClosed: bar.editIndex = -1
-        // трогал ли пользователь поля произвольного промежутка
+        // whether the user touched the fields of the arbitrary range
         property bool agoTouched: false
-        property string until: ""          // верхняя граница; "" = now
+        property string until: ""          // the upper bound; "" = now
         onOpened: { agoTouched = false; until = "" }
         readonly property var cond: (bar.editIndex >= 0
                                      && bar.editIndex < bar.spec.where.length)
@@ -579,7 +583,7 @@ Item {
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 4
                     opacity: 0.7
                 }
-                // ПОЛЕ МЕНЯЕТСЯ В ЛЮБОЙ МОМЕНТ — со списком и поиском
+                // THE FIELD CAN BE CHANGED AT ANY TIME - with a list and a search
                 FieldPicker {
                     Layout.fillWidth: true
                     Layout.preferredHeight: Kirigami.Units.gridUnit * 2
@@ -589,7 +593,7 @@ Item {
                     onPicked: function (n) { bar.setCond(bar.editIndex, "field", n) }
                 }
             }
-            // ---- ОБЫЧНОЕ УСЛОВИЕ ----
+            // ---- AN ORDINARY CONDITION ----
             RowLayout {
                 Layout.fillWidth: true
                 visible: !!(condPopup.cond && !bar.isTimeField(condPopup.cond.field))
@@ -601,8 +605,8 @@ Item {
                 }
                 QQC2.ComboBox {
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 9
-                    // у поиска по всем полям осмысленны только текстовые
-                    // операторы: сравнивать «всё» числом бессмысленно
+                    // for a search over all fields only the text operators make
+                    // sense: comparing "everything" with a number is meaningless
                     model: (condPopup.cond && condPopup.cond.field === bar.anyField)
                            ? ["MATCH", "NOT MATCH", "=", "<>"] : bar.operators
                     currentIndex: condPopup.cond
@@ -620,9 +624,9 @@ Item {
                 }
             }
 
-            // ---- УСЛОВИЕ ПО ВРЕМЕНИ ----
-            // Читается как фраза: «с ... по ...». Границу задают либо готовым
-            // промежутком, либо числом единиц назад, либо календарём.
+            // ---- A TIME CONDITION ----
+            // It reads as a phrase: "from ... to ...". The bound is set either by a
+            // ready range, by a number of units back, or by the calendar.
             ColumnLayout {
                 Layout.fillWidth: true
                 visible: !!(condPopup.cond && bar.isTimeField(condPopup.cond.field))
@@ -668,7 +672,7 @@ Item {
                     }
                 }
 
-                // быстрый способ: «за последние N единиц»
+                // the quick way: "for the last N units"
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.smallSpacing
@@ -716,10 +720,10 @@ Item {
                 }
             }
 
-            // ---- КАЛЕНДАРЬ ----
-            // MonthGrid из QtQuick.Controls.Basic: настоящая сетка месяца,
-            // без внешних зависимостей и без локализации KDE (она требует
-            // i18n, которого в приложении нет).
+            // ---- THE CALENDAR ----
+            // MonthGrid from QtQuick.Controls.Basic: a real month grid, without
+            // external dependencies and without the KDE localisation (which needs
+            // i18n, and the application has none).
             QQC2.Popup {
                 id: calPopup
                 modal: false
@@ -770,7 +774,7 @@ Item {
 
                     CB.DayOfWeekRow {
                         Layout.fillWidth: true
-                        locale: Qt.locale("en_GB")     // неделя с понедельника
+                        locale: Qt.locale("en_GB")     // the week starts on Monday
                     }
                     CB.MonthGrid {
                         id: grid
@@ -838,7 +842,7 @@ Item {
                             text: "Set"
                             highlighted: true
                             onClicked: {
-                                // местное время -> UTC, как хранится в базе
+                                // local time -> UTC, as it is stored in the database
                                 var d = new Date(calPopup.yy, calPopup.mo, calPopup.dd,
                                                  hh.value, mm.value, 0)
                                 var iso = d.toISOString().replace(/\.\d+Z$/, "Z")
@@ -876,8 +880,8 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 Item { Layout.fillWidth: true }
-                // Done И ЕСТЬ Apply: отдельная кнопка «применить» только
-                // добавляла шаг. Условие удаляется крестиком на нём самом.
+                // Done IS Apply: a separate "apply" button only added a step.
+                // A condition is deleted by the cross on itself.
                 QQC2.Button {
                     text: "Done"
                     highlighted: true
@@ -900,15 +904,15 @@ Item {
         }
     }
 
-    // ---- ОКНО «ПОКАЗАТЬ ВСЁ» ----
-    // Длинный перечень (полей выборки, условий, сортировок, группировок) не
-    // должен растягивать панель запроса: в строке остаются две строки чипов,
-    // а весь список — здесь, с теми же действиями.
+    // ---- THE "SHOW ALL" POPUP ----
+    // A long list (of selection fields, conditions, sorts, groupings) must not
+    // stretch the query panel: two rows of chips stay in the bar and the whole
+    // list lives here, with the same actions.
     QQC2.Popup {
         id: morePopup
         modal: false
         parent: bar
-        // прямо под строкой запроса: меню, а не окно поверх таблицы
+        // right under the query bar: a menu, not a window on top of the table
         x: 0
         y: bar.height + Kirigami.Units.smallSpacing
         width: Math.min(bar.width, Kirigami.Units.gridUnit * 32)
@@ -1014,21 +1018,22 @@ Item {
                 ListView {
                     id: moreList
                     model: morePopup.items
-                    // reuseItems выключен: при перетаскивании делегат должен
-                    // жить, пока его тащат
+                    // reuseItems is off: while dragging, a delegate must stay
+                    // alive as long as it is being dragged
                     delegate: QQC2.ItemDelegate {
                         id: moreRow
                         required property var modelData
                         required property int index
                         width: ListView.view.width
                         height: Kirigami.Units.gridUnit * 2.2
-                        // ПЕРЕТАСКИВАНИЕ ПОЛЕЙ ВЫБОРКИ: порядок полей — это
-                        // порядок колонок, и мышью его менять привычнее, чем
-                        // стрелками. Стрелки остаются: клавиатурой и точнее.
+                        // DRAGGING THE SELECTION FIELDS: the order of the fields is
+                        // the order of the columns, and changing it with the mouse
+                        // is more natural than with arrows. The arrows stay: the
+                        // keyboard is more precise.
                         z: dragArea.drag.active ? 2 : 1
                         Drag.active: dragArea.drag.active
                         onClicked: {
-                            // условие правится в своём окне
+                            // a condition is edited in its own popup
                             if (bar.moreKind === "where") {
                                 morePopup.close()
                                 bar.editCondition(index)
@@ -1052,11 +1057,11 @@ Item {
                             property int startY: 0
                             onPressed: startY = moreRow.y
                             onReleased: {
-                                // куда отпустили — на столько строк и сдвигаем
+                                // we move it by as many rows as it was dropped over
                                 var step = moreRow.height
                                 var delta = Math.round((moreRow.y - startY) / step)
-                                moreRow.y = startY          // вернуть на место:
-                                                            // порядок задаёт модель
+                                moreRow.y = startY          // put it back: the order
+                                                            // is set by the model
                                 if (delta !== 0)
                                     bar.moveSelectTo(index, index + delta)
                             }
@@ -1077,8 +1082,8 @@ Item {
                                 font.family: "monospace"
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize
                             }
-                            // ПОРЯДОК ПОЛЕЙ — ПЕРЕТАСКИВАНИЕМ за ручку
-                            // слева; стрелки убраны как дубль.
+                            // THE ORDER OF THE FIELDS is set BY DRAGGING the handle
+                            // on the left; the arrows were removed as a duplicate.
                             QQC2.ToolButton {
                                 visible: bar.moreKind === "order"
                                 implicitWidth: Kirigami.Units.gridUnit * 1.6
@@ -1118,7 +1123,7 @@ Item {
         width: parent.width
         spacing: Kirigami.Units.smallSpacing
 
-        // ---- строка запроса + переключатель способа ----
+        // ---- the query line + the mode switch ----
         RowLayout {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
@@ -1130,12 +1135,12 @@ Item {
                 Layout.preferredWidth: Kirigami.Units.iconSizes.small
                 Layout.preferredHeight: Kirigami.Units.iconSizes.small
             }
-            // МНОГОСТРОЧНОЕ поле: запрос бывает длиннее строки, и в одну
-            // строку его было не разглядеть. Растёт по содержимому до 6 строк,
-            // дальше прокручивается. Enter применяет, Shift+Enter — перенос.
+            // A MULTILINE field: a query is often longer than one line, and in a
+            // single line it could not be read. It grows with the content up to 6
+            // lines and then scrolls. Enter applies, Shift+Enter is a line break.
             QQC2.ScrollView {
-                // В режиме «накликать» поле скрыто: запрос читается по самому
-                // конструктору, а дублирующая строка только занимает место.
+                // In "click it together" mode the field is hidden: the query is read
+                // from the builder itself, and a duplicate line only takes space.
                 visible: !bar.builderMode
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.min(
@@ -1149,8 +1154,8 @@ Item {
                     wrapMode: TextEdit.Wrap
                     placeholderText: bar.placeholder
                     readOnly: bar.builderMode
-                    // в конструкторе поле показывает собранный запрос,
-                    // в ручном — то, что набрали
+                    // in the builder the field shows the assembled query,
+                    // in manual mode what was typed
                     text: bar.builderMode ? bar.fullSql() : bar.manualText
                     onTextChanged: if (!bar.builderMode) bar.manualText = text
                     opacity: bar.builderMode ? 0.75 : 1.0
@@ -1160,15 +1165,15 @@ Item {
                     }
                 }
             }
-            // ЯВНЫЙ ЗАПУСК: в многострочном поле Enter может быть переносом,
-            // и «когда же он выполнится» переставало быть очевидным.
-            // Управление (Run, режим, очистка) — ВНИЗУ СПРАВА
+            // AN EXPLICIT RUN: in a multiline field Enter may be a line break, and
+            // "when is it going to execute" stopped being obvious.
+            // The controls (Run, mode, clear) are AT THE BOTTOM RIGHT
         }
 
-        // ---- КОНСТРУКТОР ----
+        // ---- THE BUILDER ----
         Rectangle {
             Layout.fillWidth: true
-            // Панель И ЕСТЬ режим «накликать»
+            // The panel IS the "click it together" mode
             visible: bar.builderMode
             implicitHeight: bcol.implicitHeight + Kirigami.Units.largeSpacing
             radius: 4
@@ -1176,43 +1181,43 @@ Item {
 
             ColumnLayout {
                 id: bcol
-                // НЕ anchors.fill: высота панели считается из bcol, и
-                // заполнение родителя замыкало бы вычисление само на себя
+                // NOT anchors.fill: the height of the panel is computed from bcol,
+                // and filling the parent would close that computation on itself
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.margins: Kirigami.Units.smallSpacing
                 spacing: Kirigami.Units.smallSpacing
 
-                // ===== СТРОКА ПОИСКА =====
-                // Слева — быстрый поиск по всем полям (главное действие),
-                // справа — части запроса СЖАТЫМИ ЗНАЧКАМИ со счётчиком.
-                // Подробности (какие поля, какие условия) живут в своих
-                // окнах: 20 полей и 5 условий в строку не поместятся никогда,
-                // а счётчик читается мгновенно.
+                // ===== THE SEARCH ROW =====
+                // On the left the quick search over all fields (the main action),
+                // on the right the parts of the query as COMPACT ICONS with a
+                // counter. The details (which fields, which conditions) live in
+                // their own popups: 20 fields and 5 conditions never fit into one
+                // line, while a counter is read instantly.
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Kirigami.Units.smallSpacing
 
                     Kirigami.SearchField {
                         id: quickField
-                        // компактное поле: строка запроса не должна быть
-                        // шириной во весь экран ради одного слова
+                        // a compact field: the query bar must not be as wide as the
+                        // whole screen for the sake of one word
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 18
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 24
-                        visible: bar.builderMode      // в режиме SQL не нужно
+                        visible: bar.builderMode      // not needed in SQL mode
                         placeholderText: "search in all fields…"
                         text: bar.quickText
                         onTextEdited: {
                             bar.quickText = text
-                            // очистили строку — сразу показываем всё
+                            // the line was cleared - show everything at once
                             if (text === "") bar.apply()
                         }
                         onAccepted: bar.apply()
                     }
 
                     Item { Layout.fillWidth: true }
-                    // ---- ВЫБОРКА ----
+                    // ---- THE SELECTION ----
                     QQC2.ToolButton {
                         icon.name: "view-list-details"
                         text: bar.spec.select.length ? String(bar.spec.select.length) : ""
@@ -1222,7 +1227,7 @@ Item {
                         QQC2.ToolTip.visible: hovered
                         onClicked: { bar.moreKind = "select"; morePopup.open() }
                     }
-                    // ---- УСЛОВИЯ ----
+                    // ---- THE CONDITIONS ----
                     QQC2.ToolButton {
                         icon.name: "view-filter"
                         text: bar.spec.where.length ? String(bar.spec.where.length) : ""
@@ -1243,7 +1248,7 @@ Item {
                             }
                         }
                     }
-                    // ---- ГРУППИРОВКА ----
+                    // ---- THE GROUPING ----
                     QQC2.ToolButton {
                         icon.name: "view-group"
                         text: bar.spec.groupBy.length ? String(bar.spec.groupBy.length) : ""
@@ -1259,7 +1264,7 @@ Item {
                             bar.moreKind = "group"; morePopup.open()
                         }
                     }
-                    // ---- СОРТИРОВКА ----
+                    // ---- THE SORTING ----
                     QQC2.ToolButton {
                         icon.name: "view-sort-ascending"
                         text: bar.spec.orderBy.length ? String(bar.spec.orderBy.length) : ""
@@ -1275,9 +1280,9 @@ Item {
                             bar.moreKind = "order"; morePopup.open()
                         }
                     }
-                    // ---- ГРУППЫ КНОПОК РАЗДЕЛЕНЫ: слева части запроса,
-                    // в середине работа с запросами (сохранить, история),
-                    // справа запуск и режим ----
+                    // ---- THE BUTTON GROUPS ARE SEPARATED: the parts of the query
+                    // on the left, working with queries (save, history) in the
+                    // middle, running and the mode on the right ----
                     Kirigami.Separator {
                         visible: hostToolsRow.children.length > 0
                         Layout.preferredHeight: Kirigami.Units.gridUnit * 1.4
@@ -1295,7 +1300,7 @@ Item {
                         Layout.leftMargin: Kirigami.Units.smallSpacing
                         Layout.rightMargin: Kirigami.Units.smallSpacing
                     }
-                    // ---- ЗАПУСК И РЕЖИМ ----
+                    // ---- RUNNING AND THE MODE ----
                     QQC2.ToolButton {
                         objectName: "resetBtn"
                         icon.name: "edit-clear-all"
@@ -1307,7 +1312,7 @@ Item {
                     QQC2.Button {
                         text: "Run"
                         icon.name: "media-playback-start"
-                        // пока запрос не менялся — запускать нечего
+                        // while the query has not changed there is nothing to run
                         enabled: bar.dirty
                         highlighted: bar.dirty
                         QQC2.ToolTip.text: bar.dirty ? "Run the query"
@@ -1327,7 +1332,7 @@ Item {
                         }
                     }
 
-                    // ---- ПРОЧЕЕ: уникальные, вычисляемое поле ----
+                    // ---- THE REST: DISTINCT, a calculated field ----
                     QQC2.ToolButton {
                         icon.name: "overflow-menu"
                         QQC2.ToolTip.text: "More parts of the query"
@@ -1366,7 +1371,7 @@ Item {
                     }
                 }
 
-                // ввод вычисляемого поля — только когда его добавляют
+                // the calculated field input - only while one is being added
                 RowLayout {
                     Layout.fillWidth: true
                     visible: bar.editingCalc
@@ -1400,7 +1405,7 @@ Item {
             }
         }
 
-        // ручной режим: то же управление под строкой SQL
+                // manual mode: the same controls under the SQL line
         RowLayout {
             Layout.fillWidth: true
             visible: !bar.builderMode

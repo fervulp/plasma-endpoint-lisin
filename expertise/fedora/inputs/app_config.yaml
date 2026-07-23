@@ -3,24 +3,24 @@ id: LS-I-60
 type: input
 version: 1.0.0
 title: Where application configs live
-# ГДЕ ЛЕЖИТ КОНФИГУРАЦИЯ ПРИЛОЖЕНИЙ — два источника, оба системные:
-#  * системные: rpm сам помечает файлы флагом %config — 2756 файлов от 390
-#    пакетов за 1 секунду, ничего угадывать не нужно;
-#  * пользовательские: стандарт XDG — каталог приложения в ~/.config и
-#    ~/.local/share. Имя каталога и есть привязка к программе.
-# Никаких списков «где обычно лежат конфиги» от меня.
+# WHERE THE CONFIGURATION OF APPLICATIONS LIVES - two sources, both from the system:
+#  * system ones: rpm marks the files with the %config flag itself - thousands of
+#    files from hundreds of packages in one second, nothing has to be guessed;
+#  * user ones: the XDG standard - the application directory in ~/.config and
+#    ~/.local/share. The directory name is the binding to the program.
+# No lists of "where configs usually live" from me.
 command: |
   echo "===RPM==="
-  # ВАЖНО: внутри итерации по массиву [...] имя пакета берётся как %{=NAME} —
-  # обычный %{NAME} не разворачивается и отдаёт лишь пару строк вместо тысяч.
+  # IMPORTANT: inside an array iteration [...] the package name is taken as
+  # %{=NAME} - a plain %{NAME} is not expanded and returns a couple of rows instead of thousands.
   rpm -qa --qf '[%{=NAME}\t%{FILENAMES}\t%{FILEFLAGS:fflags}\n]' 2>/dev/null |
     awk -F'\t' '$3 ~ /c/ {print $1"\t"$2}'
   echo "===USER==="
   python3 - <<'PYU'
   import os
-  # ПОЛЬЗОВАТЕЛЬСКИЕ КОНФИГИ по стандарту XDG: каталог приложения в
-  # ~/.config — это и есть «где лежит конфигурация этого приложения».
-  # Имя каталога и есть привязка к программе, никаких списков не нужно.
+  # USER CONFIGS by the XDG standard: the application directory in ~/.config is
+  # exactly "where the configuration of this application lives".
+  # The directory name is the binding to the program, no lists are needed.
   home = os.path.expanduser("~")
   roots = [(os.path.join(home, ".config"), "XDG_CONFIG_HOME"),
            (os.path.join(home, ".local/share"), "XDG_DATA_HOME")]
@@ -40,11 +40,11 @@ command: |
                   n += len(_f)
                   if n > 500:
                       break
-              print("\t".join([app, p, "каталог", str(n), origin,
+              print("\t".join([app, p, "directory", str(n), origin,
                                str(int(st.st_mtime))]))
           else:
               app = name.lstrip(".").split(".")[0]
-              print("\t".join([app, p, "файл", "1", origin,
+              print("\t".join([app, p, "file", "1", origin,
                                str(int(st.st_mtime))]))
   PYU
 interval: 3600

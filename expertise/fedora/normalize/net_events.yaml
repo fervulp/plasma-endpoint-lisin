@@ -3,139 +3,60 @@ id: LS-N-44
 type: normalization_rule
 version: 1.0.0
 title: Connection open/close → event taxonomy
-# Diff сокетов. Ключ соединения — proto|local|peer. Заполняет source_*,
-# destination_*, network_transport/protocol/direction и процесс-владельца.
-code: |
-  def normalize(text):
-      import datetime, ipaddress, json as _j, socket
-      from pathlib import Path
-
-      STATE = Path.home() / ".local/share/lisin/net_seen.json"
-      host = socket.gethostname()
-      ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-      def split_hp(a):
-          """'192.0.2.5:443' / '[::1]:22' / '0.0.0.0%virbr1:67' → (ip, port)"""
-          a = a.strip()
-          if a.startswith("["):
-              i = a.rfind("]:")
-              return (a[1:i], a[i + 2:]) if i > 0 else (a, "")
-          i = a.rfind(":")
-          if i < 0:
-              return a, ""
-          ip = a[:i].split("%")[0]
-          return ip, a[i + 1:]
-
-      def private(ip):
-          try:
-              return ipaddress.ip_address(ip).is_private
-          except ValueError:
-              return True
-
-      cur = {}
-      for ln in text.splitlines():
-          f = ln.split()
-          if len(f) < 5 or f[0] in ("Netid", "State"):
-              continue
-          proto, state, local, peer = f[0], f[1], f[4], f[5] if len(f) > 5 else ""
-          if not peer or peer.endswith(":*") or peer == "*:*":
-              continue                       # слушатель, а не соединение
-          pm = re.search(r'"([^"]+)",pid=(\d+)', ln)
-          lip, lport = split_hp(local)
-          rip, rport = split_hp(peer)
-          if not rip:
-              continue
-          key = "%s|%s|%s" % (proto, local, peer)
-          cur[key] = {"proto": proto, "state": state, "lip": lip, "lport": lport,
-                      "rip": rip, "rport": rport,
-                      "proc": pm.group(1) if pm else "",
-                      "pid": pm.group(2) if pm else ""}
-
-      prev = {}
-      try:
-          prev = _j.loads(STATE.read_text()).get("conns", {})
-      except Exception:
-          pass
-      try:
-          STATE.parent.mkdir(parents=True, exist_ok=True)
-          STATE.write_text(_j.dumps({"conns": cur}))
-      except OSError:
-          pass
-      if not prev:
-          return []                          # первый прогон — базовая линия
-
-      def mk(k, c, opened):
-          ext = not private(c["rip"])
-          sev = 30 if opened else 15
-          if opened and ext:
-              sev = 40
-          try:
-              rport = int(c["rport"])
-          except ValueError:
-              rport = 0
-          proto_app = {53: "dns", 80: "http", 443: "tls", 22: "ssh",
-                       25: "smtp", 3389: "rdp"}.get(rport, "")
-          return {
-              "ts": ts,
-              "event_id": "net:%s:%s" % ("open" if opened else "close", k),
-              "event_kind": "event",
-              "event_category": "network",
-              "event_type": "connection" if opened else "end",
-              "event_action": "connection_opened" if opened else "connection_closed",
-              "event_outcome": "success",
-              "event_severity": sev,
-              "event_module": "netmon",
-              "event_dataset": "socket.diff",
-              "event_provider": "ss",
-              "host_name": host,
-              "source_ip": c["lip"], "source_port": c["lport"],
-              "destination_ip": c["rip"], "destination_port": c["rport"],
-              "network_transport": c["proto"].replace("6", ""),
-              "network_protocol": proto_app,
-              "network_direction": "external" if ext else "internal",
-              "process_name": c["proc"], "process_pid": c["pid"],
-              "related_ip": c["rip"],
-              "message": "%s %s %s:%s -> %s:%s%s" % (
-                  "opened" if opened else "closed", c["proto"], c["lip"],
-                  c["lport"], c["rip"], c["rport"],
-                  ("  (" + c["proc"] + ")") if c["proc"] else ""),
-              "not_normalized": "",
-          }
-
-      rows = []
-      for k, c in cur.items():
-          if k not in prev:
-              rows.append(mk(k, c, True))
-      for k, c in prev.items():
-          if k not in cur:
-              rows.append(mk(k, c, False))
-      # --- КТО → НАД ЧЕМ (единая ось для чтения события) ---
-      for r in rows:
-          if r.get("subject_type"):
-              continue
-          cat = r.get("event_category", "")
-          if r.get("user_name"):
-              r["subject_type"], r["subject_name"] = "user", r["user_name"]
-          elif r.get("service_name"):
-              r["subject_type"], r["subject_name"] = "service", r["service_name"]
-          elif r.get("process_name"):
-              r["subject_type"], r["subject_name"] = "process", r["process_name"]
-          else:
-              r["subject_type"], r["subject_name"] = "system", r.get("host_name", "")
-          if r.get("file_path"):
-              r["object_type"], r["object_name"] = "file", r["file_path"]
-          elif r.get("destination_ip"):
-              r["object_type"] = "socket"
-              r["object_name"] = "%s:%s" % (r["destination_ip"], r.get("destination_port") or "")
-          elif r.get("package_name"):
-              r["object_type"], r["object_name"] = "package", r["package_name"]
-          elif cat == "process" and r.get("process_executable"):
-              r["object_type"], r["object_name"] = "process", r["process_executable"]
-          elif cat in ("authentication", "iam"):
-              r["object_type"] = "account"
-              r["object_name"] = r.get("user_target_name") or r.get("user_name", "")
-          elif r.get("service_name"):
-              r["object_type"], r["object_name"] = "service", r["service_name"]
-          else:
-              r["object_type"], r["object_name"] = "", ""
-      return rows
+code: "def normalize(text):\n    import datetime, ipaddress, json as _j, socket\n    from pathlib import\
+  \ Path\n\n    STATE = Path.home() / \".local/share/lisin/net_seen.json\"\n    host = socket.gethostname()\n\
+  \    ts = datetime.datetime.now(datetime.timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n\n    def split_hp(a):\n\
+  \        \"\"\"'192.0.2.5:443' / '[::1]:22' / '0.0.0.0%virbr1:67' → (ip, port)\"\"\"\n        a = a.strip()\n\
+  \        if a.startswith(\"[\"):\n            i = a.rfind(\"]:\")\n            return (a[1:i], a[i +\
+  \ 2:]) if i > 0 else (a, \"\")\n        i = a.rfind(\":\")\n        if i < 0:\n            return a,\
+  \ \"\"\n        ip = a[:i].split(\"%\")[0]\n        return ip, a[i + 1:]\n\n    def private(ip):\n \
+  \       try:\n            return ipaddress.ip_address(ip).is_private\n        except ValueError:\n \
+  \           return True\n\n    cur = {}\n    for ln in text.splitlines():\n        f = ln.split()\n\
+  \        if len(f) < 5 or f[0] in (\"Netid\", \"State\"):\n            continue\n        proto, state,\
+  \ local, peer = f[0], f[1], f[4], f[5] if len(f) > 5 else \"\"\n        if not peer or peer.endswith(\"\
+  :*\") or peer == \"*:*\":\n            continue                       # a listener, not a connection\n\
+  \        pm = re.search(r'\"([^\"]+)\",pid=(\\d+)', ln)\n        lip, lport = split_hp(local)\n    \
+  \    rip, rport = split_hp(peer)\n        if not rip:\n            continue\n        key = \"%s|%s|%s\"\
+  \ % (proto, local, peer)\n        cur[key] = {\"proto\": proto, \"state\": state, \"lip\": lip, \"lport\"\
+  : lport,\n                    \"rip\": rip, \"rport\": rport,\n                    \"proc\": pm.group(1)\
+  \ if pm else \"\",\n                    \"pid\": pm.group(2) if pm else \"\"}\n\n    prev = {}\n   \
+  \ try:\n        prev = _j.loads(STATE.read_text()).get(\"conns\", {})\n    except Exception:\n     \
+  \   pass\n    try:\n        STATE.parent.mkdir(parents=True, exist_ok=True)\n        STATE.write_text(_j.dumps({\"\
+  conns\": cur}))\n    except OSError:\n        pass\n    if not prev:\n        return []            \
+  \              # the first run is the baseline\n\n    def mk(k, c, opened):\n        ext = not private(c[\"\
+  rip\"])\n        sev = 30 if opened else 15\n        if opened and ext:\n            sev = 40\n    \
+  \    try:\n            rport = int(c[\"rport\"])\n        except ValueError:\n            rport = 0\n\
+  \        proto_app = {53: \"dns\", 80: \"http\", 443: \"tls\", 22: \"ssh\",\n                     25:\
+  \ \"smtp\", 3389: \"rdp\"}.get(rport, \"\")\n        return {\n            \"ts\": ts,\n           \
+  \ \"event_id\": \"net:%s:%s\" % (\"open\" if opened else \"close\", k),\n            \"event_kind\"\
+  : \"event\",\n            \"event_category\": \"network\",\n            \"event_type\": \"connection\"\
+  \ if opened else \"end\",\n            \"event_action\": \"connection_opened\" if opened else \"connection_closed\"\
+  ,\n            \"event_outcome\": \"success\",\n            \"event_severity\": sev,\n            \"\
+  event_module\": \"netmon\",\n            \"event_dataset\": \"socket.diff\",\n            \"event_provider\"\
+  : \"ss\",\n            \"host_name\": host,\n            \"source_ip\": c[\"lip\"], \"source_port\"\
+  : c[\"lport\"],\n            \"destination_ip\": c[\"rip\"], \"destination_port\": c[\"rport\"],\n \
+  \           \"network_transport\": c[\"proto\"].replace(\"6\", \"\"),\n            \"network_protocol\"\
+  : proto_app,\n            \"network_direction\": \"external\" if ext else \"internal\",\n          \
+  \  \"process_name\": c[\"proc\"], \"process_pid\": c[\"pid\"],\n            \"related_ip\": c[\"rip\"\
+  ],\n            \"message\": \"%s %s %s:%s -> %s:%s%s\" % (\n                \"opened\" if opened else\
+  \ \"closed\", c[\"proto\"], c[\"lip\"],\n                c[\"lport\"], c[\"rip\"], c[\"rport\"],\n \
+  \               (\"  (\" + c[\"proc\"] + \")\") if c[\"proc\"] else \"\"),\n            \"not_normalized\"\
+  : \"\",\n        }\n\n    rows = []\n    for k, c in cur.items():\n        if k not in prev:\n     \
+  \       rows.append(mk(k, c, True))\n    for k, c in prev.items():\n        if k not in cur:\n     \
+  \       rows.append(mk(k, c, False))\n    # --- WHO -> OVER WHAT (the single axis for reading an event)\
+  \ ---\n    for r in rows:\n        if r.get(\"subject_type\"):\n            continue\n        cat =\
+  \ r.get(\"event_category\", \"\")\n        if r.get(\"user_name\"):\n            r[\"subject_type\"\
+  ], r[\"subject_name\"] = \"user\", r[\"user_name\"]\n        elif r.get(\"service_name\"):\n       \
+  \     r[\"subject_type\"], r[\"subject_name\"] = \"service\", r[\"service_name\"]\n        elif r.get(\"\
+  process_name\"):\n            r[\"subject_type\"], r[\"subject_name\"] = \"process\", r[\"process_name\"\
+  ]\n        else:\n            r[\"subject_type\"], r[\"subject_name\"] = \"system\", r.get(\"host_name\"\
+  , \"\")\n        if r.get(\"file_path\"):\n            r[\"object_type\"], r[\"object_name\"] = \"file\"\
+  , r[\"file_path\"]\n        elif r.get(\"destination_ip\"):\n            r[\"object_type\"] = \"socket\"\
+  \n            r[\"object_name\"] = \"%s:%s\" % (r[\"destination_ip\"], r.get(\"destination_port\") or\
+  \ \"\")\n        elif r.get(\"package_name\"):\n            r[\"object_type\"], r[\"object_name\"] =\
+  \ \"package\", r[\"package_name\"]\n        elif cat == \"process\" and r.get(\"process_executable\"\
+  ):\n            r[\"object_type\"], r[\"object_name\"] = \"process\", r[\"process_executable\"]\n  \
+  \      elif cat in (\"authentication\", \"iam\"):\n            r[\"object_type\"] = \"account\"\n  \
+  \          r[\"object_name\"] = r.get(\"user_target_name\") or r.get(\"user_name\", \"\")\n        elif\
+  \ r.get(\"service_name\"):\n            r[\"object_type\"], r[\"object_name\"] = \"service\", r[\"service_name\"\
+  ]\n        else:\n            r[\"object_type\"], r[\"object_name\"] = \"\", \"\"\n    return rows\n"

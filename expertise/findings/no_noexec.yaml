@@ -2,22 +2,22 @@ name: no_noexec
 id: LS-FN-7
 type: finding
 version: 2.0.0
-title: Каталоги, доступные на запись, без запрета исполнения
+title: Writable directories without an execution ban
 severity: low
 source: state
-sql: SELECT target, source, fstype, options, CASE WHEN world_writable='yes' THEN 'любой пользователь'
-  WHEN user_writable='yes' THEN 'мой пользователь' ELSE '' END AS who FROM mounts WHERE exec_risk='yes'
+sql: SELECT target, source, fstype, options, CASE WHEN world_writable='yes' THEN 'any user'
+  WHEN user_writable='yes' THEN 'my user' ELSE '' END AS who FROM mounts WHERE exec_risk='yes'
   AND fstype NOT IN ('proc','sysfs','devtmpfs','cgroup2','securityfs','debugfs','tracefs','configfs','bpf','pstore','fusectl','ramfs','autofs','mqueue','hugetlbfs')
-evidence: '{target} ({fstype}) — писать может {who}, исполнение разрешено'
-why: 'В каталог, куда может писать непривилегированный пользователь, попадает всё скачанное. Если оттуда
-  разрешено исполнение, загруженный файл запускается сразу, без копирования и без прав. Правило не знает
-  имён каталогов — оно смотрит на факт: доступен на запись и исполнение не запрещено.'
-action: Добавьте noexec (и nosuid,nodev) в опции монтирования тех точек, где это не ломает работу. Проверьте,
-  что там сейчас лежит.
+evidence: '{target} ({fstype}) - {who} can write, execution is allowed'
+why: 'Everything downloaded lands in a directory an unprivileged user can write to. If execution is allowed
+  from there, a downloaded file runs immediately, without copying and without extra rights. The rule knows
+  no directory names - it looks at the fact: writable and execution is not forbidden.'
+action: Add noexec (and nosuid,nodev) to the mount options of the points where it does not break anything.
+  Check what is lying there right now.
 explore_table: mounts
 explore_col: exec_risk
 explore_val: 'yes'
 tag: hardening
 time_col: ''
 basis: mismatch+methodology
-reference: 'CIS Benchmark: разделы с пользовательскими данными монтировать с nodev,nosuid,noexec'
+reference: 'CIS Benchmark: mount partitions with user data using nodev,nosuid,noexec'

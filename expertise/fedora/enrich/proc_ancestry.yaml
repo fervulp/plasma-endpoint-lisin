@@ -3,9 +3,9 @@ id: LS-E-7
 type: enrichment
 version: 1.0.0
 title: Process launch chain
-# ЦЕПОЧКА ЗАПУСКА прямо в строке процесса: кто кого породил, вплоть до init.
-# Без неё в таблице видно «python3», но не видно, что его запустил cron.
-# Родители берутся из этого же набора строк — лишних вызовов нет.
+# THE LAUNCH CHAIN right in the process row: who spawned whom, up to init.
+# Without it the table shows "python3" but not that cron started it.
+# The parents are taken from the same set of rows - no extra calls.
 code: |
   def enrich(rows):
       by = {}

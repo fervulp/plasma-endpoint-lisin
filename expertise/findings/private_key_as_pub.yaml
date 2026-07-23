@@ -2,18 +2,18 @@ name: private_key_as_pub
 id: LS-FN-3
 type: finding
 version: 1.0.0
-title: Приватный SSH-ключ под именем .pub
+title: A private SSH key under a .pub name
 severity: high
 source: state
 sql: SELECT path, types FROM ssh_keys WHERE kind='private' AND types LIKE '%.pub%'
 evidence: '{path}'
-why: Файл .pub принято считать публичным и свободно копировать. Если внутри приватный ключ — он мог утечь
-  вместе с «публичным».
-action: Переименуйте файл, проверьте права (600) и перевыпустите ключ — считайте его скомпрометированным.
+why: A .pub file is treated as public and copied freely. If a private key is inside, it may have leaked
+  together with the "public" one.
+action: Rename the file, check the permissions (600) and reissue the key - treat it as compromised.
 explore_table: ssh_keys
 explore_col: kind
 explore_val: private
 tag: secrets
 time_col: ''
 basis: mismatch
-reference: 'Соглашение OpenSSH: .pub — публичная часть ключа'
+reference: 'The OpenSSH convention: .pub is the public part of a key'

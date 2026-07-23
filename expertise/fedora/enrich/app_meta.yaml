@@ -3,15 +3,15 @@ id: LS-E-4
 type: enrichment
 version: 1.0.0
 title: Application purpose (category / description / site)
-# ЧТО ЭТО ЗА ПРИЛОЖЕНИЕ И ЗАЧЕМ ОНО НУЖНО.
-# Инвентарь отвечал только «имя + версия», по нему нельзя понять, что за пакет
-# и можно ли его трогать. Здесь добавляются:
-#   category — категория (из .desktop Categories для GUI, иначе rpm Group);
-#   purpose  — человеческое описание (Comment из .desktop — оно понятнее,
-#              чем rpm Summary: «New era of messaging» вместо «telegram-desktop»);
-#   url      — сайт проекта, чтобы посмотреть, что это.
-# Всё берётся ДВУМЯ дешёвыми вызовами rpm + чтением .desktop, результат
-# кэшируется по mtime базы rpm (пересчёт только когда менялись пакеты).
+# WHAT THIS APPLICATION IS AND WHAT IT IS FOR.
+# The inventory only answered "name + version", from which one cannot tell what
+# the package is and whether it can be touched. Here we add:
+#   category - the category (from .desktop Categories for GUI, otherwise rpm Group);
+#   purpose  - a human description (Comment from .desktop - it is clearer than the
+#              rpm Summary: "New era of messaging" instead of "telegram-desktop");
+#   url      - the project site, so that one can look it up.
+# Everything is taken with TWO cheap rpm calls + reading .desktop, and the result
+# is cached by the mtime of the rpm database (recomputed only when packages changed).
 code: |
   def enrich(rows):
       import os, subprocess
@@ -37,7 +37,7 @@ code: |
 
       if meta is None:
           meta = {}
-          # 1) один вызов rpm: сайт, лицензия, группа для ВСЕХ пакетов
+          # 1) one rpm call: the site, the licence and the group for ALL packages
           try:
               out = subprocess.run(
                   ["rpm", "-qa", "--qf",
@@ -53,9 +53,9 @@ code: |
                       "category": "" if f[2] in ("(none)", "Unspecified") else f[2],
                       "purpose": "",
                   }
-          # 2) .desktop: человеческое описание и категории для GUI-программ.
-          #    Связываем по basename(Exec) и по имени самого .desktop-файла —
-          #    имя пакета с ними часто не совпадает (telegram-desktop/Telegram).
+          # 2) .desktop: a human description and categories for GUI programs.
+          #    We link by basename(Exec) and by the name of the .desktop file itself -
+          #    the package name often differs from both (telegram-desktop/Telegram).
           dirs = ["/usr/share/applications",
                   str(Path.home() / ".local/share/applications"),
                   "/var/lib/flatpak/exports/share/applications"]
@@ -74,7 +74,7 @@ code: |
                   g = {}
                   for line in txt.splitlines():
                       if line.startswith("[") and not line.startswith("[Desktop Entry"):
-                          break        # только главная секция
+                          break        # the main section only
                       for k in ("Comment", "Categories", "Exec", "Name", "GenericName"):
                           if line.startswith(k + "="):
                               g.setdefault(k, line.split("=", 1)[1].strip())

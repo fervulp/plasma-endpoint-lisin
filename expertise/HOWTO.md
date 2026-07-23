@@ -1,29 +1,29 @@
-# Как написать экспертизу LiSin
+# How to write LiSin expertise
 
-Всё, что нужно знать, чтобы добавить новый источник данных, — здесь.
-Заглядывать в код приложения не требуется. Проверить написанное можно
-кнопками **Run** и **Tests** в разделе «Экспертиза».
+Everything you need in order to add a new data source is here. You do not
+have to look into the application code. What you write can be checked with the
+**Run** and **Tests** buttons in the "Expertise" section.
 
-Объект экспертизы — один YAML-файл. Категорию определяет поле `type`,
-а не каталог. Каталог — просто папка (`fedora/` — наши, рядом можно
-завести свою).
-
----
-
-## Поток данных
-
-```
-точка входа  →  нормализация  →  [обогащение]  →  [фильтр]  →  точка выхода
-  (bash)         (python)          (python)      (условия)     (таблица/события)
-```
-
-Узлы соединяются в конвейере (`expertise/pipelines/*.yaml`).
+An expertise object is a single YAML file. Its category is decided by the
+`type` field, not by the directory. A directory is just a folder (`fedora/` is
+ours; you can create your own next to it).
 
 ---
 
-## 1. Точка входа — `type: input`
+## Data flow
 
-Просто команда shell. Её stdout попадёт в нормализацию.
+```
+input     →  normalization  →  [enrichment]  →  [filter]    →  output
+(bash)       (python)          (python)         (conditions)   (table/events)
+```
+
+Nodes are connected in a pipeline (`expertise/pipelines/*.yaml`).
+
+---
+
+## 1. Input — `type: input`
+
+Just a shell command. Its stdout is passed to the normalization.
 
 ```yaml
 name: myservice
@@ -32,30 +32,30 @@ type: input
 version: 1.0.0
 title: My service state
 command: systemctl show myservice --property=ActiveState,MainPID
-interval: 60          # секунд
+interval: 60          # seconds
 enabled: true
 ```
 
-`command` — строка (выполняется как `bash -c`). Пишите так, чтобы команда
-**никогда не падала**: добавляйте `2>/dev/null` и `|| true`, иначе узел
-будет краснеть на машинах, где утилиты нет.
+`command` is a string (executed as `bash -c`). Write it so that it **never
+fails**: add `2>/dev/null` and `|| true`, otherwise the node will go red on
+machines where the utility is missing.
 
 ---
 
-## 2. Нормализация — `type: normalization_rule`
+## 2. Normalization — `type: normalization_rule`
 
-Главный объект. Внутри — обычный Python.
+The main object. Inside it is ordinary Python.
 
-**Контракт:**
+**The contract:**
 
-* обязана быть функция `normalize(text) -> list[dict]`;
-* `text` — stdout точки входа;
-* **колонки таблицы = ключи возвращённых dict** (порядок — из первой строки).
-  Объявлять колонки нигде не нужно;
-* таблица и ключ задаются в **точке выхода**, не здесь;
-* `re` и `json` уже импортированы; любой модуль stdlib можно импортировать
-  внутри функции;
-* строку можно отбросить, просто не добавив её в список.
+* there must be a function `normalize(text) -> list[dict]`;
+* `text` is the stdout of the input;
+* **the table columns are the keys of the returned dicts** (the order comes
+  from the first row). Columns are not declared anywhere;
+* the table and the key are set in the **output**, not here;
+* `re` and `json` are already imported; any stdlib module can be imported
+  inside the function;
+* to drop a row, simply do not add it to the list.
 
 ```yaml
 name: myservice
@@ -74,7 +74,7 @@ code: |
       return rows
 
 tests:
-  - name: две строки
+  - name: two lines
     input: |
       ActiveState=active
       MainPID=1234
@@ -83,26 +83,27 @@ tests:
       contains: {item: ActiveState, value: active}
 ```
 
-### Тесты правила
+### Rule tests
 
-Лежат рядом с правилом, запускаются кнопкой **Tests**. Виды ожиданий:
+They live next to the rule and are executed by the **Tests** button. The kinds
+of expectation:
 
-| ключ | смысл |
+| key | meaning |
 |---|---|
-| `rows: N` | ровно N строк |
-| `min_rows: N` | не меньше N |
-| `contains: {поле: значение}` | среди строк есть такая |
-| `row0: {поле: значение}` | проверка строки по индексу (`row0`, `row1`, …) |
+| `rows: N` | exactly N rows |
+| `min_rows: N` | no fewer than N |
+| `contains: {field: value}` | such a row exists among the results |
+| `row0: {field: value}` | check a row by index (`row0`, `row1`, …) |
 
-Кнопка **Run** прогоняет правило на **живом** входе (выполнит команду точки
-входа) и покажет разобранные строки и колонки — удобно, когда формат вывода
-утилиты заранее неизвестен.
+The **Run** button executes the rule against the **live** input (it runs the
+input's command) and shows the parsed rows and columns — useful when the
+output format of a utility is not known in advance.
 
 ---
 
-## 3. Точка выхода
+## 3. Output
 
-Для состояния (таблица-снимок) — `type: statedb`:
+For state (a snapshot table) — `type: statedb`:
 
 ```yaml
 name: db_myservice
@@ -111,46 +112,47 @@ type: statedb
 version: 1.0.0
 title: My service
 table: myservice
-key: [item]           # по этим полям строки обновляются, а не дублируются
+key: [item]           # rows are updated by these fields instead of duplicated
 icon: view-list-details
 ```
 
-Для событий (поток) — `type: events`. Таблица и ключ там берутся из
-**таксономии** (`expertise/taxonomy/events.yaml`), поэтому в самом выходе
-их указывать не нужно.
+For events (a stream) — `type: events`. There the table and the key come from
+the **taxonomy** (`expertise/taxonomy/events.yaml`), so the output itself does
+not have to name them.
 
 ---
 
-## 4. События: пишите под таксономию
+## 4. Events: write to the taxonomy
 
-Если правило готовит **события**, возвращайте поля из таксономии
-(`expertise/taxonomy/events.yaml`, 88 полей, ECS-подобные имена). Минимум:
+If a rule produces **events**, return fields from the taxonomy
+(`expertise/taxonomy/events.yaml`, 88 fields, ECS-like names). The minimum:
 
 ```python
 {
   "ts": "2026-07-19T15:33:06Z",      # ISO-8601 UTC
-  "event_id": "уникально",           # ключ дедупликации
+  "event_id": "unique",              # deduplication key
   "event_category": "process",       # process|network|file|authentication|...
   "event_type": "start",
   "event_action": "process_started",
   "event_outcome": "success",
   "event_severity": 30,              # 0..100
-  "event_module": "мой_источник",
-  "message": "человекочитаемо",
+  "event_module": "my_source",
+  "message": "human readable",
 }
 ```
 
-Поле `not_normalized` заполняйте именами полей исходной записи, которые вы
-**не** разобрали — сразу видно, что ещё можно вытащить.
+Fill `not_normalized` with the names of the fields of the source record that
+you did **not** parse — it immediately shows what else could be extracted.
 
-Дедупликация: `event_id` уникален, вставка идёт `INSERT OR IGNORE`. Поэтому
-точка входа может собирать **с перекрытием окна** — дублей не будет.
+Deduplication: `event_id` is unique and the insert is `INSERT OR IGNORE`. That
+is why an input may collect **with an overlapping window** — there will be no
+duplicates.
 
 ---
 
-## 5. Обогащение — `type: enrichment`
+## 5. Enrichment — `type: enrichment`
 
-Добавляет колонки к уже разобранным строкам.
+Adds columns to rows that have already been parsed.
 
 ```yaml
 name: my_enrich
@@ -165,14 +167,14 @@ code: |
       return rows
 ```
 
-Плагин может читать БД состояния (`~/.local/share/lisin/state.db`,
-только чтение) — так сделан `fedora/enrich/app_deps`.
+A plugin may read the state database (`~/.local/share/lisin/state.db`,
+read-only) — that is how `fedora/enrich/app_deps` works.
 
 ---
 
-## 6. Фильтр — `type: filter`
+## 6. Filter — `type: filter`
 
-Либо условия (проходит строка, где истинны **все**):
+Either conditions (a row passes when **all** of them are true):
 
 ```yaml
 conditions:
@@ -181,22 +183,22 @@ conditions:
     value: process
 ```
 
-Либо таблица шаблонов шума — строка, совпавшая с **любым** шаблоном,
-отбрасывается (`action: drop`) или помечается (`action: tag`):
+Or a table of noise templates — a row that matches **any** template is dropped
+(`action: drop`) or tagged (`action: tag`):
 
 ```yaml
 templates:
-  - name: спам-логи
+  - name: log spam
     event_provider: kwin_wayland
-    match: "TypeError"       # регулярное выражение по message
+    match: "TypeError"       # a regular expression over message
     action: drop
 ```
 
 ---
 
-## 7. Подключение в конвейер
+## 7. Wiring it into a pipeline
 
-`expertise/pipelines/state.yaml` (состояние) или `events.yaml` (события):
+`expertise/pipelines/state.yaml` (state) or `events.yaml` (events):
 
 ```yaml
 nodes:
@@ -208,21 +210,21 @@ edges:
   - [no_myservice, out_myservice]
 ```
 
-`ref` — путь от корня экспертизы **без** `.yaml`.
+`ref` is the path from the expertise root **without** `.yaml`.
 
 ---
 
-## Порядок работы
+## The order of work
 
-1. Создайте элемент кнопкой **Element…** — получите готовый шаблон с
-   комментариями и заготовкой теста.
-2. Напишите `command`, нажмите **Run** — увидите сырой вход и что из него
-   разобралось.
-3. Правьте `normalize`, пока колонки не станут нужными.
-4. Зафиксируйте результат в `tests:` и нажмите **Tests**.
-5. Добавьте узлы в конвейер.
+1. Create the object with the **Element…** button — you get a ready template
+   with comments and a test skeleton.
+2. Write the `command` and press **Run** — you will see the raw input and what
+   was parsed out of it.
+3. Edit `normalize` until the columns are what you need.
+4. Freeze the result in `tests:` and press **Tests**.
+5. Add the nodes to a pipeline.
 
-## Доверие
+## Trust
 
-Код правила **исполняется** (как и `command` точки входа). Импортируйте
-чужую экспертизу только из проверенных источников.
+The rule's code **is executed** (so is the `command` of an input). Import
+expertise from other people only from sources you trust.

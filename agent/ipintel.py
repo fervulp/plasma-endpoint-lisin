@@ -1,16 +1,16 @@
-"""Кто стоит за IP: ASN, организация-владелец, страна, обратный DNS.
+"""Who is behind an IP: ASN, the owning organisation, country, reverse DNS.
 
-БЕЗ API-ключей и без сторонних библиотек:
-  * ASN/страна — DNS-сервис Team Cymru (origin.asn.cymru.com), обычный TXT-
-    запрос через dig: работает везде, не требует регистрации и HTTP;
-  * организация ASN — AS<n>.asn.cymru.com;
-  * обратный DNS — stdlib socket;
-  * whois(1) — запасной вариант, если DNS ничего не дал.
+WITHOUT API keys and without third-party libraries:
+  * ASN/country - the Team Cymru DNS service (origin.asn.cymru.com), an
+    ordinary TXT query through dig: it works everywhere, needs no registration
+    and no HTTP;
+  * the ASN organisation - AS<n>.asn.cymru.com;
+  * reverse DNS - stdlib socket;
 
-Приватные/служебные адреса НАРУЖУ НЕ ОТПРАВЛЯЕМ (это утечка топологии) —
-помечаем их локально как private. Результаты кэшируются на диске (TTL 7 дней),
-за один прогон делаем не больше MAX_NEW новых запросов, чтобы конвейер не
-блокировался на сетевых таймаутах — остальное подтянется следующими прогонами.
+Private/service addresses are NOT SENT OUTSIDE (that would leak the topology) -
+they are marked as private locally. Results are cached on disk (TTL 7 days), and
+in one run we make no more than MAX_NEW new queries so that the pipeline does not
+block on network timeouts - the rest is picked up by the following runs.
 """
 import ipaddress
 import json
@@ -21,7 +21,7 @@ from pathlib import Path
 
 CACHE_PATH = Path.home() / ".local/share/lisin/ipintel.json"
 TTL = 7 * 24 * 3600
-MAX_NEW = 20            # новых (несохранённых) адресов за один прогон
+MAX_NEW = 20            # new (uncached) addresses per run
 _MEM: dict = {}
 _LOADED = False
 
@@ -68,7 +68,7 @@ def _dig_txt(name: str) -> str:
 
 
 def _cymru(ip: str) -> dict:
-    """origin.asn.cymru.com: '15169 | 8.8.8.0/24 | US | arin | 2023-12-28'."""
+    """origin.asn.cymru.com: '64496 | 192.0.2.0/24 | US | arin | 2023-12-28'."""
     try:
         a = ipaddress.ip_address(ip)
     except Exception:
@@ -97,7 +97,7 @@ def _cymru(ip: str) -> dict:
 
 
 def _whois_org(ip: str) -> str:
-    """Запасной путь: имя организации из whois(1)."""
+    """The fallback path: the organisation name from whois(1)."""
     try:
         r = subprocess.run(["whois", ip], capture_output=True, text=True,
                            timeout=8)
@@ -122,7 +122,7 @@ def _rdns(ip: str) -> str:
 
 
 def lookup_many(ips) -> dict:
-    """{ip: {as_number, as_org, country, rdns, scope}} с кэшем и лимитом."""
+    """{ip: {as_number, as_org, country, rdns, scope}} with a cache and a limit."""
     _load()
     now = time.time()
     out, fresh = {}, 0
@@ -142,7 +142,7 @@ def lookup_many(ips) -> dict:
             out[ip] = d
             continue
         if fresh >= MAX_NEW:
-            continue            # добьём на следующем прогоне
+            continue            # we will finish these on the next run
         fresh += 1
         d = {"scope": "public"}
         d.update(_cymru(ip))
@@ -163,12 +163,12 @@ def lookup(ip: str) -> dict:
 
 
 def whois_details(ip: str) -> dict:
-    """ПОЛНЫЙ WHOIS по адресу — для интерактивного запроса из интерфейса.
+    """THE FULL WHOIS for an address - for an interactive query from the interface.
 
-    В отличие от lookup_many() (быстрый ASN через DNS для массового
-    обогащения) здесь спрашивается whois(1) и разбираются поля, которые
-    нужны при расследовании: чья сеть, диапазон, страна, контакт для жалоб.
-    Приватные адреса наружу НЕ отправляются.
+    Unlike lookup_many() (a fast ASN over DNS for bulk enrichment) here whois(1)
+    is asked and the fields needed during an investigation are parsed: whose
+    network it is, the range, the country, the abuse contact.
+    Private addresses are NOT sent outside.
     """
     out = {"ip": ip, "scope": "public", "raw": ""}
     if not is_public(ip):

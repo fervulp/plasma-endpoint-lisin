@@ -3,12 +3,22 @@ id: LS-N-26
 type: normalization_rule
 version: 1.1.0
 title: Shell history
-code: "def normalize(text):\n    import datetime\n    rows = []\n    pending = {}          # user -> метка времени, ждущая свою команду\n    for ln in text.splitlines():\n        f = ln.split(\"\\t\", 3)\n\
-  \        if len(f) < 4:\n            continue\n        user, shell, lineno, raw = f[0], f[1], f[2], f[3]\n        try:\n            n = int(lineno)\n        except Exception:\n            n = 0\n    \
-  \    tm, cmd, drop = \"\", raw, False\n        if shell == \"bash\":\n            # БАГ, который здесь был: строка «#<эпоха>» — это метка времени\n            # СЛЕДУЮЩЕЙ команды (bash пишет её, когда\
-  \ задан HISTTIMEFORMAT).\n            # Мы её просто выбрасывали, и вся история оставалась без времени.\n            # Теперь запоминаем и приписываем следующей команде.\n            m = re.match(r'^#([0-9]{9,})$',\
-  \ raw)\n            if m:\n                pending[user] = int(m.group(1))\n                drop = True\n            elif pending.get(user):\n                try:\n                    tm = datetime.datetime.fromtimestamp(\n\
-  \                        pending[user],\n                        datetime.timezone.utc).strftime(\"%Y-%m-%d %H:%M\")\n                except Exception:\n                    tm = \"\"\n               \
-  \ pending[user] = 0\n        else:\n            m = re.match(r'^: ([0-9]+):[0-9]+;(.*)$', raw)\n            if m:\n                cmd = m.group(2)\n                try:\n                    tm = datetime.datetime.fromtimestamp(\n\
-  \                        int(m.group(1)), datetime.timezone.utc).strftime(\"%Y-%m-%d %H:%M\")\n                except Exception:\n                    tm = \"\"\n        cmd = cmd.strip()\n        if not\
-  \ drop and cmd:\n            rows.append({\"user\": user, \"shell\": shell, \"n\": n,\n                         \"time\": tm, \"command\": cmd})\n    return rows\n"
+code: "def normalize(text):\n    import datetime\n    rows = []\n    pending = {}          # user -> a\
+  \ timestamp waiting for its command\n    for ln in text.splitlines():\n        f = ln.split(\"\\t\"\
+  , 3)\n        if len(f) < 4:\n            continue\n        user, shell, lineno, raw = f[0], f[1], f[2],\
+  \ f[3]\n        try:\n            n = int(lineno)\n        except Exception:\n            n = 0\n  \
+  \      tm, cmd, drop = \"\", raw, False\n        if shell == \"bash\":\n            # THE BUG that used\
+  \ to be here: a line \"#<epoch>\" is the timestamp of the\n            # NEXT command (bash writes it\
+  \ when HISTTIMEFORMAT is set). We simply\n            # threw it away, and the whole history was left\
+  \ without time. Now we\n            # remember it and attach it to the next command.\n            m\
+  \ = re.match(r'^#([0-9]{9,})$', raw)\n            if m:\n                pending[user] = int(m.group(1))\n\
+  \                drop = True\n            elif pending.get(user):\n                try:\n          \
+  \          tm = datetime.datetime.fromtimestamp(\n                        pending[user],\n         \
+  \               datetime.timezone.utc).strftime(\"%Y-%m-%d %H:%M\")\n                except Exception:\n\
+  \                    tm = \"\"\n                pending[user] = 0\n        else:\n            m = re.match(r'^:\
+  \ ([0-9]+):[0-9]+;(.*)$', raw)\n            if m:\n                cmd = m.group(2)\n              \
+  \  try:\n                    tm = datetime.datetime.fromtimestamp(\n                        int(m.group(1)),\
+  \ datetime.timezone.utc).strftime(\"%Y-%m-%d %H:%M\")\n                except Exception:\n         \
+  \           tm = \"\"\n        cmd = cmd.strip()\n        if not drop and cmd:\n            rows.append({\"\
+  user\": user, \"shell\": shell, \"n\": n,\n                         \"time\": tm, \"command\": cmd})\n\
+  \    return rows\n"

@@ -4,9 +4,9 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "Fmt.js" as Fmt
 
-// С кем разговаривает машина: направления по числу СЕССИЙ (объём в байтах
-// без root недоступен — честно пишем это в подписи), владелец сети из ASN,
-// DNS-имя. Клик по адресу — WHOIS: кто это на самом деле.
+// Who the machine talks to: directions by the number of SESSIONS (the volume in
+// bytes is unavailable without root - we say so honestly in the caption), the
+// network owner from the ASN, the DNS name. A click on an address - WHOIS.
 Item {
     id: view
     property var d: ({ flows: [], dns: [], by_asn: [], live: [], resolvers: [],
@@ -53,9 +53,9 @@ Item {
                 text: "External Only"; checkable: true; checked: view.extOnly
                 onToggled: view.extOnly = checked
             }
-            // РЕДКИЕ СЕССИИ. Массовый трафик виден и так; малозаметное —
-            // несколько соединений, неизвестный владелец, узкое окно —
-            // как раз то, что теряется в общем списке.
+            // RARE SESSIONS. Bulk traffic is visible anyway; the inconspicuous -
+            // a few connections, an unknown owner, a narrow window - is exactly
+            // what gets lost in a common list.
             QQC2.ToolButton {
                 text: "Unusual (" + view.d.rare + ")"
                 checkable: true; checked: view.rareOnly
@@ -65,9 +65,9 @@ Item {
             QQC2.ToolButton { icon.name: "view-refresh"; onClicked: view.refresh() }
         }
 
-        // ГРАФИК СЕССИЙ ПО ЧАСАМ. Ровный ритм = автоматика (опрос, синхро-
-        // низация), всплеск = разовая активность. Раскладка считается в
-        // Python, интерфейс только рисует — точки не прыгают.
+        // THE SESSION CHART BY HOUR. An even rhythm means automation (polling,
+        // synchronisation), a spike means one-off activity. The layout is computed
+        // in Python, the interface only draws it - the points do not jump.
         Rectangle {
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -97,7 +97,7 @@ Item {
                         var he = (pts[j].ext / mx) * (height - 12)
                         ctx.fillStyle = Qt.rgba(0.4, 0.5, 0.6, 0.45)
                         ctx.fillRect(j * w + 1, height - h, w - 2, h)
-                        // внешние — поверх, другим цветом: видно долю наружу
+                        // external on top, in a different colour: the outbound share is visible
                         ctx.fillStyle = "#e67e22"
                         ctx.fillRect(j * w + 1, height - he, w - 2, he)
                     }
@@ -119,7 +119,7 @@ Item {
             Layout.fillHeight: true
             spacing: 0
 
-            // ---- направления ----
+            // ---- directions ----
             ListView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -135,10 +135,10 @@ Item {
                     width: ListView.view.width
                     height: Kirigami.Units.gridUnit * 3
                     onClicked: {
-                        // Kirigami.Dialog — это Popup: его открывают вызовом
-                        // open(). Биндинг `visible: detail !== null` не
-                        // срабатывал, поэтому клик по сессии не открывал
-                        // разбор — отсюда «нажимаю и не могу посмотреть».
+                        // Kirigami.Dialog is a Popup: it is opened by calling
+                        // open(). The binding `visible: detail !== null` did not
+                        // fire, so a click on a session did not open the
+                        // breakdown - hence "I click and cannot look at it".
                         // the graph answers "who sent this" directly, which
                         // the old text dialog could not
                         view.openAddress(modelData.ip)
@@ -178,10 +178,10 @@ Item {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: Kirigami.Units.smallSpacing
-                            Rectangle {          // полоса частоты обращений
-                                // ВАЖНО: ширину считаем от фиксированной базы, а не
-                                // от parent.width — иначе Layout пересчитывает сам
-                                // себя по кругу («recursive rearrange»).
+                            Rectangle {          // the frequency bar
+                                // IMPORTANT: the width is computed from a fixed base
+                                // and not from parent.width - otherwise the Layout
+                                // recomputes itself in a circle ("recursive rearrange").
                                 Layout.preferredWidth: Math.max(2,
                                     Kirigami.Units.gridUnit * 18
                                     * modelData.sessions / view.maxSessions)
@@ -211,7 +211,7 @@ Item {
         }
     }
 
-    // ---- WHOIS по клику на адрес ----
+    // ---- WHOIS on a click on an address ----
     // ---- WHO TALKED TO THIS ADDRESS ----
     // The same investigation graph as on the process dashboard, only anchored
     // on the remote address: live sockets plus network events, so a connection
@@ -359,9 +359,9 @@ Item {
         }
     }
 
-    // РАЗБОР НАПРАВЛЕНИЯ по клику. Дашборд обязан отвечать не «сколько»,
-    // а «что делать»: кто говорил, когда, каким процессом и куда идти
-    // дальше — переходы, а не совет «посмотрите сами».
+    // THE BREAKDOWN OF A DIRECTION on a click. A dashboard must answer not "how
+    // many" but "what to do": who talked, when, through which process and where
+    // to go next - jumps, not the advice "go and look yourself".
     Kirigami.Dialog {
         id: detailDlg
         title: view.detail ? ("Traffic with " + view.detail.ip) : ""
@@ -434,7 +434,7 @@ Item {
                         delegate: QQC2.Button {
                             required property var modelData
                             text: modelData.label
-                            // иконка подсказывает, КУДА уводит переход
+                            // the icon hints WHERE the jump leads
                             icon.name: modelData.kind === "events"
                                        ? "view-calendar-list" : "search"
                             onClicked: {

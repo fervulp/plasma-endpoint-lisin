@@ -3,15 +3,15 @@ id: LS-E-22
 type: enrichment
 version: 1.0.0
 title: Extract PID from owner string (link to processes)
-# Достаёт pid из строки владельца («code (520126)») в отдельную колонку,
-# чтобы таблица связывалась с processes.pid и вставала в общий граф.
+# Extracts the pid from the owner string ("code (520126)") into its own column so
+# that the table links to processes.pid and joins the common graph.
 code: |
   def enrich(rows):
-      """Выделить PID из строки владельца в отдельную колонку.
+      """Extract the PID from the owner string into its own column.
 
-      ss/lsof печатают владельца как «code (520126)» — pid внутри текста, и по
-      нему нельзя соединить с processes.pid. Достаём число регуляркой, чтобы
-      таблица встала в общий граф через процесс.
+      ss/lsof print the owner as "code (520126)" - the pid is inside the text and
+      cannot be joined with processes.pid. We pull the number out with a regex so
+      that the table joins the common graph through the process.
       """
       for r in rows:
           pid = ""

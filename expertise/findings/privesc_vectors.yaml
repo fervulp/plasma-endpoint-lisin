@@ -2,14 +2,15 @@ name: privesc_vectors
 id: LS-FN-2
 type: finding
 version: 1.0.0
-title: Векторы повышения привилегий
+title: Privilege escalation vectors
 severity: high
 source: state
 sql: SELECT kind, name, detail, changed, age_days FROM privesc WHERE risk='high' ORDER BY changed DESC
 evidence: '{changed}  {kind}: {name} {detail}'
-why: 'Файловые capabilities и sudo без пароля дают root без ввода пароля. Это первое, что ищет атакующий,
-  закрепившись под обычным пользователем. Время появления вектора важно: свежий рядом с инцидентом — зацепка.'
-action: Уберите ненужные capabilities (setcap -r) и правила NOPASSWD, если они не обоснованы.
+why: 'File capabilities and passwordless sudo give root without typing a password. This is the first thing
+  an attacker looks for after gaining a foothold as an ordinary user. When the vector appeared matters:
+  a fresh one next to an incident is a lead.'
+action: Remove capabilities you do not need (setcap -r) and NOPASSWD rules that are not justified.
 explore_table: privesc
 explore_col: risk
 explore_val: high

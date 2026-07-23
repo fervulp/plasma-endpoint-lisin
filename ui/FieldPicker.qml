@@ -3,31 +3,31 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 
-// ВЫБОР ПОЛЯ С ПОИСКОМ.
+// PICKING A FIELD WITH SEARCH.
 //
-// Обычный выпадающий список годится на десяток пунктов; у событий полей 98,
-// и листать их мышью — мучение. Поэтому: кнопка -> всплывающий список с
-// строкой поиска, отбор по подстроке, Enter берёт первое совпадение.
+// An ordinary drop-down is fine for a dozen items; events have 98 fields, and
+// scrolling them with the mouse is torture. So: a button -> a popup list with a
+// search line, filtering by substring, Enter takes the first match.
 //
-// Два режима:
-//   * одиночный (checkMode: false) — выбрали поле, список закрылся;
-//   * множественный (checkMode: true) — отметки, список остаётся открытым
-//     (так набирается выборка SELECT).
+// Two modes:
+//   * single (checkMode: false) - you pick a field and the list closes;
+//   * multiple (checkMode: true) - checkmarks, the list stays open
+//     (that is how a SELECT list is assembled).
 Item {
     id: fp
 
-    property var fields: []            // список имён (строки)
-    property string current: ""        // выбранное (одиночный режим)
+    property var fields: []            // the list of names (strings)
+    property string current: ""        // the selected one (single mode)
     property bool checkMode: false
-    property var checked: []           // отмеченные (множественный режим)
-    property string label: "field"     // подпись, когда ничего не выбрано
+    property var checked: []           // the checked ones (multiple mode)
+    property string label: "field"     // the label when nothing is selected
     property string iconName: "view-list-details"
     property bool flatButton: false
-    // ПОДСТАВИТЬ ТЕКУЩЕЕ ИМЯ В ПОИСК: так поле можно не выбирать заново, а
-    // ПОПРАВИТЬ написание — строка уже заполнена и выделена.
+    // PUT THE CURRENT NAME INTO THE SEARCH: that way a field does not have to be
+    // picked again but can be CORRECTED - the line is already filled and selected.
     property bool prefillCurrent: false
-    // поля, которые стоит предложить в первую очередь (у нас — те, что в
-    // SELECT): помечаются в списке, но выбрать можно любое
+    // the fields worth offering first (for us - the ones in SELECT): they are
+    // marked in the list, but any field can be picked
     property var preferred: []
 
     signal picked(string name)
@@ -108,8 +108,8 @@ Item {
                         }
                         contentItem: RowLayout {
                             spacing: Kirigami.Units.smallSpacing
-                            // Галочка ТОЛЬКО у выбранных: пустые квадратики
-                            // у всей сотни полей — шум, а не информация.
+                            // A checkmark ONLY on the selected ones: empty boxes
+                            // next to a hundred fields are noise, not information.
                             Kirigami.Icon {
                                 visible: fp.checkMode && fp.checked.indexOf(modelData) >= 0
                                 source: "checkmark"

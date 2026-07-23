@@ -3,8 +3,8 @@ id: LS-E-16
 type: enrichment
 version: 1.0.0
 title: Boot slowdown share
-# ДОЛЯ ЮНИТА В ЗАГРУЗКЕ: абсолютные секунды мало что говорят, пока не
-# видно, какую часть общего времени занял юнит. Считаем процент от суммы.
+# THE SHARE OF A UNIT IN THE BOOT: absolute seconds say little until you can see
+# what part of the total time the unit took. We compute the percentage of the sum.
 code: |
   def enrich(rows):
       total = 0.0

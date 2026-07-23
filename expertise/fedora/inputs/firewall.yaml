@@ -3,9 +3,9 @@ id: LS-I-7
 type: input
 version: 1.2.0
 title: firewalld rules
-# Только АКТИВНЫЕ зоны (+ дефолтная) — не вываливаем ~15 предопределённых
-# неиспользуемых зон (минимум мусора). Формат вывода тот же (зона без
-# отступа → заголовок, «  ключ: значение» → строки).
+# Only the ACTIVE zones (+ the default one) - we do not dump the ~15 predefined
+# unused zones (minimum clutter). The output format is the same (a zone with no
+# indent -> a header, "  key: value" -> the rows).
 command: |
   def=$(firewall-cmd --get-default-zone 2>/dev/null)
   act=$(firewall-cmd --get-active-zones 2>/dev/null | awk '!/^ /{print $1}')

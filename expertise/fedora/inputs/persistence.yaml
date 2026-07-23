@@ -3,18 +3,18 @@ id: LS-I-38
 type: input
 version: 1.0.0
 title: Persistence surface
-# Векторы автозапуска/persistence (MITRE ATT&CK + UAC-рецепты), которых нет
-# в autostart/timers/cron/services. Формат: vector<TAB>path<TAB>detail.
+# Autostart/persistence vectors (MITRE ATT&CK + UAC recipes) that are not in
+# autostart/timers/cron/services. Format: vector<TAB>path<TAB>detail.
 command: |
   emit() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
-  # --- динамический линкер ---
+  # --- the dynamic linker ---
   if [ -s /etc/ld.so.preload ]; then
     while IFS= read -r lib; do [ -n "$lib" ] && emit ld_preload /etc/ld.so.preload "$lib"; done < /etc/ld.so.preload
   fi
   for f in /etc/ld.so.conf.d/*.conf; do
     [ -f "$f" ] && emit ld_conf "$f" "$(grep -vE '^\s*#|^\s*$' "$f" 2>/dev/null | tr '\n' ' ')"
   done
-  # --- LD_PRELOAD/LD_LIBRARY_PATH в env/rc ---
+  # --- LD_PRELOAD/LD_LIBRARY_PATH in env/rc ---
   for f in /etc/environment /etc/profile /etc/bashrc "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile"; do
     [ -f "$f" ] && grep -nE 'LD_PRELOAD|LD_LIBRARY_PATH' "$f" 2>/dev/null | while IFS= read -r ln; do emit env_ld "$f" "$ln"; done
   done
@@ -24,12 +24,12 @@ command: |
   done
   for f in /etc/profile.d/*.sh; do [ -f "$f" ] && emit profile_d "$f" ""; done
   [ -f /etc/nsswitch.conf ] && emit nsswitch /etc/nsswitch.conf "$(grep -E '^(passwd|hosts):' /etc/nsswitch.conf 2>/dev/null | tr '\n' '; ')"
-  # --- модули ядра (install-хуки исполняют команды) ---
+  # --- kernel modules (install hooks execute commands) ---
   for f in /etc/modprobe.d/*.conf; do
     [ -f "$f" ] && grep -nE '^\s*install ' "$f" 2>/dev/null | while IFS= read -r ln; do emit modprobe "$f" "$ln"; done
   done
   for f in /etc/modules-load.d/*.conf; do [ -f "$f" ] && emit modules_load "$f" "$(grep -vE '^\s*#|^\s*$' "$f" 2>/dev/null | tr '\n' ' ')"; done
-  # --- udev RUN (исполнение при событии) ---
+  # --- udev RUN (execution on an event) ---
   for f in /etc/udev/rules.d/*.rules; do
     [ -f "$f" ] && grep -E 'RUN\+?=' "$f" >/dev/null 2>&1 && emit udev_run "$f" "$(grep -E 'RUN\+?=' "$f" 2>/dev/null | head -1)"
   done
@@ -40,7 +40,7 @@ command: |
   systemctl list-units --type=path --state=active --no-legend --plain 2>/dev/null | awk '{print $1}' | while read -r u; do [ -n "$u" ] && emit sd_path "$u" ""; done
   systemctl list-units --type=socket --state=active --no-legend --plain 2>/dev/null | awk '{print $1}' | while read -r u; do [ -n "$u" ] && emit sd_socket "$u" ""; done
   for f in /var/lib/systemd/linger/*; do [ -e "$f" ] && emit linger "$f" "$(basename "$f")"; done
-  # --- прочие исполняемые хуки ---
+  # --- other executable hooks ---
   for f in /etc/update-motd.d/*; do [ -f "$f" ] && emit update_motd "$f" ""; done
   for f in /etc/rc.local /etc/rc.d/rc.local; do [ -f "$f" ] && emit rc_local "$f" ""; done
   grep -rlE 'pam_exec|pam_python' /etc/pam.d 2>/dev/null | while read -r f; do emit pam_exec "$f" "$(grep -E 'pam_exec|pam_python' "$f" 2>/dev/null | head -1)"; done

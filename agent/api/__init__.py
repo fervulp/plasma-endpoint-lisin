@@ -1,4 +1,4 @@
-"""Слоты Backend, разложенные по разделам (миксины)."""
+"""Backend slots, split by section (mixins)."""
 from .state import StateApi
 from .events import EventsApi
 from .dashboard import DashboardApi

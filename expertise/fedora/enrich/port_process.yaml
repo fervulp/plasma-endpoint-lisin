@@ -2,9 +2,9 @@ name: port_process
 id: LS-E-1
 type: enrichment
 version: 1.0.0
-title: Порт → процесс
-# Связь: в ports поле process = "sshd (1234)". Извлекаем PID, ищем в
-# таблице processes, добавляем команду и пользователя владельца порта.
+title: Port -> process
+# The link: in ports the process field is "sshd (1234)". We extract the PID, look
+# it up in the processes table and add the command and the user of the port owner.
 lookup_table: processes
 lookup_key: pid
 from_field: process

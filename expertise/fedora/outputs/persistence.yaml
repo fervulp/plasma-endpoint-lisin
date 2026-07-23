@@ -6,8 +6,8 @@ title: Persistence surface
 table: persistence
 key: [vector, path]
 icon: system-run
-# ОТСЛЕЖИВАТЬ ПЕРЕХОДЫ: появление/исчезновение/изменение строки порождает
-# событие (event_module=statediff). Включаем только у ИНВЕНТАРНЫХ таблиц —
-# у текучих (процессы, сокеты) есть свои источники событий, и дублировать
-# их изменениями значит утопить ленту.
+# TRACK TRANSITIONS: a row appearing/disappearing/changing produces an event
+# (event_module=statediff). We enable it only for INVENTORY tables - the fluid
+# ones (processes, sockets) have their own event sources, and duplicating them
+# with changes means drowning the feed.
 track_changes: true

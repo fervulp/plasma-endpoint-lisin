@@ -1,28 +1,28 @@
-"""Запуск и тестирование правил экспертизы прямо из UI.
+"""Running and testing expertise rules straight from the UI.
 
-Две вещи, без которых правило нельзя написать «вслепую»:
+Two things without which a rule cannot be written "blind":
 
-  run_now(pipe, ref)  — ВЫПОЛНИТЬ СЕЙЧАС: взять живой вход (команду точки
-                        входа, подключённой к правилу в конвейере), прогнать
-                        плагин и показать, что получилось. Не нужно ждать
-                        интервала и лезть в «Last run».
+  run_now(pipe, ref)  - RUN NOW: take the live input (the command of the input
+                        connected to the rule in the pipeline), run the plugin
+                        and show what came out. No need to wait for the
+                        interval and dig into "Last run".
 
-  run_tests(pipe, ref) — прогнать секцию `tests:` внутри самого правила
-                        (приём из R-Vision SIEM, где тест лежит рядом с
-                        правилом). Правило самопроверяемо: автор пишет
-                        вход и ожидание, жмёт кнопку и видит pass/fail.
+  run_tests(pipe, ref) - run the `tests:` section inside the rule itself (a
+                        technique from R-Vision SIEM, where the test lives next
+                        to the rule). A rule is self-checking: the author writes
+                        the input and the expectation, presses a button and sees
+                        pass/fail.
 
-Формат тестов в YAML правила:
-
+The format of the tests in the rule's YAML:
     tests:
-      - name: обычная строка
+      - name: an ordinary line
         input: |
           rpm<TAB>bash<TAB>5.2.15
         expect:
-          rows: 1                      # ровно столько строк
-          min_rows: 1                  # или «не меньше»
-          contains: {kind: rpm}        # такая строка есть среди результата
-          row0: {name: bash}           # проверка конкретной строки по индексу
+          rows: 1                      # exactly this many rows
+          min_rows: 1                  # or "no fewer than"
+          contains: {kind: rpm}        # such a row is among the results
+          row0: {name: bash}           # checking a specific row by index
 """
 from . import pipeline as P
 
@@ -36,7 +36,7 @@ def _rule(pipe, ref: str) -> dict:
 
 
 def input_for(pipe, ref: str) -> dict:
-    """Точка входа, подключённая к этому правилу в каком-нибудь конвейере."""
+    """The input connected to this rule in some pipeline."""
     for pname, pl in pipe.pipelines.items():
         nodes = {n["id"]: n for n in pl.get("nodes", [])}
         targets = [n["id"] for n in pl.get("nodes", []) if n.get("ref") == ref]
@@ -51,7 +51,7 @@ def input_for(pipe, ref: str) -> dict:
 
 
 def run_now(pipe, ref: str, sample: str = "") -> dict:
-    """Прогнать правило на живом входе (или на переданном тексте)."""
+    """Run the rule against the live input (or against the given text)."""
     import subprocess
     found = _rule(pipe, ref)
     if not found:
@@ -95,7 +95,7 @@ def run_now(pipe, ref: str, sample: str = "") -> dict:
 
 
 def _check(exp: dict, rows: list) -> tuple:
-    """Проверка ожиданий теста. Возвращает (ok, пояснение)."""
+    """Checking the test expectations. Returns (ok, explanation)."""
     if "rows" in exp:
         want = int(exp["rows"])
         if len(rows) != want:
@@ -124,7 +124,7 @@ def _check(exp: dict, rows: list) -> tuple:
 
 
 def run_tests(pipe, ref: str) -> dict:
-    """Прогнать секцию tests: правила. Тест лежит рядом с правилом."""
+    """Run the tests: section of a rule. The test lives next to the rule."""
     found = _rule(pipe, ref)
     if not found:
         return {"error": "rule \u00ab%s\u00bb not found" % ref, "tests": []}

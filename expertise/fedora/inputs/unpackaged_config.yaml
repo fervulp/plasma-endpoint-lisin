@@ -3,19 +3,19 @@ id: LS-I-59
 type: input
 version: 1.0.0
 title: Config files not owned by any package
-# Обход /etc и сверка с базой rpm: какие файлы конфигурации добавлены МИМО
-# пакетного менеджера. Такой файл никто не сверяет с эталоном и не обновляет,
-# а если он ещё и принадлежит обычному пользователю, то влияет на поведение
-# службы, которая его читает.
+# Walking /etc and comparing with the rpm database: which configuration files were
+# added BYPASSING the package manager. Nobody compares such a file with a
+# reference and nobody updates it, and if it is also owned by an ordinary user it
+# influences the behaviour of the service that reads it.
 command: |
   python3 - <<'PYCONF'
   import os, subprocess
-  # ФАЙЛЫ КОНФИГУРАЦИИ, КОТОРЫХ НЕТ НИ В ОДНОМ ПАКЕТЕ.
-  # Пакетный менеджер знает каждый свой файл. Всё, что лежит в /etc и пакету
-  # НЕ принадлежит, добавлено вручную — и именно такие файлы интересны:
-  # их никто не проверяет на целостность и не обновляет.
-  # Плюс права: конфиг СЛУЖБЫ, доступный на запись обычному пользователю, —
-  # это возможность влиять на то, что служба делает.
+  # CONFIGURATION FILES THAT ARE IN NO PACKAGE.
+  # The package manager knows every file of its own. Everything that lies in /etc
+  # and belongs to NO package was added by hand - and those are the interesting
+  # ones: nobody checks their integrity and nobody updates them.
+  # Plus the permissions: a SERVICE config writable by an ordinary user is an
+  # opportunity to influence what the service does.
   owned = set()
   try:
       out = subprocess.run(["rpm", "-qa", "--qf", "[%{FILENAMES}\n]"],

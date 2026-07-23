@@ -4,6 +4,6 @@ type: statedb
 version: 1.0.0
 title: Open files
 table: open_files
-# ключ — конкретный дескриптор конкретного процесса
+# the key is a specific descriptor of a specific process
 key: [pid, fd, path]
 icon: document-open

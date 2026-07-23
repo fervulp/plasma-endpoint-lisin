@@ -1,21 +1,21 @@
-"""Движок корреляции: превращает поток событий в детекты.
+"""The correlation engine: turns a stream of events into detections.
 
-До сих пор правила `type: detection` были заготовкой — движок их не исполнял,
-и поля rule_*/risk_score в таксономии всегда оставались пустыми. Здесь они
-начинают работать.
+Until now `type: detection` rules were only a placeholder - the engine did not
+execute them, and the rule_*/risk_score fields of the taxonomy always stayed
+empty. Here they start working.
 
-Модель правила (по образцу R-Vision: фильтр → группировка → порог → окно):
+The rule model (following R-Vision: filter -> grouping -> threshold -> window):
 
-    where:      SQL-условие отбора событий
-    group_by:   по каким полям группировать (кто/куда/над чем)
-    threshold:  сколько событий в группе достаточно
-    window:     за сколько секунд
+    where:      the SQL condition that selects events
+    group_by:   which fields to group by (who / where to / over what)
+    threshold:  how many events in a group are enough
+    window:     within how many seconds
     severity/tactic/technique/title/message
 
-Сработка порождает НОВОЕ событие в той же таблице (event_kind = alert) —
-детект живёт рядом с сырыми событиями, ищется теми же фильтрами и виден в
-той же ленте. Дедупликация: event_id включает окно, поэтому одно и то же
-срабатывание не плодится при каждом прогоне конвейера.
+A hit produces a NEW event in the same table (event_kind = alert) - a detection
+lives next to the raw events, is found by the same filters and is visible in the
+same feed. Deduplication: event_id includes the window, so the same hit is not
+multiplied on every run of the pipeline.
 """
 import datetime
 import re
@@ -32,7 +32,7 @@ def _iso(dt):
 
 
 def _fmt(template: str, ctx: dict) -> str:
-    """Подстановка {поле} в текст сообщения — без eval, только замена."""
+    """Substituting {field} into the message text - no eval, only replacement."""
     out = template or ""
     for k, v in ctx.items():
         out = out.replace("{%s}" % k, str(v))
@@ -40,7 +40,7 @@ def _fmt(template: str, ctx: dict) -> str:
 
 
 def run(eventsdb, rules: dict, now=None) -> dict:
-    """Прогоняет все правила детекта. Возвращает {alerts, fired, errors}."""
+    """Runs all detection rules. Returns {alerts, fired, errors}."""
     now = now or _now()
     alerts, fired, errors = [], [], []
 
@@ -77,7 +77,7 @@ def run(eventsdb, rules: dict, now=None) -> dict:
                 continue
             ctx = {g: (row.get(g) or "") for g in group_by}
             ctx["count"] = n
-            # окно в id — одно срабатывание не дублируется каждый прогон
+            # the window is part of the id - one hit is not duplicated every run
             bucket = int(now.timestamp()) // window
             gid = "|".join(str(ctx.get(g, "")) for g in group_by) or "-"
             sev = {"low": 30, "medium": 55, "high": 75,

@@ -4,10 +4,10 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "Fmt.js" as Fmt
 
-// Повышение привилегий: и СОБЫТИЯ (кто и что делал через sudo, неудачные
-// входы), и ПОСТОЯННЫЕ ВЕКТОРЫ (capabilities, NOPASSWD, SUID, polkit).
-// Одно без другого бесполезно: события говорят «что было», векторы — «чем
-// ещё можно воспользоваться».
+// Privilege escalation: both the EVENTS (who did what through sudo, failed
+// logins) and the STANDING VECTORS (capabilities, NOPASSWD, SUID, polkit).
+// One is useless without the other: events say "what happened", vectors say
+// "what else could be used".
 Item {
     id: view
     property var d: ({ events: [], vectors: [], suid: [], admins: [],
@@ -65,9 +65,9 @@ Item {
                 height: Kirigami.Units.gridUnit * 2.4
                 contentItem: RowLayout {
                     spacing: Kirigami.Units.smallSpacing
-                    // ВРЕМЯ ПЕРВОЙ КОЛОНКОЙ (положение 6): вектор или событие
-                    // без даты невозможно связать с инцидентом. У векторов
-                    // это mtime носителя, у событий — время события.
+                    // THE TIME IN THE FIRST COLUMN (principle 6): a vector or an
+                    // event without a date cannot be tied to an incident. For a
+                    // vector that is the mtime of its carrier, for an event its time.
                     QQC2.Label {
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 8
                         Layout.alignment: Qt.AlignVCenter

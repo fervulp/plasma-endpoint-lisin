@@ -1,353 +1,366 @@
-# Основные положения LiSin
+# LiSin principles
 
-Это не пожелания, а рамка. **Перед любым изменением сверяться с этим файлом.**
-Если правка нарушает положение — либо правка неверна, либо положение надо
-обсудить и изменить ЯВНО, а не обойти молча.
+These are not wishes, they are the frame. **Check this file before any
+change.** If a change breaks a principle, then either the change is wrong or
+the principle has to be discussed and changed EXPLICITLY, not worked around in
+silence.
 
 ---
 
-## 1. Все данные идут через конвейер
+## 1. All data goes through the pipeline
 
-    точка входа → нормализация → обогащение → фильтр → точка выхода
+    input → normalization → enrichment → filter → output
 
-Никаких исключений:
+No exceptions:
 
-- **Точка входа** — единственное место, где данные появляются: команда
-  системы, чтение файла, запрос в сеть. Если что-то ходит в интернет мимо
-  точки входа — это нарушение (его не видно в конвейере, нельзя выключить,
-  нельзя прогнать вручную и посмотреть, что пришло).
-- **Нормализация** — единственное место, где сырой текст превращается в
-  строки. Колонки = ключи словаря.
-- **Обогащение** — только связывание уже собранных данных со справочниками
-  и другими таблицами. В сеть не ходит.
-- **Точка выхода** — куда легли данные: состояние, события или внешний
-  источник.
+- **Input** is the only place where data appears: a system command, reading a
+  file, a network request. If something reaches the internet bypassing an
+  input, that is a violation (it is invisible in the pipeline, it cannot be
+  switched off, and it cannot be run by hand to see what came back).
+- **Normalization** is the only place where raw text becomes rows. Columns are
+  the keys of the dictionary.
+- **Enrichment** only links data that has already been collected with
+  reference data and other tables. It never goes to the network.
+- **Output** is where the data landed: state, events, or an external source.
 
-Признак нарушения: значение появилось в интерфейсе, но нельзя показать
-пальцем, какая точка входа его принесла.
+Sign of a violation: a value appears in the interface, but you cannot point at
+the input that brought it.
 
-## 2. Логика живёт в экспертизе, а не под капотом
+## 2. The logic lives in the expertise, not under the hood
 
-Пользователь должен уметь прочитать и поправить правило, не открывая
-исходники приложения. Всё, что является ЗНАНИЕМ О СИСТЕМЕ, живёт в
-`expertise/*.yaml`: как собрать, как разобрать, как связать, что считать
-находкой, что считать шумом.
+A user must be able to read and edit a rule without opening the application
+sources. Everything that is KNOWLEDGE ABOUT THE SYSTEM lives in
+`expertise/*.yaml`: how to collect it, how to parse it, how to link it, what
+counts as a finding, what counts as noise.
 
-В коде приложения остаётся только ДВИЖОК: как исполнить правило, куда
-положить, как показать.
+Only the ENGINE stays in the application code: how to execute a rule, where to
+put the result, how to show it.
 
-Признак нарушения: чтобы добавить проверку, надо править `.py`.
+Sign of a violation: adding a check requires editing a `.py` file.
 
-## 3. Никаких данных, вписанных руками
+## 3. No hand-written data
 
-Списки «важных портов», «опасных процессов», «административных групп»,
-«правильных значений sysctl» — запрещены. Такой список верен только на той
-машине, где его писали, и молча врёт на любой другой.
+Lists of "important ports", "dangerous processes", "administrative groups",
+"correct sysctl values" are forbidden. Such a list is true only on the machine
+where it was written and silently lies on every other one.
 
-Вместо списка — источник в самой системе:
+Instead of a list — a source inside the system itself:
 
-| Нужно узнать | Источник в системе |
+| What you need to know | The source in the system |
 |---|---|
-| что за пакет владеет файлом | база rpm |
-| что такое порт | `/etc/services` + владелец сокета |
-| какая оболочка интерактивная | `/etc/shells` |
-| какая группа административная | правила polkit, права на сокеты root |
-| какое значение sysctl ожидается | `/usr/lib/sysctl.d`, `/etc/sysctl.d` |
-| что является браузером | desktop-запись с `x-scheme-handler/http` |
+| which package owns a file | the rpm database |
+| what a port is | `/etc/services` + the owner of the socket |
+| which shell is interactive | `/etc/shells` |
+| which group is administrative | polkit rules, permissions on root's sockets |
+| what a sysctl value should be | `/usr/lib/sysctl.d`, `/etc/sysctl.d` |
+| what counts as a browser | a desktop entry with `x-scheme-handler/http` |
 
-Если источника нет — делаем точку входа, а не вписываем значение.
+If there is no source, write an input — do not hard-code the value.
 
-Исключение, требующее явной пометки: **правила детекта** (сигнатуры,
-шаблоны шума). Это не данные о системе, а знание об атаках — но и они
-живут в экспертизе, а не в коде.
+An exception that has to be marked explicitly: **detection rules** (signatures,
+noise templates). That is not data about the system but knowledge about
+attacks — and even that lives in the expertise, not in the code.
 
-## 4. Упор на инвентаризацию и наблюдение за своей системой
+## 4. The focus is inventory and observation of our own system
 
-Мы описываем ЭТУ машину: что установлено, откуда взялось, что запущено,
-что изменилось. Внешние фиды — вспомогательные и вторичны: общий список
-чужих адресов стареет за часы и ловит лишь общеизвестное.
+We describe THIS machine: what is installed, where it came from, what is
+running, what changed. External feeds are auxiliary and secondary: a generic
+list of someone else's addresses goes stale within hours and only catches what
+is already common knowledge.
 
-Сигнал ищем в НЕСООТВЕТСТВИИ внутри своей системы:
-расширение заявлено системным, а поставлено из `/tmp`; значение ядра
-разошлось с объявленным в конфигурации; процесс запущен из бинарника, о
-котором не знает ни один пакет.
+We look for the signal in a MISMATCH inside our own system: an extension
+declared as a system one but installed from `/tmp`; a kernel value that
+diverges from what the configuration declares; a process started from a binary
+no package knows about.
 
-## 5. Шум фильтруется, полезное — никогда
+## 5. Noise is filtered, useful data never is
 
-События, не несущие информации (в первую очередь порождённые самим
-агентом), отбрасываются шаблонами в экспертизе. После КАЖДОЙ партии
-фильтров обязателен контроль до/после по классам полезного: запуски
-процессов, внешние соединения, файловые события, аутентификация,
-sudo-команды. Если полезное просело — фильтр неверен, а не данные.
+Events that carry no information (first of all the ones produced by the agent
+itself) are dropped by templates in the expertise. After EVERY batch of
+filters a before/after check by classes of useful data is mandatory: process
+starts, external connections, file events, authentication, sudo commands. If
+the useful data dropped, the filter is wrong — not the data.
 
-## 6. Вывод существует, чтобы можно было что-то сделать
+## 6. Output exists so that something can be done
 
-Каждый показанный элемент обязан отвечать на четыре вопроса:
+Every element on screen must answer four questions:
 
-1. **Что** произошло или обнаружено;
-2. **Когда** — время обязательно, без него ничего нельзя расследовать;
-3. **Откуда мы знаем** — источник, чтобы вывод можно было проверить;
-4. **Что делать** — конкретное действие или куда посмотреть дальше.
+1. **What** happened or was found;
+2. **When** — the time is mandatory, without it nothing can be investigated;
+3. **How we know** — the source, so that the conclusion can be checked;
+4. **What to do** — a concrete action or where to look next.
 
-Дашборд, который отвечает только «сколько чего есть», бесполезен.
+A dashboard that only answers "how many of each" is useless.
 
-## 7. Не выдавать предположение за факт
+## 7. Never present a guess as a fact
 
-Если данные недоступны без root — так и писать, а не подставлять
-приблизительное. Если оценка неполная — показывать полноту («оценено 3 из
-9»). Если источников два и они расходятся — показывать, какой использован.
+If the data is unavailable without root, say so instead of substituting
+something approximate. If the assessment is incomplete, show the coverage
+("scored 3 of 9"). If two sources disagree, show which one was used.
 
-## 8. Состояние — только про этот компьютер
+## 8. State is only about this computer
 
-В состоянии лежит машина: процессы, порты, пакеты, файлы, пользователи.
-Скачанные справочники — во внешних источниках, отдельной базой и отдельным
-разделом. Смешивать нельзя: иначе половина «состояния» окажется не про нас.
+State holds the machine: processes, ports, packages, files, users. Downloaded
+reference data belongs to external sources, in a separate database and a
+separate section. Mixing them is forbidden: otherwise half of the "state"
+turns out not to be about us.
 
-## 9. Правило детекта описывает МЕТОД, а не конкретный экземпляр
+## 9. A detection rule describes a METHOD, not a specific instance
 
-Корреляция и находки строятся на **общеизвестной методике** — «так быть не
-должно» или «так должно быть» — и на структурном несоответствии внутри
-системы. Правило обязано пережить смену версии, имени и адреса.
+Correlations and findings are built on a **well-known methodology** — "this
+must not happen" or "this must be so" — and on a structural mismatch inside the
+system. A rule has to survive a change of version, name and address.
 
-Запрещено в правилах:
+Forbidden in rules:
 
-- конкретная версия («если openssh 9.9p2 — уязвимо») — версии сравнивает
-  бюллетень вендора, а не мы;
-- конкретный адрес, домен, хэш, имя файла или процесса как признак угрозы —
-  вредонос назовётся иначе, адрес сменится завтра;
-- список «плохих» имён любого рода.
+- a specific version ("if openssh 9.9p2 then vulnerable") — versions are
+  compared by the vendor advisory, not by us;
+- a specific address, domain, hash, file name or process name as an indicator
+  of threat — malware will call itself something else, an address changes
+  tomorrow;
+- a list of "bad" names of any kind.
 
-Разрешено и правильно:
+Allowed and correct:
 
-- **несоответствие фактов внутри системы**: расширение заявлено системным,
-  но поставлено из `/tmp`; бинарник запущен, но не принадлежит ни одному
-  пакету; значение ядра разошлось с объявленным в конфигурации;
-- **общеизвестная методика** с явной ссылкой на неё: техника MITRE ATT&CK,
-  рекомендация CIS, требование стандарта. Ссылка пишется в поле правила,
-  чтобы вывод можно было проверить и оспорить;
-- **пороги и окна** (N событий за M минут) — это метод, а не экземпляр.
+- **a mismatch of facts inside the system**: an extension declared as a system
+  one but installed from `/tmp`; a binary that is running but belongs to no
+  package; a kernel value that diverges from the configuration;
+- **a well-known methodology** with an explicit reference to it: a MITRE
+  ATT&CK technique, a CIS recommendation, a requirement of a standard. The
+  reference is written into a field of the rule so that the conclusion can be
+  checked and disputed;
+- **thresholds and windows** (N events in M minutes) — that is a method, not an
+  instance.
 
-Правило не выносит приговор, оно **подсвечивает** и объясняет, по какой
-методике сработало. Решение принимает человек.
+A rule does not pass judgement, it **highlights** and explains which
+methodology fired. The decision is made by a human.
 
-Признак нарушения: правило перестанет работать после обновления пакета,
-переименования файла или смены адреса.
+Sign of a violation: the rule will stop working after a package update, a file
+rename or a change of address.
 
-## 10. Проверять на фактах, а не на убеждении
+## 10. Verify against facts, not against belief
 
-Изменение считается сделанным, когда прогнано на живой системе и показан
-результат. Ссылаться на память вместо источника — запрещено (уже приводило
-к выдуманному «эталону»). У правил нормализации есть секция `tests:`.
-Раскладку интерфейса проверять РЕНДЕРОМ: компиляция QML не ловит ни пустые
-карточки, ни неверную ширину.
+A change counts as done when it has been run on the live system and the result
+has been shown. Referring to memory instead of a source is forbidden (it has
+already produced an invented "reference value"). Normalization rules have a
+`tests:` section. Interface layout must be verified by RENDERING: compiling QML
+catches neither empty cards nor a wrong width.
 
-## 11. Много однотипных элементов — это ТАБЛИЦА
+## 11. Many elements of the same shape means a TABLE
 
-Если элементов больше нескольких и они одной формы, показывать их надо
-таблицей — так же, как «События» и «Состояние». Карточки со свободной
-вёрсткой для такого не годятся: у каждой получается своя высота, колонки
-не выравниваются, кнопки уезжают, а сравнить строки глазом нельзя.
+If there are more than a few elements and they have the same shape, they must
+be shown as a table — the same way "Events" and "State" do it. Cards with free
+layout do not work for that: each of them gets its own height, the columns do
+not line up, buttons drift, and rows cannot be compared by eye.
 
-Правила таблицы:
+Rules of a table:
 
-- **Одно описание колонок** (ключ, заголовок, ширина, выравнивание), которое
-  читают И шапка, И строки. Два независимых списка неизбежно разъезжаются.
-- Строка фиксированной высоты. Длинное описание, список CVE, стек — НЕ в
-  строку, а в панель деталей под таблицей или сбоку.
-- Числа выравниваются вправо и моноширинным шрифтом, текст — влево.
-- Статус и критичность — цветовой акцент (полоса слева, иконка), а не
-  дополнительная строка текста внутри карточки: она ломает единую высоту.
-- Пустое значение показывается пустотой, а не прочерком-заглушкой.
-- Длинные списки — `reuseItems: true`, иначе интерфейс подвисает на
-  пересоздании делегатов.
+- **One description of the columns** (key, header, width, alignment) that is
+  read BOTH by the header AND by the rows. Two independent lists inevitably
+  drift apart.
+- A row has a fixed height. A long description, a list of CVEs, a stack trace
+  do NOT go into the row but into a detail panel below or beside the table.
+- Numbers are right-aligned and monospaced, text is left-aligned.
+- Status and severity are a colour accent (a stripe on the left, an icon), not
+  an extra line of text inside a card: that breaks the uniform height.
+- An empty value is shown as emptiness, not as a placeholder dash.
+- Long lists use `reuseItems: true`, otherwise the interface stalls while
+  recreating delegates.
 
-## 12. Следовать KDE Human Interface Guidelines
+## 12. Follow the KDE Human Interface Guidelines
 
-Приложение живёт в Plasma и должно выглядеть её частью, а не самоделкой.
-Сверяться с `develop.kde.org/hig`, в частности:
+The application lives in Plasma and must look like a part of it, not like a
+home-made tool. Check against `develop.kde.org/hig`, in particular:
 
-- **Заглавные буквы:** Title Case у кнопок, заголовков и пунктов меню
-  («Open Graph», «Full Screen»); sentence case у подсказок, плейсхолдеров и
-  пояснений («Show the graph full screen»).
-- Настоящий символ многоточия «…» (U+2026), а не три точки.
-- Единицы измерения словами и через пробел: «512 MB», «200 milliseconds».
-- Отступы кратны `Kirigami.Units`; вертикальный ритм задаёт `spacing`
-  контейнера, а не индивидуальные поля у каждой строки.
-- Одинаковые действия — одинаковой формы и на одном месте во всех списках.
-- Язык интерфейса — английский; данные пользователя не переводятся.
+- **Capitalisation:** Title Case for buttons, headings and menu items ("Open
+  Graph", "Full Screen"); sentence case for tooltips, placeholders and
+  explanations ("Show the graph full screen").
+- The real ellipsis character "…" (U+2026), not three dots.
+- Units spelled out and separated by a space: "512 MB", "200 milliseconds".
+- Margins are multiples of `Kirigami.Units`; the vertical rhythm is set by the
+  container's `spacing`, not by individual margins on every row.
+- Identical actions have an identical shape and sit in the same place in every
+  list.
+- The language of the interface is English; the user's own data is not
+  translated.
 
-## 13. Проверять КАЖДОЕ изменение, всегда
+## 13. Verify EVERY change, every time
 
-Не «обычно проверяю», а каждый раз, перед тем как сказать «готово».
-Минимум:
+Not "usually I verify" but every time, before saying "done". The minimum:
 
 1. `python3 -m py_compile lisin_app.py agent/*.py agent/api/*.py`;
-2. компиляция ВСЕХ `ui/*.qml` разом;
-3. **прогон через QML**: вид грузится в `QQuickView`, вызываются его функции,
-   предупреждения собираются через `qInstallMessageHandler`. Слот, который
-   зовёт QML, проверять ЧЕРЕЗ QML — вызов из Python не воспроизводит целый
-   класс ошибок (QJSValue уже ломал дашборд);
-4. прогон конвейера — ошибок узлов быть не должно;
-5. сборка RPM.
+2. compile ALL of `ui/*.qml` at once;
+3. **run through QML**: the view is loaded into a `QQuickView`, its functions
+   are called, warnings are collected through `qInstallMessageHandler`. A slot
+   that QML calls must be verified THROUGH QML — calling it from Python does
+   not reproduce a whole class of errors (a `QJSValue` has already broken the
+   dashboard);
+4. run the pipeline — there must be no node errors;
+5. build the RPM.
 
-Заявлять результат числами, а не словами: «было 4120 мс, стало 177 мс»,
-«пересечений 363 -> 50». Если что-то не проверено — сказать об этом прямо.
+State the result in numbers, not in words: "was 4120 ms, now 177 ms",
+"crossings 363 -> 50". If something has not been verified, say so plainly.
 
-## 14. Нашли ошибку — дорабатываем ОБЩУЮ логику, а не частный случай
+## 14. When a bug is found, fix the GENERAL logic, not the special case
 
-Ошибка почти никогда не единична: если что-то не показано для одной
-программы, то же самое не показано для десятков других. Чинить надо
-механизм, а не симптом.
+A bug is almost never unique: if something is not shown for one program, the
+same thing is not shown for dozens of others. Fix the mechanism, not the
+symptom.
 
-- Заплатка «для openvpn» запрещена: правило должно опираться на
-  СТРУКТУРНЫЙ признак («аргумент является существующим файлом», «адрес
-  стоит отдельным токеном в команде»), и тогда оно работает для любой
-  программы. Проверять охватом: сработало на N процессах, а не на одном.
-- Если инвариант нарушается (блоки налезают, счётчик врёт), он должен
-  проверяться в ОДНОЙ точке и применяться всегда — при загрузке, при
-  изменении, а не только по кнопке.
-- Значение должно писаться в ОДНОМ месте. Дублирующая запись рано или
-  поздно разъезжается (позиция узла писалась и в карточку, и в модель —
-  модель получала копию, и рёбра рисовались по старым координатам).
-- После правки — измерить охват и назвать число: «сработало на 47
-  процессах», «наложений 16 -> 0», а не «стало лучше».
+- A patch "for openvpn" is forbidden: a rule must rely on a STRUCTURAL property
+  ("the argument is an existing file", "the address stands as a separate token
+  in the command line"), and then it works for any program. Verify by coverage:
+  it fired on N processes, not on one.
+- If an invariant is broken (blocks overlap, a counter lies), it must be
+  enforced in ONE place and applied always — on load, on change, not only when
+  a button is pressed.
+- A value must be written in ONE place. A duplicated write drifts apart sooner
+  or later (a node position was written both into the card and into the model —
+  the model received a copy, and the edges were drawn at the old coordinates).
+- After the fix, measure the coverage and name the number: "fired on 47
+  processes", "overlaps 16 -> 0", not "it got better".
 
-## 15. Одинаковое поведение — один компонент, а не копия в каждом разделе
+## 15. Identical behaviour means one component, not a copy in every section
 
-Раньше поиск, фильтры, выбор колонок и боковая панель были написаны заново
-в каждом разделе: State, Events, Vulnerabilities, SQL — четыре реализации
-одного и того же, которые расходились при любой правке.
+Search, filters, column selection and the side panel used to be written from
+scratch in every section: State, Events, Vulnerabilities, SQL — four
+implementations of the same thing, which diverged on every edit.
 
-Правило: если элемент интерфейса встречается второй раз — он выносится в
-общий компонент, и разделы им ПОЛЬЗУЮТСЯ, а не копируют.
+The rule: if an interface element appears a second time, it is extracted into a
+shared component, and the sections USE it instead of copying it.
 
-Готовые шаблоны:
+The ready templates:
 
-- **`ui/QueryBar.qml`** — единая строка запроса. Два способа задать выборку:
-  НАБРАТЬ SQL руками или НАКЛИКАТЬ конструктором (фильтр WHERE, поля SELECT,
-  группировка GROUP BY, сортировка ORDER BY, уникальные DISTINCT,
-  вычисляемое поле). Переключение между режимами не теряет запрос. Компонент
-  ничего не исполняет — отдаёт спецификацию и SQL сигналом `applied`, а
-  раздел решает, применить это к базе или к списку в памяти.
-- **`ui/DataTable.qml`** — шаблонная таблица: одно описание колонок для шапки
-  и строк, выбор видимых колонок и их порядка, закреплённая шапка, зебра,
-  `reuseItems`, клик по строке → сигнал (раздел открывает sidebar), «+»/«−»
-  на ячейке добавляют условие в запрос.
-- **`ui/GraphCanvas.qml`** — шаблонное полотно графа: категории-блоки со
-  сворачиванием, перетаскивание узлов с расталкиванием и привязкой к сетке,
-  рёбра следуют за узлом, маршрутизация через свободные коридоры, клик →
-  боковая панель, двойной клик → пивот.
+- **`ui/QueryBar.qml`** — the single query bar. Two ways to express a query:
+  TYPE the SQL by hand or CLICK it together in the builder (the WHERE filter,
+  SELECT fields, GROUP BY, ORDER BY, DISTINCT, a calculated field). Switching
+  between the modes does not lose the query. The component executes nothing —
+  it emits the specification and the SQL through the `applied` signal, and the
+  section decides whether to apply it to the database or to an in-memory list.
+- **`ui/DataTable.qml`** — the template table: one description of the columns
+  for the header and the rows, a choice of visible columns and their order, a
+  pinned header, zebra striping, `reuseItems`, a click on a row → a signal (the
+  section opens a sidebar), "+"/"−" on a cell add a condition to the query.
+- **`ui/GraphCanvas.qml`** — the template graph canvas: category blocks with
+  collapsing, dragging nodes with push-away and snapping to the grid, edges
+  that follow the node, routing through free corridors, a click → the side
+  panel, a double click → a pivot.
 
-Новый раздел с элементами из нескольких полей ОБЯЗАН строиться на этих
-шаблонах. Своя таблица или свой поиск в новом разделе — это ошибка.
+A new section with multi-field elements MUST be built on these templates. Its
+own table or its own search bar in a new section is a defect.
 
-## 16. Гигиена вёрстки: ничего не наслаивается и не вылезает
+## 16. Layout hygiene: nothing overlaps and nothing escapes
 
-Компонент считается готовым, только если он выдерживает РЕАЛЬНЫЕ данные:
-длинное имя пакета, путь в 200 символов, пустое значение, 400 строк.
+A component counts as finished only if it withstands REAL data: a long package
+name, a 200-character path, an empty value, 400 rows.
 
-- **Текст обрезается, а не растягивает контейнер.** У каждой подписи —
-  `elide` и ограничение ширины (`Layout.maximumWidth` или фиксированная
-  колонка). Узел графа с длинной подписью раньше растягивался и налезал на
-  соседей и на рёбра.
-- **Ничего не наслаивается.** Элементы в фиксированной по высоте строке
-  располагаются раскладкой, а не абсолютными координатами; наложение —
-  признак того, что высота задана «на глаз».
-- **Одна форма у однотипных элементов.** Часть узлов графа рисовалась
-  овалами, часть блоками — разнобой читался как «это разные сущности», хотя
-  тип уже показан иконкой и цветом. Тип кодируется иконкой и цветом, форма
-  остаётся одна.
-- **Декоративные вставки повторяют геометрию родителя.** Полоса акцента с
-  прямыми углами выпирала из скруглённой рамки — у неё должно быть то же
-  скругление.
-- **Пустое значение показывается пустотой**, а не прочерком-заглушкой.
-- Проверять надо РЕНДЕРОМ на живых данных: компиляция не ловит ни
-  наложение, ни выход за рамки.
-
-
-## 17. Раздел с таблицей выглядит и работает как «События»
-
-«События» — образец, а не частный случай. Любой раздел, где показывается
-таблица, повторяет его устройство, чтобы навык переносился без переучивания:
-
-- **Одна строка запроса** (`ui/QueryBar.qml`) и она минималистична: слева
-  поле быстрого поиска ПО ВСЕМ ПОЛЯМ (главное действие — «найти что угодно»
-  без знания SQL), справа части запроса СЖАТЫМИ ЗНАЧКАМИ со счётчиком
-  (поля, условия, группировка, сортировка). Подробности живут в своих окнах:
-  20 полей и 5 условий в строку не помещаются никогда, а счётчик читается
-  мгновенно. Отдельных полей «фильтр» рядом быть не должно: два способа
-  отобрать одно и то же — это два места, где можно ошибиться.
-- **Условие исполняет БАЗА**, а не разбор строки в интерфейсе. Разбор в QML
-  уже дважды приводил к молчаливо неверному ответу: он понимал только `AND`,
-  а `OR`, `NOT` и `MATCH` (тот разворачивается в `LIKE '%…%'`) — нет.
-- **Поля предлагаются только те, что есть в ЭТОЙ таблице.** Общего списка
-  полей не существует: у каждой таблицы состояния свой набор. Свободный
-  текст тоже разворачивается в условие по колонкам текущей таблицы.
-- **Выборка задаёт видимые колонки** на текущий взгляд; постоянная настройка
-  колонок — отдельная панель, она и сохраняет. Один узкий запрос не должен
-  навсегда перекраивать вид.
-- **Длинные перечни сворачиваются**: если чипы (поля, условия, сортировки,
-  группировки) занимают больше двух строк, лишнее уходит за «…», а полный
-  список открывается отдельным окном с теми же действиями.
-- **Группировка** — панель слева: колонок ровно столько, сколько полей в
-  `GROUP BY`, ширины по содержимому и тянутся за край шапки, счётчик
-  `count` виден всегда, сгруппированные поля из таблицы убираются.
-- **Оформление таблицы одно**: закреплённая шапка с именами колонок и
-  сортировкой по клику (иконка направления), зебра, фиксированная высота
-  строки, `reuseItems`, клик по строке — sidebar со всеми полями, двойной
-  клик по значению — копирование, `+`/`−` на ячейке дописывают условие.
-- **Сохранение и история запросов — только там, где это оправдано.** В
-  «Событиях» они есть (расследование живёт долго); в остальных разделах
-  строка запроса та же, но без сохранённых шаблонов и истории.
-
-Признак нарушения: в разделе появилось СВОЁ поле поиска или свой разбор
-условия. Значит, шаблон обошли, и рано или поздно он ответит неверно.
+- **Text is elided, it does not stretch the container.** Every label has
+  `elide` and a width limit (`Layout.maximumWidth` or a fixed column). A graph
+  node with a long label used to stretch and cover its neighbours and the
+  edges.
+- **Nothing overlaps.** Elements in a row of fixed height are positioned by a
+  layout, not by absolute coordinates; an overlap is a sign that the height was
+  guessed.
+- **One shape for elements of the same kind.** Some graph nodes were drawn as
+  ovals and some as blocks — the inconsistency read as "these are different
+  entities", although the type is already shown by the icon and the colour. The
+  type is encoded by the icon and the colour, the shape stays the same.
+- **Decorative inserts repeat the geometry of the parent.** An accent stripe
+  with square corners stuck out of a rounded frame — it must have the same
+  corner radius.
+- **An empty value is shown as emptiness**, not as a placeholder dash.
+- Verify by RENDERING on live data: compiling catches neither an overlap nor
+  something escaping its frame.
 
 
+## 17. A section with a table looks and works like "Events"
 
-## 18. Личных данных в репозитории не бывает
+"Events" is the reference, not a special case. Any section that shows a table
+repeats its design so that the skill transfers without relearning:
 
-Репозиторий публичный. Всё, что попало в код, историю или примеры, видно
-всем и остаётся в истории git навсегда — «удалить потом» не работает.
+- **One query bar** (`ui/QueryBar.qml`), and it is minimalist: on the left a
+  quick search ACROSS ALL FIELDS (the main action is "find anything" without
+  knowing SQL), on the right the parts of the query as COMPACT ICONS with a
+  counter (fields, conditions, grouping, sorting). The details live in their
+  own popups: 20 fields and 5 conditions never fit into one line, while a
+  counter is read instantly. There must be no separate "filter" field next to
+  it: two ways to select the same thing are two places to get it wrong.
+- **The condition is executed by the DATABASE**, not by parsing a string in the
+  interface. Parsing in QML has already produced a silently wrong answer twice:
+  it understood only `AND`, while `OR`, `NOT` and `MATCH` (which expands into
+  `LIKE '%…%'`) it did not.
+- **Only the fields of THIS table are offered.** There is no common list of
+  fields: every state table has its own set. Free text is also expanded into a
+  condition over the columns of the current table.
+- **The selection defines the visible columns** for the current view; a
+  permanent column setup is a separate panel, and that is what persists. One
+  narrow query must not reshape the view forever.
+- **Long lists collapse**: if the chips (fields, conditions, sorts, groupings)
+  take more than two lines, the rest goes behind "…", and the full list opens
+  in a separate popup with the same actions.
+- **Grouping** is a panel on the left: exactly as many columns as there are
+  fields in `GROUP BY`, widths fit the content and can be dragged at the edge
+  of the header, the `count` column is always visible, grouped fields are
+  removed from the table.
+- **The table styling is one**: a pinned header with column names and
+  click-to-sort (a direction icon), zebra striping, a fixed row height,
+  `reuseItems`, a click on a row opens a sidebar with all the fields, a double
+  click on a value copies it, `+`/`−` on a cell append a condition.
+- **Saving and query history only where it is justified.** "Events" has them
+  (an investigation lives long); in other sections the query bar is the same
+  but without saved templates and history.
 
-- **Никакого жёстко вписанного личного**: домашних путей (`/home/имя/...`),
-  имён пользователей, имён машин, реальных IP-адресов и доменов, с которыми
-  общалась машина, MAC-адресов, серийных номеров, идентификаторов
-  расширений браузера, адресов почты, ключей и токенов.
-- **Данные берутся ИЗ СИСТЕМЫ во время работы**, а не вписываются в код:
-  путь к дому — через `Path.home()`/`$HOME`, имя пользователя — из системы,
-  адреса — из таблиц состояния. Если для примера нужен адрес, берётся
-  документационный диапазон (RFC 5737: `192.0.2.0/24`, `198.51.100.0/24`,
-  `203.0.113.0/24`) или `example.com`.
-- **Рабочие журналы не публикуются.** Файлы с историей работы и наблюдениями
-  по конкретной машине (`CLAUDE.md`, `WISHES.md`) в git не попадают: они
-  полны реальных путей, адресов и имён. Для чужих людей полезна
-  документация (`README.md`, `ARCHITECTURE.md`, `expertise/HOWTO.md`), а не
-  дневник.
-- **Перед каждым коммитом — проверка**, а не память: поиск по репозиторию
-  домашних путей, почты, непубличных адресов. Нашлось — правим до коммита.
+Sign of a violation: a section grew ITS OWN search field or its own condition
+parser. That means the template was bypassed, and sooner or later it will
+answer incorrectly.
 
-Признак нарушения: строка в коде, которая верна только на этой машине.
+
+
+## 18. Personal data never enters the repository
+
+The repository is public. Anything that gets into the code, the history or the
+examples is visible to everyone and stays in the git history forever —
+"we will delete it later" does not work.
+
+- **Nothing personal is hard-coded**: home paths (`/home/name/...`), user
+  names, machine names, real IP addresses and domains the machine talked to,
+  MAC addresses, serial numbers, browser extension identifiers, e-mail
+  addresses, keys and tokens.
+- **Data is taken FROM THE SYSTEM at run time**, not written into the code: the
+  home path through `Path.home()`/`$HOME`, the user name from the system,
+  addresses from the state tables. If an example needs an address, use a
+  documentation range (RFC 5737: `192.0.2.0/24`, `198.51.100.0/24`,
+  `203.0.113.0/24`) or `example.com`.
+- **Working journals are not published.** Files with the history of the work
+  and observations about a specific machine (`CLAUDE.md`, `WISHES.md`) do not
+  go into git: they are full of real paths, addresses and names. What is useful
+  to other people is the documentation (`README.md`, `ARCHITECTURE.md`,
+  `expertise/HOWTO.md`), not a diary.
+- **Before every commit — a check**, not memory: grep the repository for home
+  paths, e-mail addresses, non-public addresses. If something is found, fix it
+  before committing.
+
+Sign of a violation: a line in the code that is true only on this machine.
 
 
 ---
 
-## Как проверить себя перед коммитом
+## How to check yourself before a commit
 
-- [ ] Новые данные пришли через точку входа?
-- [ ] Логику можно поправить в YAML, не трогая `.py`?
-- [ ] Нет ли в правиле списка, который я придумал?
-- [ ] Есть ли у вывода время, источник и действие?
-- [ ] Правило описывает метод, а не конкретную версию/имя/адрес?
-- [ ] Прогнано на живой системе, результат показан ЧИСЛАМИ?
-- [ ] Много однотипных элементов показано таблицей с общим описанием колонок?
-- [ ] Заглавные буквы, «…», отступы — по KDE HIG?
-- [ ] Пройдены все пять шагов проверки (py_compile, QML, через QML, конвейер, RPM)?
-- [ ] Исправлен МЕХАНИЗМ, а не частный случай? Измерен охват?
-- [ ] Таблица/поиск/граф взяты из общих шаблонов, а не написаны заново?
-- [ ] Проверено на длинных значениях: текст обрезается, ничего не наслаивается?
-- [ ] Однотипные элементы одной формы, родственные сущности в ОДНОМ блоке?
-- [ ] Раздел с таблицей повторяет «События»: одна строка запроса, условие
-      исполняет база, поля — только из этой таблицы, длинные перечни за «…»?
-- [ ] В коммите НЕТ личного: домашних путей, имён, реальных адресов, ключей?
-      Проверено поиском, а не по памяти?
+- [ ] Did the new data arrive through an input?
+- [ ] Can the logic be edited in YAML without touching a `.py` file?
+- [ ] Is there a list in the rule that I invented myself?
+- [ ] Does the output have a time, a source and an action?
+- [ ] Does the rule describe a method rather than a specific version/name/address?
+- [ ] Has it been run on the live system, with the result stated in NUMBERS?
+- [ ] Are many same-shaped elements shown as a table with a shared column description?
+- [ ] Capitalisation, "…", margins — per the KDE HIG?
+- [ ] Have all five verification steps been done (py_compile, QML, through QML, pipeline, RPM)?
+- [ ] Was the MECHANISM fixed rather than a special case? Was the coverage measured?
+- [ ] Are the table/search/graph taken from the shared templates instead of written anew?
+- [ ] Verified on long values: is the text elided, does nothing overlap?
+- [ ] Are same-kind elements of one shape, and related entities in ONE block?
+- [ ] Does the table section repeat "Events": one query bar, the condition executed
+      by the database, fields only from that table, long lists behind "…"?
+- [ ] Is there NOTHING personal in the commit: home paths, names, real addresses, keys?
+      Verified by grep, not from memory?

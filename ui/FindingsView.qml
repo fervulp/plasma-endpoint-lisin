@@ -3,9 +3,9 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 
-// Дашборд «Что не так»: не «сколько чего есть», а конкретные проблемы —
-// почему это важно и что с этим делать. Клик по находке ведёт в «Состояние»
-// на нужную таблицу с фильтром, чтобы аналитик увидел данные сам.
+// The "What is wrong" dashboard: not "how many of each" but concrete problems -
+// why they matter and what to do about them. Clicking a finding leads into
+// "State", to the right table with a filter, so that the analyst sees the data.
 Item {
     id: view
     property var d: ({ findings: [], total: 0, high: 0, medium: 0, low: 0 })

@@ -3,27 +3,52 @@ id: LS-E-6
 type: enrichment
 version: 3.2.1
 title: Process meaning (from package metadata)
-code: "def enrich(rows):\n    import os, subprocess\n    from pathlib import Path\n\n    CACHE = Path.home() / \".local/share/lisin/procpkg.json\"\n    RPMDB = \"/var/lib/rpm/rpmdb.sqlite\"\n    KEEP =\
-  \ (\"/usr/bin/\", \"/usr/sbin/\", \"/usr/libexec/\", \"/usr/lib/\",\n            \"/usr/lib64/\", \"/opt/\", \"/bin/\", \"/sbin/\")\n\n    def stamp():\n        try:\n            return str(os.path.getmtime(RPMDB))\n\
-  \        except OSError:\n            return \"0\"\n\n    key, idx = stamp(), None\n    try:\n        c = json.loads(CACHE.read_text())\n        if c.get(\"_stamp\") == key:\n            idx = c.get(\"\
-  idx\")\n    except Exception:\n        idx = None\n\n    if idx is None:\n        idx = {}\n        try:\n            out = subprocess.run(\n                [\"rpm\", \"-qa\", \"--qf\", \"[%{FILENAMES}\\\
-  t%{=NAME}\\t%{=SUMMARY}\\n]\"],\n                capture_output=True, text=True, timeout=120).stdout\n        except Exception:\n            out = \"\"\n        for ln in out.splitlines():\n         \
-  \   f = ln.split(\"\\t\", 2)\n            if len(f) < 3 or not f[0].startswith(KEEP):\n                continue          # держим только каталоги с исполняемым\n            idx[f[0]] = [f[1], f[2]]\n\
-  \        try:\n            CACHE.parent.mkdir(parents=True, exist_ok=True)\n            CACHE.write_text(json.dumps({\"_stamp\": key, \"idx\": idx}))\n        except OSError:\n            pass\n\n   \
-  \ for r in rows:\n        cmd = str(r.get(\"command\") or \"\").strip()\n        if not cmd:\n            continue\n        if cmd.startswith(\"[\"):\n            r[\"title\"] = \"kernel thread\"\n  \
-  \          r[\"purpose\"] = \"Linux kernel internal task\"\n            r[\"package\"] = \"\"\n            continue\n        exe = \"\"\n        pid = str(r.get(\"pid\") or \"\")\n        if pid:\n  \
-  \          try:\n                exe = os.readlink(\"/proc/%s/exe\" % pid).split(\" (deleted)\")[0]\n            except OSError:\n                exe = \"\"\n        if not exe:\n            # У root-процесса\
-  \ /proc/<pid>/exe без прав не читается, а часть\n            # процессов ПЕРЕПИСЫВАЕТ свою командную строку:\n            # «sshd: /usr/sbin/sshd -D [listener]» — первое слово там\n            # «sshd:»,\
-  \ и разбор по нему давал пустой пакет.\n            # Берём первое слово, которое похоже на путь И известно базе\n            # пакетов: признак структурный, никаких списков имён.\n            exe = \"\
-  \"\n            for tok in cmd.replace(\":\", \" \").split():\n                if not tok.startswith(\"/\"):\n                    continue\n                # /usr/sbin — симлинк на /usr/bin (объединённый\
-  \ /usr), и\n                # пакет записывает файл как /usr/bin/sshd, а процесс\n                # показывает /usr/sbin/sshd. Сверяем и по реальному пути.\n                if tok in idx:\n          \
-  \          exe = tok\n                    break\n                try:\n                    real = os.path.realpath(tok)\n                except OSError:\n                    real = \"\"\n            \
-  \    if real and real in idx:\n                    exe = real\n                    break\n            if not exe:\n                tok = cmd.split(None, 1)[0]\n                exe = tok if tok.startswith(\"\
-  /\") else \"\"\n        # РАЗВОРОТ ИНТЕРПРЕТАТОРА. tuned запущен как «python3 -Es /usr/sbin/tuned»\n        # — exe это python3, и процесс подписывался «python3 / interpreter»,\n        # хотя это демон\
-  \ tuned. Скрипт важнее интерпретатора: если exe — это\n        # интерпретатор языка, ищем в команде АРГУМЕНТ-ПУТЬ, который есть в\n        # базе пакетов, и берём ЕГО пакет. Набор интерпретаторов — это\
-  \ факт\n        # методики (как /etc/shells для оболочек), а не список «плохих имён».\n        INTERP = (\"python\", \"python2\", \"python3\", \"perl\", \"ruby\", \"node\",\n                  \"php\"\
-  , \"bash\", \"sh\", \"dash\", \"zsh\", \"java\", \"mono\")\n        base = exe.rsplit(\"/\", 1)[-1] if exe else \"\"\n        base = re.sub(r\"[0-9.]+$\", \"\", base)\n        if base in INTERP:\n   \
-  \         for tok in cmd.split()[1:]:\n                if not tok.startswith(\"/\") or tok == exe:\n                    continue\n                cand = tok if tok in idx else (\n                    os.path.realpath(tok)\
-  \ if os.path.exists(tok) else \"\")\n                if cand and cand in idx:\n                    exe = cand          # это скрипт — он и есть суть процесса\n                    break\n        hit =\
-  \ idx.get(exe)\n        if hit is None and exe:\n            try:\n                hit = idx.get(os.path.realpath(exe))\n            except OSError:\n                hit = None\n        r[\"package\"\
-  ] = hit[0] if hit else \"\"\n        r[\"title\"] = hit[0] if hit else \"\"\n        r[\"purpose\"] = hit[1] if hit else \"\"\n    return rows\n"
+code: "def enrich(rows):\n    import os, subprocess\n    from pathlib import Path\n\n    CACHE = Path.home()\
+  \ / \".local/share/lisin/procpkg.json\"\n    RPMDB = \"/var/lib/rpm/rpmdb.sqlite\"\n    KEEP = (\"/usr/bin/\"\
+  , \"/usr/sbin/\", \"/usr/libexec/\", \"/usr/lib/\",\n            \"/usr/lib64/\", \"/opt/\", \"/bin/\"\
+  , \"/sbin/\")\n\n    def stamp():\n        try:\n            return str(os.path.getmtime(RPMDB))\n \
+  \       except OSError:\n            return \"0\"\n\n    key, idx = stamp(), None\n    try:\n      \
+  \  c = json.loads(CACHE.read_text())\n        if c.get(\"_stamp\") == key:\n            idx = c.get(\"\
+  idx\")\n    except Exception:\n        idx = None\n\n    if idx is None:\n        idx = {}\n       \
+  \ try:\n            out = subprocess.run(\n                [\"rpm\", \"-qa\", \"--qf\", \"[%{FILENAMES}\\\
+  t%{=NAME}\\t%{=SUMMARY}\\n]\"],\n                capture_output=True, text=True, timeout=120).stdout\n\
+  \        except Exception:\n            out = \"\"\n        for ln in out.splitlines():\n          \
+  \  f = ln.split(\"\\t\", 2)\n            if len(f) < 3 or not f[0].startswith(KEEP):\n             \
+  \   continue          # we keep only the directories with executables\n            idx[f[0]] = [f[1],\
+  \ f[2]]\n        try:\n            CACHE.parent.mkdir(parents=True, exist_ok=True)\n            CACHE.write_text(json.dumps({\"\
+  _stamp\": key, \"idx\": idx}))\n        except OSError:\n            pass\n\n    for r in rows:\n  \
+  \      cmd = str(r.get(\"command\") or \"\").strip()\n        if not cmd:\n            continue\n  \
+  \      if cmd.startswith(\"[\"):\n            r[\"title\"] = \"kernel thread\"\n            r[\"purpose\"\
+  ] = \"Linux kernel internal task\"\n            r[\"package\"] = \"\"\n            continue\n      \
+  \  exe = \"\"\n        pid = str(r.get(\"pid\") or \"\")\n        if pid:\n            try:\n      \
+  \          exe = os.readlink(\"/proc/%s/exe\" % pid).split(\" (deleted)\")[0]\n            except OSError:\n\
+  \                exe = \"\"\n        if not exe:\n            # For a root process /proc/<pid>/exe cannot\
+  \ be read without rights, and\n            # some processes REWRITE their own command line:\n      \
+  \      # \"sshd: /usr/sbin/sshd -D [listener]\" - the first word there is\n            # \"sshd:\",\
+  \ and parsing by it produced an empty package.\n            # We take the first word that looks like\
+  \ a path AND is known to the\n            # package database: the property is structural, no lists of\
+  \ names.\n            exe = \"\"\n            for tok in cmd.replace(\":\", \" \").split():\n      \
+  \          if not tok.startswith(\"/\"):\n                    continue\n                # /usr/sbin\
+  \ is a symlink to /usr/bin (the merged /usr), and the\n                # package records the file as\
+  \ /usr/bin/sshd while the process\n                # shows /usr/sbin/sshd. We also check the resolved\
+  \ path.\n                if tok in idx:\n                    exe = tok\n                    break\n\
+  \                try:\n                    real = os.path.realpath(tok)\n                except OSError:\n\
+  \                    real = \"\"\n                if real and real in idx:\n                    exe\
+  \ = real\n                    break\n            if not exe:\n                tok = cmd.split(None,\
+  \ 1)[0]\n                exe = tok if tok.startswith(\"/\") else \"\"\n        # UNWRAPPING THE INTERPRETER.\
+  \ tuned runs as \"python3 -Es /usr/sbin/tuned\"\n        # - the exe is python3, and the process was\
+  \ labelled \"python3 / interpreter\"\n        # although it is the tuned daemon. The script matters\
+  \ more than the\n        # interpreter: if the exe is a language interpreter, we look in the command\n\
+  \        # for a PATH ARGUMENT known to the package database and take ITS package.\n        # The set\
+  \ of interpreters is a fact of the method (like /etc/shells for\n        # shells), not a list of \"\
+  bad names\".\n        INTERP = (\"python\", \"python2\", \"python3\", \"perl\", \"ruby\", \"node\",\n\
+  \                  \"php\", \"bash\", \"sh\", \"dash\", \"zsh\", \"java\", \"mono\")\n        base =\
+  \ exe.rsplit(\"/\", 1)[-1] if exe else \"\"\n        base = re.sub(r\"[0-9.]+$\", \"\", base)\n    \
+  \    if base in INTERP:\n            for tok in cmd.split()[1:]:\n                if not tok.startswith(\"\
+  /\") or tok == exe:\n                    continue\n                cand = tok if tok in idx else (\n\
+  \                    os.path.realpath(tok) if os.path.exists(tok) else \"\")\n                if cand\
+  \ and cand in idx:\n                    exe = cand          # this is the script - it is the essence\
+  \ of the process\n                    break\n        hit = idx.get(exe)\n        if hit is None and\
+  \ exe:\n            try:\n                hit = idx.get(os.path.realpath(exe))\n            except OSError:\n\
+  \                hit = None\n        r[\"package\"] = hit[0] if hit else \"\"\n        r[\"title\"]\
+  \ = hit[0] if hit else \"\"\n        r[\"purpose\"] = hit[1] if hit else \"\"\n    return rows\n"

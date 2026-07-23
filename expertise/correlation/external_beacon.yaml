@@ -1,0 +1,20 @@
+name: external_beacon
+id: LS-C-4
+type: correlation_rule
+version: 1.0.0
+title: Frequent contacts with one external address
+severity: medium
+tactic: command_and_control
+technique: T1071
+category: network
+enabled: true
+# A command and control server is polled regularly and often. Many connections
+# to ONE external address in a short window is a reason to look at who is doing
+# it and what the address is (the ASN is already filled in by enrichment).
+where: >-
+  event_category = 'network' AND event_action = 'connection_opened'
+  AND network_direction = 'external'
+group_by: [destination_ip]
+threshold: 20
+window: 300
+message: "{count} connections to the external address {destination_ip} in 5 minutes"

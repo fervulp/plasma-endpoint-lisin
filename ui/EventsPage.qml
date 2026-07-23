@@ -4,22 +4,22 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "Fmt.js" as Fmt
 
-// События: ОДНО окно для ВСЕХ точек входа (нормализация приводит их к общей
-// таксономии). Фильтрация «условно в SQL»: наведение на ячейку даёт + и −,
-// они собирают WHERE, который виден и правится руками. Плюс группировка
-// (слева значения группы, справа строки) и история SQL с поиском похожих.
+// Events: ONE window for ALL inputs (normalization brings them to a common
+// taxonomy). Filtering is expressed in SQL: hovering a cell gives + and -, they
+// assemble a WHERE that is visible and editable by hand. Plus grouping (the
+// values of a group on the left, the rows on the right) and SQL history with a
 Kirigami.Page {
     id: page
     title: "Events"
     padding: 0
 
-    // Переключатель «Лента / Цепочки». Лента отвечает «что происходило»,
-    // цепочки — «что за история за этим стоит»: связанная последовательность
-    // от запуска процесса до соединения наружу.
+    // The "Feed / Chains" switch. The feed answers "what happened", the chains
+    // answer "what story is behind it": a connected sequence from a process start
+    // to an outbound connection.
     actions: [
-        // ЦЕПОЧКИ ВРЕМЕННО СКРЫТЫ. Механизм работает (87 цепочек, покрытие
-        // 100%), но пользоваться им рано: сперва доводим состояние и события.
-        // Код, слоты и вкладка остаются — достаточно вернуть visible: true.
+        // THE CHAINS ARE TEMPORARILY HIDDEN. The mechanism works (87 chains, 100%
+        // coverage), but it is too early to use: first we finish state and events.
+        // The code, the slots and the tab stay - it is enough to set visible: true.
         Kirigami.Action {
             visible: false
             text: "Feed"
@@ -58,13 +58,13 @@ Kirigami.Page {
     property int pageIndex: 0
     property int pageLimit: 50
 
-    // фильтры «условно в SQL»
-    property var conds: []           // [{col, op, val}] — совместимость
-    // ЕДИНЫЙ ЗАПРОС из общей строки (положение 15). Может быть условием SQL
-    // или просто текстом — тогда ищем его по осмысленным полям сразу.
+    // filters expressed in SQL
+    property var conds: []           // [{col, op, val}] - kept for compatibility
+    // THE SINGLE QUERY from the shared bar (principle 15). It may be an SQL
+    // condition or just text - then we search it over the meaningful fields.
     property string queryText: ""
-    // eventFields() отдаёт ГРУППЫ таксономии [{group, fields:[{name,…}]}],
-    // а конструктору нужны плоские ИМЕНА — иначе в ComboBox попадают объекты
+    // eventFields() returns taxonomy GROUPS [{group, fields:[{name,...}]}], while
+    // the builder needs flat NAMES - otherwise objects end up in the ComboBox
     // («Unable to assign QVariantMap to QString»).
     property var allFields: {
         var out = []
@@ -77,55 +77,55 @@ Kirigami.Page {
         return out.length ? out : ["ts", "event_action", "message"]
     }
     property string whereText: ""
-    // режим раздела: лента отдельных событий или ЦЕПОЧКИ (связанные истории)
+    // the mode of the section: the feed of separate events or CHAINS (linked stories)
     property string mode: "feed"
     property var chains: null
     property string chainId: ""
     property var chainSteps: null
-    // ГРУППИРОВКА ПО НЕСКОЛЬКИМ ПОЛЯМ: как `GROUP BY a, b` в SQL.
-    // groupBy — список полей, groupParts — выбранные значения по каждому.
+    // GROUPING BY SEVERAL FIELDS: like `GROUP BY a, b` in SQL.
+    // groupBy is the list of fields, groupParts holds the chosen values of each.
     property var groupBy: []
     property var groupParts: []
     property string groupVal: ""
-    property bool groupPicked: false     // выбрана ли группа (пустое значение — тоже выбор)
-    // Ограничение по времени БОЛЬШЕ НЕ ОТДЕЛЬНОЕ СОСТОЯНИЕ: промежуток
-    // закрепляется обычным условием `ts >= …` в строке запроса (pinPeriod).
-    // Скользящее окно давало разный набор при каждом обновлении.
+    property bool groupPicked: false     // whether a group is picked (an empty value is a choice too)
+    // The time limit is NO LONGER A SEPARATE STATE: the range is pinned as an
+    // ordinary `ts >= ...` condition in the query bar (pinPeriod). A sliding
+    // window produced a different set on every refresh.
     property var groupRows: []
-    // все группы, как их вернула база: порог размера убран — прятать мелкие
-    // группы значит прятать редкое, а редкое как раз и интересно
+    // all the groups as the database returned them: the size threshold was removed -
+    // hiding small groups means hiding the rare, and the rare is exactly what matters
     readonly property var shownGroups: groupRows
 
-    // ---- колонки ----
+    // ---- columns ----
     property var allCols: []
     property var colOrder: []
     property var hiddenCols: []
     property var widths: ({})
-    // РОВНО 8 колонок, которые отвечают на «что произошло»:
-    // когда · кто · что сделал · над чем (тип+имя) · чем это кончилось ·
-    // к какой области относится · подробности. Остальные 84 поля доступны
-    // через «Columns» и в панели деталей — но не мешают чтению ленты.
+    // EXACTLY 8 columns that answer "what happened":
+    // when - who - what they did - over what (type+name) - how it ended -
+    // which area it belongs to - the details. The other 84 fields are available
+    // through "Columns" and in the details panel - but they do not disturb reading.
     readonly property var defaultCols: ["ts", "subject_name", "event_action",
         "object_type", "object_name", "event_outcome", "event_category", "message"]
-    readonly property int cfgVersion: 2      // смена набора по умолчанию
-    // ЕСЛИ СГРУППИРОВАЛИ — эти поля из таблицы убираем: внутри группы они
-    // одинаковы во всех строках и только занимают место (значение видно
-    // слева, в самой группе).
+    readonly property int cfgVersion: 2      // the default set changed
+    // IF WE GROUPED, these fields are removed from the table: inside a group they
+    // are the same in every row and only take space (the value is visible on the
+    // left, in the group itself).
     property var visibleCols: colOrder.filter(
         c => !hiddenCols.includes(c) && groupBy.indexOf(c) < 0)
-    // поиск в панели выбора колонок
+    // the search in the column chooser panel
     property string colSearch: ""
     readonly property var shownColChoices: {
         if (colSearch === "") return colOrder
         var q = colSearch.toLowerCase()
         return colOrder.filter(c => c.toLowerCase().indexOf(q) >= 0)
     }
-    // Снимок исходной выборки: к нему возвращает «Reset» в строке запроса.
-    // Именно СНИМОК, а не visibleCols — иначе применение выборки меняло бы
-    // и то, к чему сбрасывать.
+    // A snapshot of the original selection: "Reset" in the query bar returns to it.
+    // Exactly a SNAPSHOT and not visibleCols - otherwise applying a selection would
+    // change what to reset to as well.
     property var baseSelect: []
 
-    // Поле события → куда «исследовать» в разделе «Состояние»
+    // An event field -> where to "explore" in the "State" section
     readonly property var exploreMap: ({
         "process_pid":        { table: "processes",    col: "pid" },
         "parent_pid":         { table: "processes",    col: "pid" },
@@ -142,7 +142,7 @@ Kirigami.Page {
     })
     property var savedList: []
     function reloadSaved() { savedList = backend.savedQueries() }
-    // каталоги сохранённых запросов (создаются пользователем)
+    // the directories of saved queries (created by the user)
     property var dirsList: ["general"]
     function reloadDirs() {
         var d = backend.queryDirs()
@@ -151,7 +151,7 @@ Kirigami.Page {
 
     function esc(v) { return String(v).replace(/'/g, "''") }
     function condSql(c) {
-        // пустая ячейка бывает и NULL, и '' — учитываем оба варианта
+        // an empty cell may be both NULL and '' - we account for both
         if (c.op === "IS NULL")
             return '("' + c.col + '" IS NULL OR "' + c.col + '" = \'\')'
         if (c.op === "IS NOT NULL")
@@ -160,35 +160,35 @@ Kirigami.Page {
             return '"' + c.col + '" IN \'' + esc(c.val) + '\''
         if (c.op === "LIKE" || c.op === "NOT LIKE")
             return '"' + c.col + '" ' + c.op + " '%" + esc(c.val) + "%'"
-        // для < > <= >= числовое значение отдаём БЕЗ кавычек, иначе SQLite
-        // сравнивает как текст ('9' > '40') и порог работает неверно
+        // for < > <= >= the numeric value is passed WITHOUT quotes, otherwise
+        // SQLite compares as text ('9' > '40') and the threshold works incorrectly
         var num = (c.op === ">" || c.op === "<" || c.op === ">=" || c.op === "<=")
                   && c.val !== "" && !isNaN(Number(c.val))
         if (num) return '"' + c.col + '" ' + c.op + " " + c.val
         return '"' + c.col + '" ' + c.op + " '" + esc(c.val) + "'"
     }
-    // общий сборщик условия
+    // the common condition builder
     function assemble(parts) { return parts.join(" AND ") }
-    // Условие выбранной группы. Пустая ячейка в SQLite бывает и NULL, и '' —
-    // GROUP BY даёт их РАЗНЫМИ группами, поэтому «= \'\'» ловил не те строки
-    // (счётчик показывал 300, а таблица оставалась пустой).
+    // The condition of the selected group. An empty cell in SQLite may be both NULL
+    // and '', and GROUP BY makes them DIFFERENT groups, so `= ''` caught the wrong
+    // rows (the counter showed 300 while the table stayed empty).
     function groupCond() {
         if (!groupBy.length || !groupPicked) return ""
         var parts = []
         for (var i = 0; i < groupBy.length; i++) {
             var f = groupBy[i]
             var v = i < groupParts.length ? String(groupParts[i]) : ""
-            // пустая ячейка в SQLite бывает и NULL, и '' — ловим обе
+            // an empty cell in SQLite may be both NULL and '' - we catch both
             if (v === "") parts.push('("' + f + '" IS NULL OR "' + f + '" = \'\')')
             else parts.push('"' + f + '" = \'' + esc(v) + '\'')
         }
         return parts.length > 1 ? "(" + parts.join(" AND ") + ")" : parts[0]
     }
-    // WHERE без условия группы — по нему считаются счётчики групп,
-    // чтобы они совпадали с тем, что реально покажет таблица.
-    // Текст из общей строки: если это похоже на условие SQL — берём как есть,
-    // иначе разворачиваем в поиск по осмысленным полям. Так одна строка
-    // работает и для «набрать», и для «просто найти».
+    // the WHERE without the group condition - the group counters are computed by it
+    // so that they match what the table will actually show.
+    // The text from the shared bar: if it looks like an SQL condition we take it as
+    // is, otherwise we expand it into a search over the meaningful fields. That way
+    // one bar works both for "type it" and for "just find it".
     function queryPart() {
         var q = String(page.queryText || "").trim()
         if (q === "") return ""
@@ -214,16 +214,16 @@ Kirigami.Page {
         if (gc !== "") parts.push(gc)
         return assemble(parts)
     }
-    // Кнопки «+»/«−» на ячейке дописывают условие в ОБЩУЮ строку запроса,
-    // а не в собственный список — источник запроса должен быть один.
+    // The "+"/"-" buttons on a cell append a condition to the SHARED query bar and
+    // not to a list of their own - there must be a single source of the query.
     function addCond(col, op, val) { qbar.addCondition(col, op, String(val)) }
     function dropCond(i) {
         var c = conds.slice(); c.splice(i, 1); conds = c; syncWhere()
     }
     function syncWhere() { whereText = buildWhere(); pageIndex = 0; reload() }
 
-    // КОПИРОВАНИЕ В БУФЕР. В QML нет прямого доступа к буферу обмена, поэтому
-    // используем скрытый TextEdit: кладём текст, выделяем, copy().
+    // COPYING TO THE CLIPBOARD. QML has no direct access to the clipboard, so we
+    // use a hidden TextEdit: put the text in, select it, copy().
     property string copied: ""
     function copyValue(v) {
         if (v === undefined || v === null || v === "") return
@@ -236,15 +236,15 @@ Kirigami.Page {
     TextEdit { id: clipHelper; visible: false }
     Timer { id: copiedTimer; interval: 1600; onTriggered: page.copied = "" }
 
-    // ---- СТАТИСТИКА ПОЛЕЙ: что вообще заполнено и чем ----
-    // ИМЯ ОТЛИЧАЕТСЯ от `stats`: то — фасеты ленты, это — разбор полей
+    // ---- FIELD STATISTICS: what is filled at all and with what ----
+    // THE NAME DIFFERS from `stats`: that one holds the feed facets, this one the
     property var fieldStats: null
     property string statsFilter: ""
-    // перечень значений одной строкой-столбиком; длинный раскрывается в панели
-    // ШИРИНА КОЛОНКИ ПАНЕЛИ ГРУПП — ПО САМОМУ ДЛИННОМУ ЗНАЧЕНИЮ в ней
-    // (и по имени поля в шапке), с потолком: что не влезло — многоточием.
-    // Считается в одном месте, шапка и строки берут отсюда, иначе колонки
-    // разъезжаются.
+    // the list of values as a column; a long one expands in the panel
+    // THE WIDTH OF A GROUP PANEL COLUMN FOLLOWS ITS LONGEST VALUE (and the field
+    // name in the header), with a ceiling: what does not fit is elided.
+    // It is computed in one place, the header and the rows read it from here,
+    // otherwise the columns drift apart.
     readonly property int grpCountWidth: Kirigami.Units.gridUnit * 5
     readonly property int grpColMin: Kirigami.Units.gridUnit * 5
     readonly property int grpColMax: Kirigami.Units.gridUnit * 20
@@ -263,18 +263,18 @@ Kirigami.Page {
         }
         return out
     }
-    // ручная ширина колонки перекрывает расчётную (ключ — имя поля, чтобы
-    // не сбивалась при смене порядка группировки)
+    // a manual column width overrides the computed one (the key is the field name
+    // so that it is not lost when the grouping order changes)
     property var grpColUser: ({})
-    // желаемая ширина: ручная, иначе по содержимому
+    // the desired width: manual, otherwise by content
     function grpColWish(i) {
         var f = i < groupBy.length ? groupBy[i] : ""
         if (grpColUser[f] !== undefined) return grpColUser[f]
         return i < grpColWidths.length ? grpColWidths[i] : grpColMin
     }
-    // ФАКТИЧЕСКАЯ ширина: если панель уже суммы желаемых, колонки ужимаются
-    // ПРОПОРЦИОНАЛЬНО — счётчик не должен выпадать за край, что бы ни было
-    // с шириной панели. Ниже минимума не жмём, дальше — многоточие.
+    // THE ACTUAL width: if the panel is narrower than the sum of the desired ones,
+    // the columns shrink PROPORTIONALLY - the counter must not fall off the edge,
+    // whatever happens to the panel width. We do not squeeze below the minimum.
     property int grpPanelWidth: 0
     readonly property var grpColFit: {
         var wish = [], sum = 0
@@ -306,10 +306,10 @@ Kirigami.Page {
         delete o[f]
         grpColUser = o
     }
-    // сколько нужно панели целиком — и сколько задал пользователь перетаскиванием
+    // how much the panel needs in total - and how much the user set by dragging
     readonly property int grpNaturalWidth: {
-        // учитываем и ручные ширины, иначе после растягивания колонки
-        // счётчик уезжает за край панели
+        // the manual widths count too, otherwise after stretching a column the
+        // counter moves beyond the edge of the panel
         var _ = grpColUser
         var w = grpCountWidth + Kirigami.Units.gridUnit * 2
         for (var i = 0; i < groupBy.length; i++) w += grpColWish(i)
@@ -326,7 +326,7 @@ Kirigami.Page {
         return out.join("\n")
     }
 
-    // выбранное в таблице статистики поле и его значения
+    // the field selected in the statistics table and its values
     property string statsField: ""
     readonly property var statsValues: {
         if (!fieldStats || !fieldStats.fields) return []
@@ -341,13 +341,13 @@ Kirigami.Page {
             if (statsValues[i].n > m) m = statsValues[i].n
         return m
     }
-    // для проверки рендером
+    // for verification by rendering
     function openStats() { statsDlg.open() }
 
     function loadStats() {
         page.fieldStats = backend.eventFieldStats(page.whereText)
-        // по умолчанию раскрыто первое поле — окно не выглядит пустым
-        page.statsField = ""   // панель открывается по клику, а не сама
+        // by default the first field is expanded - the window does not look empty
+        page.statsField = ""   // the panel opens on a click, not by itself
     }
     readonly property var statsRows: {
         var stats = page.fieldStats
@@ -364,22 +364,22 @@ Kirigami.Page {
         return out
     }
 
-    // ЗАКРЕПИТЬ ПРОМЕЖУТОК: границу считаем СЕЙЧАС и записываем абсолютным
-    // временем. «За последний час» остаётся тем самым часом, а не скользит
-    // вслед за часами — иначе повторный просмотр показывал бы другой набор.
-    // для проверки из харнесса: запустить текущий запрос, как кнопка Run
+    // PIN THE RANGE: the bound is computed NOW and written as an absolute time.
+    // "For the last hour" stays that very hour instead of sliding along with the
+    // clock - otherwise a second look would show a different set.
+    // for verification from a harness: run the current query, like the Run button
     function runQuery() { qbar.apply() }
     function setQuick(t) { qbar.quickText = t; qbar.apply() }
-    // для проверки из харнесса
+    // for verification from a harness
     function qbarChanged() { return qbar.changed }
     function editCond0() { qbar.editCondition(0) }
-    // для проверки рендером
+    // for verification by rendering
     function selectMany(fs) { qbar.spec.select = fs; qbar.touch(); qbar.apply() }
     function qbarHeight() { return qbar.height }
     function openMore(kind) { qbar.showMore(kind) }
     function moveSelectField(i, d) { qbar.moveSelect(i, d) }
     function specSelect() { return qbar.spec.select.join(",") }
-    // для проверки: задать группировку и выбрать группу
+    // for verification: set the grouping and pick a group
     function setGroup(fs) {
         qbar.addClause("group")
         qbar.spec.groupBy = fs
@@ -399,10 +399,10 @@ Kirigami.Page {
     function dropField(n) { qbar.toggleField(n) }
     function addCondition2(f, o, v) { qbar.addCondition(f, o, v) }
 
-    // ---- СВЯЗЬ СОБЫТИЯ С ЖИВЫМ ПРОЦЕССОМ ----
-    // Карта «pid -> команда» снимается ОДИН РАЗ НА СТРАНИЦУ (50 событий по
-    // умолчанию). Считать её на каждое событие незачем, а на всю базу —
-    // тем более: процесс из вчерашнего события давно мёртв.
+    // ---- LINKING AN EVENT WITH A LIVE PROCESS ----
+    // The "pid -> command" map is taken ONCE PER PAGE (50 events by default).
+    // There is no point computing it per event, and even less for the whole
+    // database: the process of yesterday's event has long been dead.
     property var livePids: ({})
     function reloadLive() { livePids = backend.livePids() }
     function liveCommandOf(pid) { return page.liveCommand(pid) }
@@ -411,60 +411,60 @@ Kirigami.Page {
         return p !== "" && livePids[p] !== undefined ? livePids[p] : ""
     }
 
-    // ---- сортировка кликом по шапке ----
-    // Порядок приходит ИЗ ЗАПРОСА (конструктор или набранный SQL) — одно
-    // место истины, поэтому в шапке и в тексте запроса всегда одно и то же.
+    // ---- sorting by a click on the header ----
+    // The order comes FROM THE QUERY (the builder or the typed SQL) - a single
+    // source of truth, so the header and the query text always agree.
     property string orderText: ""
     property string sortCol: ""
     property bool sortDesc: false
     function sortBy(col) {
         if (sortCol === col) sortDesc = !sortDesc
         else { sortCol = col; sortDesc = false }
-        qbar.addSort(col, sortDesc)     // попадёт и в SQL-текст, и в конструктор
+        qbar.addSort(col, sortDesc)     // it lands both in the SQL text and in the builder
         qbar.apply()
     }
-    // и набрать запрос руками, как в режиме SQL
+    // and type a query by hand, as in SQL mode
     function manualQuery(t) {
         qbar.builderMode = false
         qbar.manualText = t
         qbar.apply()
     }
 
-    // окно времени по умолчанию: сутки, закреплённые абсолютной границей
+    // the default time window: one day, pinned with an absolute bound
     readonly property int defaultWindowMs: 86400000
     property bool timeSeeded: false
     function seedPeriod() {
         if (timeSeeded) return
         timeSeeded = true
-        // ВЕРНУЛИСЬ В РАЗДЕЛ — ЗАПРОС НА МЕСТЕ. Страница пересоздаётся при
-        // переходе по разделам, поэтому запрос хранится в настройках и
-        // восстанавливается вместе с результатом.
+        // WE ARE BACK IN THE SECTION AND THE QUERY IS STILL THERE. The page is
+        // recreated when navigating between sections, so the query is stored in the
+        // settings and restored together with its result.
         var st = backend.getSettings()
         if (st && st.events_query && qbar.importState(st.events_query)) return
         pinPeriod(defaultWindowMs)
         qbar.apply()
-        // ЭТО И ЕСТЬ ИСХОДНЫЙ ЗАПРОС: 8 колонок ленты + сутки событий
+        // THIS IS THE ORIGINAL QUERY: the 8 feed columns + a day of events
         qbar.markBaseline()
     }
     function saveQueryState() {
-        // сохраняем только осмысленное состояние: до инициализации колонок
-        // apply() срабатывает вхолостую и записал бы пустой запрос
+        // we save only meaningful state: before the columns are initialised apply()
+        // fires for nothing and would write an empty query
         if (!timeSeeded || !qbar.spec.select.length) return
         backend.setSetting("events_query", qbar.exportState())
     }
 
     function pinPeriod(ms) {
         var from = new Date(Date.now() - ms)
-        // события хранятся в UTC — условие тоже в UTC. Смещение сохраняем:
-        // при сбросе запроса граница пересчитается от текущего момента, а не
-        // вернётся к дате, которая была при открытии раздела.
+        // events are stored in UTC - the condition is in UTC too. We keep the
+        // offset: on a reset the bound is recomputed from the current moment
+        // instead of returning to the date the section was opened with.
         qbar.addCondition("ts", ">=",
                           from.toISOString().replace(/\.\d+Z$/, "Z"), "AND", ms)
     }
 
-    // Внешний переход (из сетевого дашборда: «События по адресу»). Условие
-    // готовое, поэтому кладём его прямо в общую строку — там его видно и
-    // можно поправить руками.
+    // An external jump (from the network dashboard: "Events by address"). The
+    // condition is ready, so we put it straight into the shared bar - there it is
+    // visible and can be corrected by hand.
     function applyEventFocus() {
         if (!root.eventFocus) return
         qbar.builderMode = false
@@ -476,7 +476,7 @@ Kirigami.Page {
     Connections {
         target: root
         function onEventFocusChanged() { page.applyEventFocus() }
-        // приход из «Изменений»: сразу открыть нужную цепочку
+        // arrival from "Changes": open the required chain at once
         function onChainFocusChanged() { page.applyChainFocus() }
     }
 
@@ -538,7 +538,7 @@ Kirigami.Page {
         var s = backend.getSettings()
         if (s && s.events_colcfg) {
             try { cfg = JSON.parse(s.events_colcfg) } catch (e) { cfg = null }
-            // старый сохранённый набор не должен перекрывать новый дефолт
+            // an old saved set must not override the new default
             if (cfg && (cfg.v || 0) < page.cfgVersion) cfg = null
         }
         var order = []
@@ -554,8 +554,8 @@ Kirigami.Page {
         page.seedPeriod()
     }
 
-    // ВЫБОРКА ЗАДАЁТ КОЛОНКИ: что перечислено в SELECT, то лента и показывает,
-    // в том же порядке. Пустая выборка колонки не трогает.
+    // THE SELECTION SETS THE COLUMNS: what is listed in SELECT is what the feed
+    // shows, in the same order. An empty selection does not touch the columns.
     function applySelect(sel) {
         if (!sel || !sel.length) return
         var keep = sel.filter(c => page.allCols.includes(c))
@@ -563,16 +563,16 @@ Kirigami.Page {
         var rest = page.colOrder.filter(c => !keep.includes(c))
         page.colOrder = keep.concat(rest)
         page.hiddenCols = rest
-        // НЕ СОХРАНЯЕМ: выборка в запросе — это разовый взгляд на данные, а
-        // не настройка вида. Иначе один узкий запрос навсегда перекраивал бы
-        // таблицу, и вернуть прежние колонки было бы нечем. Постоянная
-        // настройка колонок делается панелью «Columns» — она и сохраняет.
+        // WE DO NOT SAVE IT: the selection in a query is a one-off look at the data,
+        // not a setting of the view. Otherwise one narrow query would reshape the
+        // table forever with no way to bring the old columns back. The permanent
+        // column setup is done in the "Columns" panel - and that is what persists.
     }
 
     function reload() {
         page.feed = backend.eventRows(whereText, pageLimit,
                                       pageIndex * pageLimit, page.orderText)
-        // карта живых процессов — под ту же страницу
+        // the map of live processes - for the same page
         page.reloadLive()
         page.stats = backend.eventStats()
         if (groupBy.length) {
@@ -584,8 +584,8 @@ Kirigami.Page {
     }
     Component.onCompleted: {
         initCols()
-        // внешний переход (из сетевого дашборда) применяется ВМЕСТО
-        // обычной загрузки: иначе условие затёрлось бы пустым фильтром
+        // an external jump (from the network dashboard) is applied INSTEAD of the
+        // ordinary load: otherwise the condition would be overwritten by an empty filter
         if (root.eventFocus) applyEventFocus()
         else reload()
     }
@@ -625,7 +625,7 @@ Kirigami.Page {
             spacing: Kirigami.Units.smallSpacing
             Layout.topMargin: Kirigami.Units.smallSpacing
 
-            // ---- поиск + группировка ----
+            // ---- search + grouping ----
             RowLayout {
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.largeSpacing
@@ -634,16 +634,16 @@ Kirigami.Page {
                 QueryBar {
                     id: qbar
                     Layout.fillWidth: true
-                    // поля таксономии — из них строится конструктор
+                    // the taxonomy fields - the builder is made of them
                     fields: {
                         var out = []
                         var f = page.allFields
                         for (var i = 0; i < f.length; i++) out.push({ name: f[i] })
                         return out
                     }
-                    // выборка начинается с 8 колонок, которые лента показывает
+                    // the selection starts with the 8 columns the feed shows
                     defaultSelect: page.baseSelect
-                    // ---- работа с запросами: слева от Run и Build ----
+                    // ---- working with queries: to the left of Run and Build ----
                     hostTools: [
                         QQC2.ToolButton {
                             icon.name: "document-save"
@@ -671,10 +671,10 @@ Kirigami.Page {
                     placeholder: "type SQL, or plain text to search everywhere"
                     onApplied: function (spec, sql) {
                         page.applySelect(spec.select)
-                        // запомнить запрос в истории (пустые не храним)
+                        // remember the query in the history (empty ones are not stored)
                         if (sql && sql.trim() !== "") backend.eventSqlRemember(sql)
                         page.orderText = qbar.orderText()
-                        // группировка задаётся в самом запросе (GROUP BY)
+                        // the grouping is set in the query itself (GROUP BY)
                         var g = spec.groupBy.slice()
                         if (g.join(",") !== page.groupBy.join(",")) {
                             page.groupBy = g
@@ -689,9 +689,9 @@ Kirigami.Page {
                 }
             }
 
-            // ---- WHERE «условно в SQL»: строится кнопками + / −, правится руками ----
+            // ---- the WHERE expressed in SQL: built with + / -, editable by hand ----
 
-            // ---- чипы активных условий ----
+            // ---- the chips of the active conditions ----
 
             Kirigami.InlineMessage {
                 Layout.fillWidth: true
@@ -702,7 +702,7 @@ Kirigami.Page {
                 text: page.feed.error || ""
             }
 
-            // ---- группировка слева + таблица справа ----
+            // ---- the grouping on the left + the table on the right ----
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -710,8 +710,8 @@ Kirigami.Page {
 
                 Item {
                     visible: page.groupBy.length > 0
-                    // КОЛОНОК СТОЛЬКО ЖЕ, СКОЛЬКО ПОЛЕЙ ГРУППИРОВКИ:
-                    // ширина панели растёт вместе с ними
+                    // THERE ARE AS MANY COLUMNS AS GROUPING FIELDS:
+                    // the width of the panel grows with them
                     Layout.preferredWidth: page.grpUserWidth > 0
                         ? page.grpUserWidth
                         : Math.min(page.width * 0.6, page.grpNaturalWidth)
@@ -721,15 +721,15 @@ Kirigami.Page {
                     ColumnLayout {
                         anchors.fill: parent
                         spacing: 0
-                        // ШАПКА — ТАКАЯ ЖЕ, КАК У ОСНОВНОЙ ТАБЛИЦЫ: тот же
-                        // фон, та же высота, те же разделители колонок.
+                        // THE HEADER IS THE SAME AS THE MAIN TABLE'S: the same
+                        // background, the same height, the same column separators.
                         Rectangle {
                             id: grpHeadBar
                             Layout.fillWidth: true
                             Layout.preferredHeight: grpProbe.implicitHeight
                                                     + Kirigami.Units.smallSpacing * 2
                             color: Kirigami.Theme.alternateBackgroundColor
-                            // мерка высоты: та же, что у шапки основной таблицы
+                            // the height measure: the same as the main table header
                             QQC2.Label { id: grpProbe; visible: false; text: "Ag"; font.bold: true }
                             Row {
                                 id: grpHead
@@ -743,9 +743,9 @@ Kirigami.Page {
                                         required property var modelData
                                         required property int index
                                         width: page.grpColWidth(index)
-                                        // ЯЧЕЙКА ВО ВСЮ ВЫСОТУ ШАПКИ: рукоятка
-                                        // изменения ширины была тонкой полоской
-                                        // в 17 px и в неё было не попасть
+                                        // A CELL THE FULL HEIGHT OF THE HEADER: the
+                                        // resize handle used to be a thin 17 px strip
+                                        // and it was impossible to hit
                                         height: grpHeadBar.height
                                         QQC2.Label {
                                             id: grpHeadLbl
@@ -766,17 +766,17 @@ Kirigami.Page {
                                     }
                                 }
                             }
-                            // ИЗМЕНЕНИЕ ШИРИНЫ КОЛОНОК — ОДНОЙ ПОЛОСОЙ ПОВЕРХ
-                            // ШАПКИ. Отдельные рукоятки в ячейках событий не
-                            // получали (их перекрывала раскладка), а здесь
-                            // граница вычисляется по координате курсора.
+                            // COLUMN RESIZING IS DONE BY ONE STRIP OVER THE HEADER.
+                            // Separate handles inside the cells received no events
+                            // (the layout covered them), while here the boundary is
+                            // computed from the cursor coordinate.
                             MouseArea {
                                 id: grpResize
                                 anchors.fill: parent
                                 z: 5
                                 hoverEnabled: true
                                 acceptedButtons: Qt.LeftButton
-                                property int edge: -1        // граница под курсором
+                                property int edge: -1        // the boundary under the cursor
                                 property real sx: 0
                                 property real sw: 0
                                 function edgeAt(x) {
@@ -806,7 +806,7 @@ Kirigami.Page {
                                     if (e >= 0) page.resetGrpColWidth(e)
                                 }
                                 onExited: edge = -1
-                                // подсветка границы, за которую можно тянуть
+                                // highlighting the boundary that can be dragged
                                 Rectangle {
                                     visible: grpResize.edge >= 0
                                     width: 2
@@ -824,11 +824,11 @@ Kirigami.Page {
                             QQC2.Label {
                                 anchors.right: parent.right
                                 z: 6
-                                // ровно над числами: у списка есть полоса
-                                // прокрутки, о ней шапка не знала — плюс
-                                // отступ от края, иначе «n» липнет к границе
-                                // ровно по правому краю списка: у шапки своя
-                                // ширина, у списка — своя (полоса прокрутки)
+                                // exactly above the numbers: the list has a scrollbar
+                                // that the header did not know about - plus a margin
+                                // from the edge, otherwise "n" sticks to the border
+                                // exactly at the right edge of the list: the header has
+                                // its own width, the list has its own (the scrollbar)
                                 anchors.rightMargin: Math.max(0, grpHeadBar.width
                                                                - grpList.width)
                                 anchors.verticalCenter: parent.verticalCenter
@@ -848,8 +848,8 @@ Kirigami.Page {
                         }
                         QQC2.ScrollView {
                             id: grpScroll
-                            // ширина полосы прокрутки: под неё шапка оставляет
-                            // ровно столько же, сколько занимает список
+                            // the scrollbar width: the header leaves exactly as much
+                            // room for it as the list takes
                             readonly property int barW: QQC2.ScrollBar.vertical
                                 && QQC2.ScrollBar.vertical.visible
                                 ? QQC2.ScrollBar.vertical.width : 0
@@ -864,10 +864,10 @@ Kirigami.Page {
                                     required property var modelData
                                     required property int index
                                     width: ListView.view.width
-                                    // ТА ЖЕ ФОРМА, ЧТО У ОСНОВНОЙ ТАБЛИЦЫ:
-                                    // высота строки, зебра, разделитель, метка
-                                    // выделения справа — иначе две таблицы
-                                    // рядом читаются как разные приложения.
+                                    // THE SAME SHAPE AS THE MAIN TABLE: the row height,
+                                    // the zebra, the separator, the selection mark on
+                                    // the right - otherwise two tables side by side
+                                    // read as different applications.
                                     height: Kirigami.Units.gridUnit * 2.3
                                     padding: 0
                                     highlighted: page.groupPicked
@@ -885,10 +885,10 @@ Kirigami.Page {
                                             width: parent.width
                                             opacity: 0.35
                                         }
-                                        // метка выбранной группы — СЛЕВА, как
-                                        // полоса критичности в ленте: справа
-                                        // она обрывалась на полосе прокрутки и
-                                        // выделение выглядело кривым
+                                        // the mark of the selected group is on the LEFT,
+                                        // like the severity stripe in the feed: on the
+                                        // right it was cut off by the scrollbar and the
+                                        // selection looked crooked
                                         Rectangle {
                                             anchors { left: parent.left; top: parent.top
                                                       bottom: parent.bottom }
@@ -911,7 +911,7 @@ Kirigami.Page {
                                     }
                                     contentItem: RowLayout {
                                         spacing: 0
-                                        // по колонке на каждое поле группировки
+                                        // one column per grouping field
                                         Repeater {
                                             model: modelData.parts
                                                    ? modelData.parts
@@ -920,14 +920,14 @@ Kirigami.Page {
                                                 required property var modelData
                                                 required property int index
                                                 Layout.preferredWidth: page.grpColWidth(index)
-                                                // воздух внутри ячейки, иначе
-                                                // текст наезжает на границу
+                                                // air inside the cell, otherwise the
+                                                // text runs into the border
                                                 leftPadding: Kirigami.Units.smallSpacing
                                                 rightPadding: Kirigami.Units.largeSpacing
                                                 horizontalAlignment: Text.AlignLeft
-                                                // ТО ЖЕ ФОРМАТИРОВАНИЕ, ЧТО В ЛЕНТЕ:
-                                                // время — в местной зоне, адреса и
-                                                // время моноширинным шрифтом
+                                                // THE SAME FORMATTING AS IN THE FEED:
+                                                // the time in the local zone, addresses
+                                                // and time in a monospaced font
                                                 text: String(modelData) === ""
                                                     ? "(empty)"
                                                     : (page.groupBy[index] === "ts"
@@ -957,9 +957,9 @@ Kirigami.Page {
                         }
                     }
                 }
-                // ГРАНИЦА ПЕРЕТАСКИВАЕТСЯ: сколько места отдать группам, а
-                // сколько ленте, решает пользователь. Двойной клик возвращает
-                // ширину «по содержимому».
+                // THE BOUNDARY IS DRAGGABLE: how much space goes to the groups and how
+                // much to the feed is decided by the user. A double click returns the
+                // width "by content".
                 Item {
                     visible: page.groupBy.length > 0
                     Layout.fillHeight: true
@@ -992,7 +992,7 @@ Kirigami.Page {
                     }
                 }
 
-                // ---- РЕЖИМ «СТАТИСТИКА»: та же область, что и лента ----
+                // ---- THE "STATISTICS" MODE: the same area as the feed ----
                 ColumnLayout {
                     visible: page.mode === "stats"
                     Layout.fillWidth: true
@@ -1024,15 +1024,15 @@ Kirigami.Page {
                     if (!page.fieldStats) return "…"
                     var t = page.statsRows.length + " fields filled in of "
                             + page.fieldStats.all_fields + "  ·  " + page.fieldStats.total + " events"
-                    // МОЛЧАЛИВОГО СРЕЗА НЕ БЫВАЕТ: если упёрлись в порог, так и пишем
+                    // THERE IS NO SILENT TRUNCATION: if we hit the threshold, we say so
                     if (page.fieldStats.truncated) t += "  ·  counted over the latest " + page.fieldStats.total
                     if (page.whereText) t += "  ·  query applied"
                     return t
                 }
             }
-            // СТАТИСТИКА — ОДНА ТАБЛИЦА: строка = поле, во второй колонке
-            // сами значения в столбик. Длинный перечень не раскрывается на
-            // всю страницу: клик по строке открывает панель, где он целиком.
+            // THE STATISTICS ARE ONE TABLE: a row = a field, the second column holds
+            // the values themselves in a column. A long list does not unfold over the
+            // whole page: a click on a row opens a panel where it is shown in full.
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -1106,7 +1106,7 @@ Kirigami.Page {
                                         font.family: "monospace"
                                         font.pointSize: Kirigami.Theme.smallFont.pointSize
                                     }
-                                    // ЗНАЧЕНИЯ В СТОЛБИК прямо в строке
+                                    // THE VALUES IN A COLUMN right inside the row
                                     QQC2.Label {
                                         id: valsLbl
                                         Layout.fillWidth: true
@@ -1141,7 +1141,7 @@ Kirigami.Page {
                     }
                 }
 
-                // ---- панель поля: все значения целиком ----
+                // ---- the field panel: all the values in full ----
                 Kirigami.Separator {
                     Layout.fillHeight: true
                     visible: page.statsField !== ""
@@ -1269,9 +1269,9 @@ Kirigami.Page {
                                             font.bold: true
                                             elide: Text.ElideRight
                                         }
-                                        // НАПРАВЛЕНИЕ СОРТИРОВКИ — ИКОНКОЙ,
-                                        // как принято в таблицах: стрелка
-                                        // читается быстрее символа в тексте.
+                                        // THE SORT DIRECTION AS AN ICON, as is
+                                        // customary in tables: an arrow is read
+                                        // faster than a character in the text.
                                         Kirigami.Icon {
                                             id: sortIcon
                                             anchors.right: parent.right
@@ -1283,9 +1283,9 @@ Kirigami.Page {
                                             source: page.sortDesc ? "view-sort-descending"
                                                                   : "view-sort-ascending"
                                         }
-                                        // СОРТИРОВКА ИДЁТ В ЗАПРОС: клик по
-                                        // шапке дописывает ORDER BY — и в
-                                        // набранный SQL, и в конструктор.
+                                        // THE SORTING GOES INTO THE QUERY: a click on
+                                        // the header appends ORDER BY - both to the
+                                        // typed SQL and to the builder.
                                         TapHandler {
                                             onTapped: page.sortBy(parent.col)
                                         }
@@ -1327,8 +1327,8 @@ Kirigami.Page {
                             highlighted: page.sel && page.sel._id === modelData._id
                             onClicked: page.sel = modelData
                             background: Rectangle {
-                                // ВЫДЕЛЕНИЕ ЦВЕТОМ ПОДСВЕТКИ, а не серым:
-                                // серый поверх зебры почти не читался
+                                // SELECTION BY THE HIGHLIGHT COLOUR, not grey:
+                                // grey over the zebra was almost unreadable
                                 color: rowDel.highlighted
                                        ? Qt.alpha(Kirigami.Theme.highlightColor, 0.20)
                                        : (rowDel.hovered
@@ -1340,9 +1340,9 @@ Kirigami.Page {
                                     width: parent.width
                                     opacity: 0.35
                                 }
-                                // ВЫБРАННАЯ СТРОКА помечается полосой цвета
-                                // подсветки: заливка сама по себе спорит с
-                                // зеброй и с полосой критичности слева.
+                                // THE SELECTED ROW is marked with a stripe of the
+                                // highlight colour: a fill of its own competes with
+                                // the zebra and with the severity stripe on the left.
                                 Rectangle {
                                     anchors { right: parent.right; top: parent.top
                                               bottom: parent.bottom }
@@ -1366,14 +1366,14 @@ Kirigami.Page {
                                         height: rowDel.height
                                         property string col: modelData
                                         property string val: String(rowDel.rowData[modelData] ?? "")
-                                        // ПОКАЗЫВАЕМ местное время, а в val
-                                        // остаётся UTC: из него строятся
-                                        // условия WHERE, а в базе время UTC
+                                        // WE SHOW the local time, while val keeps
+                                        // UTC: the WHERE conditions are built from it
+                                        // and the database stores UTC
                                         property string display: cell.col === "ts"
                                                                  ? Fmt.local(cell.val) : cell.val
                                         QQC2.Label {
                                             anchors.fill: parent
-                                            // воздух внутри ячейки
+                                            // air inside the cell
                                             anchors.rightMargin: cellHover.hovered
                                                                  ? 40 : Kirigami.Units.largeSpacing
                                             verticalAlignment: Text.AlignVCenter
@@ -1390,10 +1390,10 @@ Kirigami.Page {
                                                    : Kirigami.Theme.textColor
                                         }
                                         HoverHandler { id: cellHover }
-                                        // Клик по ЯЧЕЙКЕ выделяет строку —
-                                        // раньше выделение зависело от того,
-                                        // попал ли клик мимо содержимого.
-                                        // Двойной клик КОПИРУЕТ значение.
+                                        // A click on a CELL selects the row - the
+                                        // selection used to depend on whether the
+                                        // click missed the content.
+                                        // A double click COPIES the value.
                                         TapHandler {
                                             acceptedButtons: Qt.LeftButton
                                             onSingleTapped: page.sel = rowDel.rowData
@@ -1402,7 +1402,7 @@ Kirigami.Page {
                                                 page.copyValue(cell.val)
                                             }
                                         }
-                                        // + добавить значение в фильтр, − исключить
+                                        // + adds the value to the filter, - excludes it
                                         // CELL ACTIONS ARE LAZY.
                                         // Each cell used to build three
                                         // buttons and a ten-item Menu up
@@ -1438,7 +1438,7 @@ Kirigami.Page {
                                                     QQC2.ToolTip.visible: hovered
                                                     onClicked: page.addCond(cell.col, "<>", cell.val)
                                                 }
-                                                // остальные операторы сравнения (как в RQL)
+                                                // the other comparison operators (as in RQL)
                                                 QQC2.ToolButton {
                                                     implicitWidth: Kirigami.Units.gridUnit * 1.1
                                                     implicitHeight: Kirigami.Units.gridUnit * 1.1
@@ -1484,7 +1484,7 @@ Kirigami.Page {
                                                         }
                                                         QQC2.MenuSeparator {}
                                                         QQC2.MenuItem {
-                                                            // подсеть: RQL-приём `ip IN '10.0.0.0/8'`
+                                                            // a subnet: the RQL idiom `ip IN '192.0.2.0/24'`
                                                             text: "same /24 subnet"
                                                             enabled: cell.col.indexOf("_ip") >= 0
                                                             onTriggered: {
@@ -1513,7 +1513,7 @@ Kirigami.Page {
                 }
             }
 
-            // ---- футер ----
+            // ---- the footer ----
             QQC2.ToolBar {
                 Layout.fillWidth: true
                 RowLayout {
@@ -1539,7 +1539,7 @@ Kirigami.Page {
                         onClicked: { page.pageIndex++; page.reload() }
                     }
                     QQC2.ComboBox {
-                        // сколько строк показывать; «all» = без ограничения
+                        // how many rows to show; "all" = no limit
                 model: [{ t: "50", v: 50 }, { t: "100", v: 100 }, { t: "200", v: 200 },
                         { t: "500", v: 500 }, { t: "1000", v: 1000 },
                         { t: "all", v: 0 }]
@@ -1570,19 +1570,19 @@ Kirigami.Page {
                             : "Which fields are filled in, and with what — for this query"
                         QQC2.ToolTip.visible: hovered
                         onClicked: {
-                            // СТАТИСТИКА — РЕЖИМ ТОЙ ЖЕ ТАБЛИЦЫ, а не окно
-                            // поверх: запрос один, меняется только взгляд.
+                            // THE STATISTICS ARE A MODE OF THE SAME TABLE, not a window
+                            // on top: the query is one, only the view changes.
                             if (page.mode === "stats") { page.mode = "feed"; return }
                             page.mode = "stats"
                             page.loadStats()
                         }
                     }
-            // ВЫБОР КОЛОНОК УБРАН: колонки задаёт SELECT в строке запроса
+            // THE COLUMN CHOICE WAS REMOVED: the columns are set by SELECT in the query bar
                 }
             }
         }
 
-        // ---- СОХРАНЁННЫЕ ЗАПРОСЫ ----
+        // ---- SAVED QUERIES ----
         SidePanel {
             id: savedPanel
             title: "Saved queries"
@@ -1596,10 +1596,10 @@ Kirigami.Page {
                 Layout.fillHeight: true
                 spacing: 0
 
-                // дерево каталогов: «Все» + каталоги экспертизы
+                // the directory tree: "All" + the expertise directories
                 ColumnLayout {
-                    // ширина фиксирована, иначе колонка съедала всю панель и
-                    // сами запросы оставались без места
+                    // the width is fixed, otherwise the column ate the whole panel and
+                    // the queries themselves were left without room
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 11
                     Layout.maximumWidth: Kirigami.Units.gridUnit * 11
                     Layout.fillWidth: false
@@ -1665,7 +1665,7 @@ Kirigami.Page {
                 }
                 Kirigami.Separator { Layout.fillHeight: true }
 
-                // сами запросы выбранного каталога (или всех)
+                // the queries of the selected directory (or of all of them)
                 QQC2.ScrollView {
                     Layout.fillWidth: true
                     Layout.minimumWidth: Kirigami.Units.gridUnit * 12
@@ -1735,7 +1735,7 @@ Kirigami.Page {
             }
         }
 
-        // ---- детали события ----
+        // ---- the event details ----
         SidePanel {
             id: details
             title: "Event"
@@ -1744,8 +1744,8 @@ Kirigami.Page {
             open: page.sel !== null && !colPanel.open
             onCloseRequested: page.sel = null
 
-            // ПРОЦЕСС СОБЫТИЯ ЕЩЁ ЖИВ — можно посмотреть его в графе:
-            // кто его запустил, что он открыл, куда ходит.
+            // THE PROCESS OF THE EVENT IS STILL ALIVE - it can be looked at in the
+            // graph: who started it, what it opened, where it goes.
             QQC2.Button {
                 Layout.fillWidth: true
                 visible: page.sel && page.eventProcess(page.sel).alive
@@ -1788,7 +1788,7 @@ Kirigami.Page {
                                     var f = modelData.fields[i]
                                     var v = page.sel[f.name]
                                     if (v !== undefined && v !== null && String(v) !== "") {
-                                        // время показываем местное (в базе UTC)
+                                        // we show the local time (UTC in the database)
                                         var sv = (f.name === "ts" || f.name === "ingested")
                                                  ? Fmt.local(v) : String(v)
                                         r.push({ n: f.name, v: sv, e: f.ecs })
@@ -1824,7 +1824,7 @@ Kirigami.Page {
                                         font.family: "monospace"
                                         font.pointSize: Kirigami.Theme.smallFont.pointSize
                                     }
-                                    // «Исследовать»: прыжок в State с фильтром
+                                    // "Explore": a jump into State with a filter
                                     QQC2.ToolButton {
                                         visible: page.exploreMap[modelData.n] !== undefined
                                         icon.name: "search"
@@ -1848,7 +1848,7 @@ Kirigami.Page {
             }
         }
 
-        // ---- выбор колонок ----
+        // ---- the column chooser ----
         SidePanel {
             id: colPanel
             title: "Columns"
@@ -1895,8 +1895,8 @@ Kirigami.Page {
                             }
                             QQC2.ToolButton {
                                 icon.name: "go-up"
-                                // порядок считаем по ПОЛНОМУ списку: при поиске
-                                // индекс в отфильтрованном ничего не значит
+                                // the order is computed over the FULL list: while
+                                // searching an index in the filtered one means nothing
                                 enabled: page.colOrder.indexOf(modelData) > 0
                                 onClicked: page.moveCol(modelData, -1)
                             }
@@ -1912,10 +1912,10 @@ Kirigami.Page {
             }
         }
 
-        // ---- ЦЕПОЧКИ: слева список, справа СОБЫТИЯ ЦЕПОЧКИ ----
-        // События показываются той же таблицей и той же боковой панелью, что
-        // и обычная лента: цепочка — это не отдельный «дешёвый» список, а
-        // тот же просмотр событий, только отфильтрованный по истории.
+        // ---- CHAINS: the list on the left, the EVENTS OF THE CHAIN on the right ----
+        // The events are shown by the same table and the same side panel as the
+        // ordinary feed: a chain is not a separate "cheap" list but the same view of
+        // events, only filtered by a story.
         ColumnLayout {
             visible: page.mode === "chains"
             Layout.preferredWidth: Kirigami.Units.gridUnit * 22
@@ -1990,7 +1990,7 @@ Kirigami.Page {
                                 opacity: 0.5
                                 elide: Text.ElideRight
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
-                                // ЧЕМ связаны события: видно надёжность
+                                // WHAT the events are linked by: the reliability is visible
                                 text: {
                                     var l = modelData.links || {}, p = []
                                     for (var k in l) p.push(k + " " + l[k])
@@ -2003,8 +2003,8 @@ Kirigami.Page {
                             onClicked: {
                                 page.chainId = modelData.id
                                 var d = backend.chainDetail(modelData.id)
-                                // подменяем ленту событиями цепочки: та же
-                                // таблица, те же колонки, та же панель деталей
+                                // we replace the feed with the events of the chain: the
+                                // same table, the same columns, the same details panel
                                 page.feed = { rows: d.steps || [],
                                               total: d.count || 0, error: "" }
                                 page.sel = null
@@ -2023,16 +2023,16 @@ Kirigami.Page {
 
     }
 
-    // ---- история SQL: топ-10 последних, а при вводе — похожие из ВСЕЙ истории ----
+    // ---- the SQL history: the last 10, and while typing the similar ones from the WHOLE history ----
     QQC2.Popup {
         id: histPopup
-        // там же, где и сохранённые: левый угол под строкой запроса
+        // in the same place as the saved ones: the left corner under the query bar
         x: 0
         y: Kirigami.Units.gridUnit * 9
         width: Math.min(page.width * 0.6, Kirigami.Units.gridUnit * 40)
         padding: 2
         property var items: []
-        property bool filtered: false      // список похожих, а не просто недавние
+        property bool filtered: false      // a list of similar ones, not just recent
         function show(text) {
             var t = (text || "").trim()
             filtered = t !== ""
@@ -2073,7 +2073,7 @@ Kirigami.Page {
         }
     }
 
-    // ---- сохранение запроса: имя + каталог (каталог можно создать тут же) ----
+    // ---- saving a query: a name + a directory (a directory can be created here) ----
     Kirigami.Dialog {
         id: saveDialog
         title: "Save query"
@@ -2131,11 +2131,11 @@ Kirigami.Page {
         }
     }
 
-    // ---- СОХРАНЁННЫЕ ЗАПРОСЫ — БОКОВАЯ ПАНЕЛЬ ----
-    // Это объекты экспертизы (expertise/queries/<каталог>), поэтому и
-    // показываем их как экспертизу: слева дерево каталогов, справа запросы.
-    // Клик по КОРНЮ показывает запросы всех каталогов сразу.
-    property string savedDir: ""          // "" = все каталоги
+    // ---- SAVED QUERIES - THE SIDE PANEL ----
+    // These are expertise objects (expertise/queries/<directory>), so we show them
+    // as expertise: the directory tree on the left, the queries on the right.
+    // A click on the ROOT shows the queries of every directory at once.
+    property string savedDir: ""          // "" = all directories
     readonly property var savedShown: {
         if (savedDir === "") return savedList
         var out = []
@@ -2152,19 +2152,19 @@ Kirigami.Page {
     }
 
 
-    // ---- выбор поля группировки с поиском (полей 87, списком неудобно) ----
+    // ---- picking a grouping field with search (87 fields, a plain list is awkward) ----
 
 
 
-    // Разбор начинают не с чтения ленты, а с вопроса «какие поля вообще
-    // заполнены и какими значениями» — так делают в зрелых SIEM. Считается
-    // ОТНОСИТЕЛЬНО ТЕКУЩЕГО ЗАПРОСА, поэтому сузил выборку — статистика
-    // пересчиталась под неё. Клик по значению добавляет его в условие.
+    // An investigation starts not by reading the feed but with the question "which
+    // fields are filled at all and with what values" - that is how mature SIEMs do
+    // it. It is computed RELATIVE TO THE CURRENT QUERY, so narrowing the selection
+    // recomputes the statistics for it. A click on a value adds it to the condition.
 
 
 
-    // ПОДТВЕРЖДЕНИЕ КОПИРОВАНИЯ: без него двойной клик выглядит как «ничего
-    // не произошло».
+    // A COPY CONFIRMATION: without it a double click looks like nothing happened.
+
     Kirigami.InlineMessage {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom

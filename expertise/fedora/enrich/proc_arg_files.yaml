@@ -3,23 +3,23 @@ id: LS-E-24
 type: enrichment
 version: 1.0.0
 title: Files given to the process on its command line
-# Без root нельзя прочитать /proc/<pid>/fd чужого процесса, и «с каким
-# конфигом он работает» оставалось без ответа. Команда видна всегда, а пути
-# в ней указаны явно. Берём аргументы-пути, которые существуют на диске.
-# Признак структурный: никаких имён программ и ключей.
+# Without root one cannot read /proc/<pid>/fd of a foreign process, and "which
+# config does it use" had no answer. The command line is always visible, and the
+# paths in it are explicit. We take the path arguments that exist on disk.
+# The property is structural: no program names and no option names.
 code: |
   def enrich(rows):
-      """Файлы, которые процессу ЗАДАЛИ аргументом командной строки.
+      """The files GIVEN to a process as a command line argument.
 
-      У демона под другим пользователем /proc/<pid>/fd не читается без root,
-      и «с каким конфигом он работает» ответа не имело. Но команда процесса
-      видна всегда, а в ней пути указаны явно: --config, --ca, --cert, --key,
-      -f /etc/... Берём КАЖДЫЙ аргумент, похожий на путь, и оставляем те,
-      которые РЕАЛЬНО существуют на диске.
+      For a daemon running as another user /proc/<pid>/fd cannot be read without
+      root, and "which config does it use" had no answer. But the command line of a
+      process is always visible, and the paths in it are explicit: --config, --ca,
+      --cert, --key, -f /etc/... We take EVERY argument that looks like a path and
+      keep those that ACTUALLY exist on disk.
 
-      Признак структурный: никаких имён программ и списков ключей — только
-      «аргумент является существующим файлом». Работает для любой программы,
-      которой файл передали явно.
+      The property is structural: no program names and no lists of options - only
+      "the argument is an existing file". It works for any program that was given
+      a file explicitly.
       """
       import os
       for r in rows:
@@ -32,7 +32,7 @@ code: |
               if not tok.startswith("/") or tok in seen:
                   continue
               seen.add(tok)
-              # сам бинарник не конфиг: его показывает пакет
+              # the binary itself is not a config: the package shows it
               if tok == cmd.split()[0]:
                   continue
               try:

@@ -4,123 +4,124 @@ type: filter
 version: 2.0.0
 title: Noise templates (events to drop)
 description: >-
-  ТАБЛИЦА ШАБЛОНОВ БЕСПОЛЕЗНЫХ СОБЫТИЙ. Событие, совпавшее с ЛЮБЫМ шаблоном,
-  выбрасывается в конвейере (action: drop) и не засоряет ленту. action: tag —
-  оставить, но пометить (tags=noise:<reason>).
+  A TABLE OF TEMPLATES FOR USELESS EVENTS. An event matching ANY template is
+  dropped in the pipeline (action: drop) and does not clutter the feed. action:
+  tag keeps it but marks it (tags=noise:<reason>).
 
-  Шаблон: любые поля события сравниваются КАК ПОДСТРОКА, `match` — регулярное
-  выражение по message. Правьте под себя: это ваша экспертиза, файл вне fedora.
+  A template: any event fields are compared AS A SUBSTRING, `match` is a regular
+  expression over message. Edit it for yourself: this is your expertise, the file
+  lives outside fedora.
 
-  ПРИНЦИП ОТБОРА: выбрасываем только то, что не несёт информации о системе —
-  собственную активность агента, служебные технические записи и повторяющийся
-  спам приложений. Реальные действия (запуск программ, внешние соединения,
-  изменения файлов) НЕ фильтруются никогда, даже если их много.
+  THE SELECTION PRINCIPLE: we drop only what carries no information about the
+  system - the agent's own activity, service technical records and repeated
+  application spam. Real actions (program starts, external connections, file
+  changes) are NEVER filtered, however many of them there are.
 templates:
-  # ---- 1-8: собственная активность агента -----------------------------------
-  # EDR не должен наблюдать сам себя: сбор состояния каждые 20-60 с порождает
-  # десятки процессов, и в ленте они вытесняют реальные события.
-  - {name: self-ps,        event_module: procmon, match: "ps -eo pid=,ppid=,user=", reason: "сбор процессов агентом", action: drop}
-  - {name: self-bash-ps,   event_module: procmon, match: "bash -c ps -eo",          reason: "обёртка сбора процессов", action: drop}
-  - {name: self-journal,   event_module: procmon, match: "journalctl -o json",      reason: "сбор журнала агентом", action: drop}
-  - {name: self-ss,        event_module: procmon, match: "\\bss -tuna",             reason: "сбор сокетов агентом", action: drop}
-  - {name: self-rpm,       event_module: procmon, match: "rpm -(qa|Va|qf)",         reason: "инвентаризация пакетов агентом", action: drop}
-  - {name: self-dnf,       event_module: procmon, match: "dnf (history|updateinfo)", reason: "сбор истории и уязвимостей", action: drop}
-  - {name: self-feeds,     event_module: procmon, match: "feodotracker|torproject", reason: "загрузка фидов угроз", action: drop}
-  - {name: self-misc,      event_module: procmon, match: "(systemd-analyze|swapon|getcap|lsblk|findmnt) ", reason: "прочие команды сбора", action: drop}
+  # ---- 1-8: the agent's own activity ----------------------------------------
+  # An EDR must not watch itself: collecting the state every 20-60 seconds spawns
+  # dozens of processes, and in the feed they push out the real events.
+  - {name: self-ps,        event_module: procmon, match: "ps -eo pid=,ppid=,user=", reason: "the agent collecting processes", action: drop}
+  - {name: self-bash-ps,   event_module: procmon, match: "bash -c ps -eo",          reason: "the wrapper of the process collection", action: drop}
+  - {name: self-journal,   event_module: procmon, match: "journalctl -o json",      reason: "the agent collecting the journal", action: drop}
+  - {name: self-ss,        event_module: procmon, match: "\\bss -tuna",             reason: "the agent collecting sockets", action: drop}
+  - {name: self-rpm,       event_module: procmon, match: "rpm -(qa|Va|qf)",         reason: "the agent inventorying packages", action: drop}
+  - {name: self-dnf,       event_module: procmon, match: "dnf (history|updateinfo)", reason: "collecting history and vulnerabilities", action: drop}
+  - {name: self-feeds,     event_module: procmon, match: "feodotracker|torproject", reason: "downloading threat feeds", action: drop}
+  - {name: self-misc,      event_module: procmon, match: "(systemd-analyze|swapon|getcap|lsblk|findmnt) ", reason: "other collection commands", action: drop}
 
-  # ---- 9-12: служебные процессы системы -------------------------------------
-  - {name: userwork,       event_module: procmon, match: "systemd-userwork",        reason: "служебные рабочие процессы systemd", action: drop}
-  - {name: kernel-threads, event_module: procmon, match: "^(started|exited) \\[",   reason: "потоки ядра, а не программы", action: drop}
-  - {name: shell-helpers,  event_module: procmon, match: "^(started|exited) (sed|awk|grep|cat|wc|head|tail|cut|tr|sort|basename|dirname)\\b", reason: "вспомогательные утилиты внутри скриптов", action: drop}
-  - {name: crontab-list,   event_provider: crontab, match: "LIST",                  reason: "чтение своего crontab", action: drop}
+  # ---- 9-12: service processes of the system --------------------------------
+  - {name: userwork,       event_module: procmon, match: "systemd-userwork",        reason: "systemd service worker processes", action: drop}
+  - {name: kernel-threads, event_module: procmon, match: "^(started|exited) \\[",   reason: "kernel threads, not programs", action: drop}
+  - {name: shell-helpers,  event_module: procmon, match: "^(started|exited) (sed|awk|grep|cat|wc|head|tail|cut|tr|sort|basename|dirname)\\b", reason: "helper utilities inside scripts", action: drop}
+  - {name: crontab-list,   event_provider: crontab, match: "LIST",                  reason: "reading one's own crontab", action: drop}
 
-  # ---- 13-15: сетевой шум, который не говорит ни о чём -----------------------
-  # ВНИМАНИЕ: внешние соединения НЕ фильтруются — только петля на себя.
-  - {name: loopback-conn,  event_module: netmon,  match: "127\\.0\\.0\\.1:\\d+ -> 127\\.", reason: "соединение localhost→localhost", action: drop}
-  - {name: loopback-open,  event_module: netmon,  match: "-> 127\\.0\\.0\\.1:",     reason: "подключение к локальной службе", action: drop}
-  - {name: resolver-dns,   event_module: audit,   match: "syscall=42.*comm=\"systemd-resolve\"", reason: "штатные DNS-запросы резолвера", action: tag}
+  # ---- 13-15: network noise that says nothing -------------------------------
+  # NOTE: external connections are NOT filtered - only the loopback.
+  - {name: loopback-conn,  event_module: netmon,  match: "127\\.0\\.0\\.1:\\d+ -> 127\\.", reason: "a localhost to localhost connection", action: drop}
+  - {name: loopback-open,  event_module: netmon,  match: "-> 127\\.0\\.0\\.1:",     reason: "a connection to a local service", action: drop}
+  - {name: resolver-dns,   event_module: audit,   match: "syscall=42.*comm=\"systemd-resolve\"", reason: "routine DNS queries by the resolver", action: tag}
 
-  # ---- 16-18: технические записи аутентификации ------------------------------
-  - {name: pam-setcred,    event_module: audit,   match: "op=PAM:setcred",          reason: "служебный шаг PAM без результата", action: drop}
-  - {name: pam-session,    event_module: audit,   match: "op=PAM:session_(open|close)", reason: "штатное открытие сессии", action: tag}
-  - {name: pam-fprintd,    match: "pam_fprintd\\.so|PAM adding faulty module|unable to dlopen", reason: "отсутствует модуль отпечатка", action: drop}
+  # ---- 16-18: technical authentication records ------------------------------
+  - {name: pam-setcred,    event_module: audit,   match: "op=PAM:setcred",          reason: "a PAM service step with no outcome", action: drop}
+  - {name: pam-session,    event_module: audit,   match: "op=PAM:session_(open|close)", reason: "a routine session open", action: tag}
+  - {name: pam-fprintd,    match: "pam_fprintd\\.so|PAM adding faulty module|unable to dlopen", reason: "the fingerprint module is missing", action: drop}
 
-  # ---- 19-22: спам приложений -----------------------------------------------
-  - {name: kwin-errors,    event_provider: kwin_wayland, match: "TypeError|ReferenceError|Cannot read property|kwinRaiseTogether", reason: "ошибки скриптов kwin", action: drop}
-  - {name: kwin-gl,        event_provider: kwin_wayland, match: "GL_INVALID_|render time query|no context is current", reason: "спам графического стека kwin", action: drop}
-  - {name: firewalld-zone, event_provider: firewalld, match: "^ERROR: INVALID_ZONE", reason: "проверка зоны по умолчанию", action: drop}
-  - {name: lisin-own-qml,  match: "QML .*(was not placed in the graphics scene|Unable to assign|is not a type)", reason: "предупреждения самого LiSin", action: drop}
-  - {name: empty-message,  event_action: log, match: "^\\s*$",                      reason: "пустая запись", action: drop}
-  # ================= ПАРТИЯ 2: отобрана по остатку после первой =============
-  # regex записаны в ОДИНАРНЫХ кавычках: YAML в двойных пытается разбирать
-  # \( как escape и падает, а в одинарных строка идёт как есть.
-  # ---- 24-29: снова собственная активность агента, теперь через sudo/audit ---
-  # ВНИМАНИЕ: фильтруем ТОЛЬКО свои проверки sudo -n (по имени команды в
-  # COMMAND=). Голое 'a password is required' скрыло бы и ЧУЖУЮ попытку
-  # повышения прав — а это ровно то, что расследуют.
-  - {name: self-sudo-nopass, event_provider: sudo, match: 'a password is required.*COMMAND=\S*(dmidecode|getcap|sudo)', reason: 'проверка прав самим агентом', action: drop}
-  - {name: self-dmidecode,   event_module: audit, match: 'cmd=646[dD]69646563', reason: 'sudo dmidecode из источника hardware', action: drop}
-  - {name: self-sudo-list,   event_module: audit, match: 'cmd=7375646F202D6E202D6C', reason: 'перечисление прав sudo агентом', action: drop}
-  - {name: self-getcap,      event_module: audit, match: 'cmd=676574636170', reason: 'getcap из источника privesc', action: drop}
-  - {name: self-curl-feeds,  event_module: audit, match: 'cmd=6375726C', reason: 'curl фидов угроз', action: drop}
-  - {name: self-rpm-audit,   event_module: audit, match: 'comm="(rpm|dnf|rpmdb)"', reason: 'инвентаризация пакетов агентом', action: drop}
+  # ---- 19-22: application spam ----------------------------------------------
+  - {name: kwin-errors,    event_provider: kwin_wayland, match: "TypeError|ReferenceError|Cannot read property|kwinRaiseTogether", reason: "kwin script errors", action: drop}
+  - {name: kwin-gl,        event_provider: kwin_wayland, match: "GL_INVALID_|render time query|no context is current", reason: "spam from the kwin graphics stack", action: drop}
+  - {name: firewalld-zone, event_provider: firewalld, match: "^ERROR: INVALID_ZONE", reason: "a check of the default zone", action: drop}
+  - {name: lisin-own-qml,  match: "QML .*(was not placed in the graphics scene|Unable to assign|is not a type)", reason: "warnings from LiSin itself", action: drop}
+  - {name: empty-message,  event_action: log, match: "^\\s*$",                      reason: "an empty record", action: drop}
+  # ================= BATCH 2: picked from what was left after the first ======
+  # the regexes are written in SINGLE quotes: inside double quotes YAML tries to
+  # parse \( as an escape and fails, while in single quotes the string goes as is.
+  # ---- 24-29: the agent's own activity again, now through sudo/audit --------
+  # NOTE: we filter ONLY our own sudo -n checks (by the command name in
+  # COMMAND=). A bare 'a password is required' would also hide SOMEONE ELSE'S
+  # escalation attempt - and that is exactly what gets investigated.
+  - {name: self-sudo-nopass, event_provider: sudo, match: 'a password is required.*COMMAND=\S*(dmidecode|getcap|sudo)', reason: 'the agent checking its own rights', action: drop}
+  - {name: self-dmidecode,   event_module: audit, match: 'cmd=646[dD]69646563', reason: 'sudo dmidecode from the hardware source', action: drop}
+  - {name: self-sudo-list,   event_module: audit, match: 'cmd=7375646F202D6E202D6C', reason: 'the agent listing sudo rights', action: drop}
+  - {name: self-getcap,      event_module: audit, match: 'cmd=676574636170', reason: 'getcap from the privesc source', action: drop}
+  - {name: self-curl-feeds,  event_module: audit, match: 'cmd=6375726C', reason: 'curl of the threat feeds', action: drop}
+  - {name: self-rpm-audit,   event_module: audit, match: 'comm="(rpm|dnf|rpmdb)"', reason: 'the agent inventorying packages', action: drop}
 
-  # ---- 30-33: штатная работа системного резолвера и часов --------------------
-  # 350+ записей за 45 минут — обычные DNS-запросы systemd-resolved. Сам факт
-  # «резолвер резолвит» не расследуют; КУДА он ходил, видно в netmon-событиях.
-  - {name: resolver-syscall, event_module: audit, match: 'syscall=42.*comm="systemd-resolve"', reason: 'штатные DNS-запросы резолвера', action: drop}
-  - {name: resolver-sock,    event_module: audit, match: 'comm="systemd-resolve".*SOCKADDR', reason: 'сокеты резолвера', action: drop}
-  - {name: resolver-degrade, event_provider: systemd-resolved, match: 'degraded feature set|Grace period over|Using degraded', reason: 'переключение режимов резолвера', action: drop}
-  - {name: chronyd-sync,     event_provider: chronyd, match: 'Selected source|clock was stepped|clock wrong by', reason: 'штатная синхронизация времени', action: drop}
+  # ---- 30-33: normal work of the system resolver and the clock --------------
+  # 350+ records in 45 minutes are ordinary DNS queries by systemd-resolved. The
+  # fact that "the resolver resolves" is not investigated; WHERE it went is
+  # visible in the netmon events.
+  - {name: resolver-syscall, event_module: audit, match: 'syscall=42.*comm="systemd-resolve"', reason: 'routine DNS queries by the resolver', action: drop}
+  - {name: resolver-sock,    event_module: audit, match: 'comm="systemd-resolve".*SOCKADDR', reason: 'resolver sockets', action: drop}
+  - {name: resolver-degrade, event_provider: systemd-resolved, match: 'degraded feature set|Grace period over|Using degraded', reason: 'the resolver switching modes', action: drop}
+  - {name: chronyd-sync,     event_provider: chronyd, match: 'Selected source|clock was stepped|clock wrong by', reason: 'routine time synchronisation', action: drop}
 
-  # ---- 34-37: технические шаги PAM и учёт сессий -----------------------------
-  - {name: pam-accounting,   event_module: audit, match: 'op=PAM:accounting', reason: 'служебный шаг PAM без результата', action: drop}
-  - {name: pam-unix-session, event_provider: sudo, match: 'pam_unix\(sudo:session\)', reason: 'открытие/закрытие сессии sudo', action: drop}
-  - {name: session-scope,    event_provider: systemd, match: 'session-[0-9]+\.scope', reason: 'учёт ресурсов сессии', action: drop}
-  - {name: user-slice,       event_provider: systemd, match: 'user@[0-9]+\.service|user-[0-9]+\.slice', reason: 'служебные срезы пользователя', action: drop}
+  # ---- 34-37: technical PAM steps and session accounting --------------------
+  - {name: pam-accounting,   event_module: audit, match: 'op=PAM:accounting', reason: 'a PAM service step with no outcome', action: drop}
+  - {name: pam-unix-session, event_provider: sudo, match: 'pam_unix\(sudo:session\)', reason: 'opening/closing a sudo session', action: drop}
+  - {name: session-scope,    event_provider: systemd, match: 'session-[0-9]+\.scope', reason: 'session resource accounting', action: drop}
+  - {name: user-slice,       event_provider: systemd, match: 'user@[0-9]+\.service|user-[0-9]+\.slice', reason: 'service slices of the user', action: drop}
 
-  # ---- 38-43: неизменные предупреждения и штатное обслуживание ---------------
-  - {name: cfg-executable,   event_provider: systemd, match: 'is marked executable', reason: 'конфиг с битом x — предупреждение не меняется', action: tag}
-  - {name: systemd-consumed, event_provider: systemd, match: 'Consumed .*CPU time', reason: 'отчёт о потреблении при остановке юнита', action: drop}
-  - {name: systemd-maint,    event_provider: systemd, match: '(Starting|Started|Stopping|Stopped) (Cleanup|Daily|Rotate|Refresh|Update|Verify)', reason: 'плановое обслуживание', action: drop}
-  - {name: dbus-activation,  event_provider: dbus-daemon, match: 'Activating|Successfully activated', reason: 'штатная активация служб D-Bus', action: drop}
-  - {name: gvfs-mount,       event_provider: gvfsd, match: 'mount|Mounted', reason: 'монтирование пользовательских ресурсов', action: drop}
-  - {name: bluetooth-noise,  event_provider: bluetoothd, match: 'Endpoint registered|profile connect|Battery Provider', reason: 'штатные сообщения bluetooth', action: drop}
-  # ================= ПАРТИЯ 3: остаток после 43 шаблонов =====================
-  # ---- 44-49: болтовня шины D-Bus (конфигурация, а не действия) --------------
-  - {name: dbus-eavesdrop,  event_provider: dbus-broker-launch, match: 'Eavesdropping is deprecated', reason: 'предупреждение о старом синтаксисе политики', action: drop}
-  - {name: dbus-reload,     event_provider: dbus-broker-launch, match: 'Noticed file-system modification', reason: 'перечитывание своей конфигурации', action: drop}
-  - {name: dbus-naming,     event_provider: dbus-broker-launch, match: 'is not named after the D-Bus name', reason: 'замечание к имени service-файла', action: drop}
-  - {name: dbus-legacy,     event_provider: dbus-broker-launch, match: 'Ignoring duplicate|Missing .service file|deprecated', reason: 'претензии к чужим пакетам, не к системе', action: drop}
-  - {name: dbus-activation2, event_provider: dbus-broker, match: 'Activation request|activated service', reason: 'штатная активация служб', action: drop}
-  - {name: systemd-cfg-exec, event_provider: systemd, match: 'is marked executable', reason: 'постоянное предупреждение о бите x', action: drop}
+  # ---- 38-43: unchanging warnings and routine maintenance -------------------
+  - {name: cfg-executable,   event_provider: systemd, match: 'is marked executable', reason: 'a config with the x bit - the warning never changes', action: tag}
+  - {name: systemd-consumed, event_provider: systemd, match: 'Consumed .*CPU time', reason: 'a consumption report when a unit stops', action: drop}
+  - {name: systemd-maint,    event_provider: systemd, match: '(Starting|Started|Stopping|Stopped) (Cleanup|Daily|Rotate|Refresh|Update|Verify)', reason: 'scheduled maintenance', action: drop}
+  - {name: dbus-activation,  event_provider: dbus-daemon, match: 'Activating|Successfully activated', reason: 'routine activation of D-Bus services', action: drop}
+  - {name: gvfs-mount,       event_provider: gvfsd, match: 'mount|Mounted', reason: 'mounting user resources', action: drop}
+  - {name: bluetooth-noise,  event_provider: bluetoothd, match: 'Endpoint registered|profile connect|Battery Provider', reason: 'routine bluetooth messages', action: drop}
+  # ================= BATCH 3: what was left after 43 templates ==============
+  # ---- 44-49: D-Bus chatter (configuration, not actions) -------------------
+  - {name: dbus-eavesdrop,  event_provider: dbus-broker-launch, match: 'Eavesdropping is deprecated', reason: 'a warning about the old policy syntax', action: drop}
+  - {name: dbus-reload,     event_provider: dbus-broker-launch, match: 'Noticed file-system modification', reason: 're-reading its own configuration', action: drop}
+  - {name: dbus-naming,     event_provider: dbus-broker-launch, match: 'is not named after the D-Bus name', reason: 'a remark about the name of a service file', action: drop}
+  - {name: dbus-legacy,     event_provider: dbus-broker-launch, match: 'Ignoring duplicate|Missing .service file|deprecated', reason: 'complaints about other packages, not about the system', action: drop}
+  - {name: dbus-activation2, event_provider: dbus-broker, match: 'Activation request|activated service', reason: 'routine activation of services', action: drop}
+  - {name: systemd-cfg-exec, event_provider: systemd, match: 'is marked executable', reason: 'a permanent warning about the x bit', action: drop}
 
-  # ---- 50-53: BPF и eBPF-загрузки штатных инструментов ------------------------
-  # LOAD/UNLOAD программ BPF идут сотнями от systemd и контейнерных служб.
-  # Опасна загрузка BPF ЧУЖИМ процессом — это ловит детект kernel_module,
-  # а штатный поток пары LOAD/UNLOAD не расследуют.
-  - {name: bpf-load-pair,   event_module: audit, match: 'BPF prog-id=[0-9]+ op=(LOAD|UNLOAD)', reason: 'штатная загрузка/выгрузка программ BPF', action: tag}
-  - {name: bpf-systemd,     event_module: audit, match: 'comm="systemd"[^|]*BPF', reason: 'BPF от systemd при старте юнитов', action: drop}
-  - {name: audit-anon,      event_module: audit, match: 'syscall=(41|49|50|288)\b.*success=yes', reason: 'создание и приём сокетов без адреса назначения', action: drop}
-  - {name: audit-noaddr,    event_module: audit, match: 'SYSCALL[^|]*$', reason: 'SYSCALL без SOCKADDR/PROCTITLE — нечего расследовать', action: tag}
+  # ---- 50-53: BPF and eBPF loads by standard tools --------------------------
+  # LOAD/UNLOAD of BPF programs come in hundreds from systemd and container
+  # services. What is dangerous is a BPF load by a FOREIGN process - that is
+  # caught by the kernel_module detection, while the routine LOAD/UNLOAD pairs
+  # are not investigated.
+  - {name: bpf-load-pair,   event_module: audit, match: 'BPF prog-id=[0-9]+ op=(LOAD|UNLOAD)', reason: 'routine load/unload of BPF programs', action: tag}
+  - {name: bpf-systemd,     event_module: audit, match: 'comm="systemd"[^|]*BPF', reason: 'BPF from systemd while starting units', action: drop}
+  - {name: audit-anon,      event_module: audit, match: 'syscall=(41|49|50|288)\b.*success=yes', reason: 'creating and accepting sockets with no destination address', action: drop}
+  - {name: audit-noaddr,    event_module: audit, match: 'SYSCALL[^|]*$', reason: 'SYSCALL without SOCKADDR/PROCTITLE - nothing to investigate', action: tag}
 
-  # ---- 54-59: рабочий стол и пользовательские службы --------------------------
-  - {name: plasma-noise,    event_provider: plasmashell, match: 'QQmlEngine|Property .* does not exist|deprecated|libpng warning', reason: 'предупреждения оболочки рабочего стола', action: drop}
-  - {name: kded-modules,    event_provider: kded6, match: 'Loading module|module .* not found|kf.kded', reason: 'загрузка модулей рабочего стола', action: drop}
-  - {name: xdg-portal,      event_provider: xdg-desktop-portal, match: 'No skeleton|not implemented|Choosing .* for', reason: 'штатный выбор бэкенда портала', action: drop}
-  - {name: pipewire-noise,  event_provider: pipewire, match: 'unknown property|not found|clock drift|xrun', reason: 'штатные сообщения звукового сервера', action: drop}
-  - {name: wireplumber,     event_provider: wireplumber, match: 'lookup .* failed|no match|SPA handle', reason: 'штатные сообщения менеджера звука', action: drop}
-  - {name: gnome-keyring,   event_provider: gnome-keyring-daemon, match: 'discover_other_daemon|couldn.t connect', reason: 'штатная инициализация связки ключей', action: drop}
+  # ---- 54-59: the desktop and user services ---------------------------------
+  - {name: plasma-noise,    event_provider: plasmashell, match: 'QQmlEngine|Property .* does not exist|deprecated|libpng warning', reason: 'warnings from the desktop shell', action: drop}
+  - {name: kded-modules,    event_provider: kded6, match: 'Loading module|module .* not found|kf.kded', reason: 'loading desktop modules', action: drop}
+  - {name: xdg-portal,      event_provider: xdg-desktop-portal, match: 'No skeleton|not implemented|Choosing .* for', reason: 'the portal routinely choosing a backend', action: drop}
+  - {name: pipewire-noise,  event_provider: pipewire, match: 'unknown property|not found|clock drift|xrun', reason: 'routine messages from the sound server', action: drop}
+  - {name: wireplumber,     event_provider: wireplumber, match: 'lookup .* failed|no match|SPA handle', reason: 'routine messages from the sound manager', action: drop}
+  - {name: gnome-keyring,   event_provider: gnome-keyring-daemon, match: 'discover_other_daemon|couldn.t connect', reason: 'routine keyring initialisation', action: drop}
 
-  # ---- 60-64: фоновая работа приложений --------------------------------------
-  - {name: syncthing-scan,  event_provider: syncthing, match: 'Completed initial scan|Detected upgrade|Ready to synchronize|quic|Established secure connection', reason: 'штатная синхронизация файлов', action: drop}
-  - {name: cron-run,        event_provider: CROND, match: 'pam_unix\(crond:session\)|CMD \(', reason: 'плановый запуск заданий cron', action: tag}
-  - {name: rsyslog-stats,   event_provider: rsyslogd, match: 'imjournal|action .* suspended|resumed', reason: 'внутренняя статистика rsyslog', action: drop}
-  - {name: abrt-noise,      event_provider: abrt, match: 'Lock file .* is locked|Deleting problem directory', reason: 'обслуживание каталога отчётов о сбоях', action: drop}
-  - {name: flatpak-portal,  event_provider: flatpak, match: 'Allowing .* access|portal', reason: 'штатные разрешения flatpak-портала', action: drop}
+  # ---- 60-64: background work of applications -------------------------------
+  - {name: syncthing-scan,  event_provider: syncthing, match: 'Completed initial scan|Detected upgrade|Ready to synchronize|quic|Established secure connection', reason: 'routine file synchronisation', action: drop}
+  - {name: cron-run,        event_provider: CROND, match: 'pam_unix\(crond:session\)|CMD \(', reason: 'the scheduled start of cron jobs', action: tag}
+  - {name: rsyslog-stats,   event_provider: rsyslogd, match: 'imjournal|action .* suspended|resumed', reason: 'internal rsyslog statistics', action: drop}
+  - {name: abrt-noise,      event_provider: abrt, match: 'Lock file .* is locked|Deleting problem directory', reason: 'maintenance of the crash report directory', action: drop}
 
-  # ---- 65-68: сетевые служебные записи ---------------------------------------
-  - {name: nm-dhcp,         event_provider: NetworkManager, match: 'dhcp4? .* address|state changed .* -> (activated|secondaries)|Activation.*successful', reason: 'штатное получение адреса', action: drop}
-  - {name: nm-dns-update,   event_provider: NetworkManager, match: 'dns-mgr|Writing DNS information', reason: 'обновление конфигурации DNS', action: drop}
-  - {name: avahi-iface,     event_provider: avahi-daemon, match: 'Registering new address|Withdrawing address|Joining mDNS|New relevant interface', reason: 'штатное обнаружение в локальной сети', action: drop}
-  - {name: netmon-selfloop, event_module: netmon, match: '-> 192\.168\.10\.91:', reason: 'соединение на собственный адрес хоста', action: drop}
+  # ---- 65-68: network service records ---------------------------------------
+  - {name: nm-dhcp,         event_provider: NetworkManager, match: 'dhcp4? .* address|state changed .* -> (activated|secondaries)|Activation.*successful', reason: 'routinely obtaining an address', action: drop}
+  - {name: nm-dns-update,   event_provider: NetworkManager, match: 'dns-mgr|Writing DNS information', reason: 'updating the DNS configuration', action: drop}
+  - {name: avahi-iface,     event_provider: avahi-daemon, match: 'Registering new address|Withdrawing address|Joining mDNS|New relevant interface', reason: 'routine discovery on the local network', action: drop}

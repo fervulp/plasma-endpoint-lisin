@@ -3,16 +3,16 @@ id: LS-I-40
 type: input
 version: 2.0.0
 title: Kernel parameters vs declared configuration
-# НИКАКИХ СПИСКОВ ОТ МЕНЯ. Раньше здесь был зашит перечень из 15 «важных»
-# параметров и эталон «правильных» значений — и то и другое устаревает и
-# врёт на чужой машине.
+# NO LISTS FROM ME. There used to be a hard-coded list of 15 "important"
+# parameters and a reference of "correct" values - both go stale and lie on
+# another machine.
 #
-# Теперь сверяем систему С НЕЙ ЖЕ САМОЙ: дистрибутив и админ объявляют
-# нужные значения в /usr/lib/sysctl.d, /run/sysctl.d, /etc/sysctl.d и
-# /etc/sysctl.conf. Мы читаем эти объявления и сравниваем с тем, что
-# реально стоит в ядре. Расхождение = кто-то поменял значение на ходу
-# (sysctl -w, приложение, вредонос) — вот это и есть сигнал, в отличие от
-# мнения о том, какое значение «хорошее».
+# Now we compare the system WITH ITSELF: the distribution and the administrator
+# declare the values they want in /usr/lib/sysctl.d, /run/sysctl.d, /etc/sysctl.d
+# and /etc/sysctl.conf. We read those declarations and compare them with what is
+# actually set in the kernel. A divergence means somebody changed the value on
+# the fly (sysctl -w, an application, malware) - that is the signal, unlike an
+# opinion about which value is "good".
 command: |
   echo "===RUNNING==="
   sysctl -a 2>/dev/null | sed 's/ = /\t/'

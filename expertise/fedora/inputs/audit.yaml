@@ -6,7 +6,7 @@ title: Audit
 command: |
   printf 'status\tauditd\t%s\n' "$(systemctl is-active auditd 2>/dev/null)"
   printf 'status\tenabled\t%s\n' "$(systemctl is-enabled auditd 2>/dev/null)"
-  # -s/-l требуют CAP_AUDIT (root); без прав молча пусто
+  # -s/-l need CAP_AUDIT (root); without rights it is silently empty
   auditctl -s 2>/dev/null | awk 'NF>=2{printf "setting\t%s\t%s\n",$1,$2}'
   auditctl -l 2>/dev/null | grep -v 'No rules' | awk 'NF{n++; printf "rule\t%d\t%s\n",n,$0}'
 interval: 600

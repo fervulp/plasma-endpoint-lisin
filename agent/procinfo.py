@@ -1,4 +1,4 @@
-"""EDR-обзор одного процесса: происхождение, сеть, пакет+зависимости, файлы."""
+"""EDR overview of one process: origin, network, package + dependencies, files."""
 import subprocess
 
 
@@ -11,7 +11,7 @@ def _run(cmd) -> str:
 
 
 def _proc_line(pid: str) -> dict:
-    """Один процесс через ps: pid/ppid/user/started/command (или {} если нет)."""
+    """One process through ps: pid/ppid/user/started/command (or {} if absent)."""
     st = _run(["ps", "-o", "pid=,ppid=,user=,lstart=,args=", "-p", pid])
     if not st:
         return {}
@@ -25,8 +25,8 @@ def _proc_line(pid: str) -> dict:
 
 
 def _ancestry(pid: str) -> list:
-    """Цепочка запуска: от init (1) ВНИЗ до самого процесса — timeline «как
-    запустился». Идём по ppid вверх, потом разворачиваем."""
+    """The launch chain: from init (1) DOWN to the process itself - the "how it
+    started" timeline. We walk up by ppid, then reverse."""
     chain, seen, cur = [], set(), pid
     for _ in range(24):
         if not cur or cur in seen or cur == "0":
@@ -37,12 +37,12 @@ def _ancestry(pid: str) -> list:
             break
         chain.append(p)
         cur = p["ppid"]
-    chain.reverse()      # init → … → процесс
+    chain.reverse()      # init -> ... -> the process
     return chain
 
 
 def _unit(pid: str) -> str:
-    """systemd-юнит/scope, запустивший процесс (из /proc/PID/cgroup)."""
+    """The systemd unit/scope that started the process (from /proc/PID/cgroup)."""
     cg = _run(["cat", f"/proc/{pid}/cgroup"])
     if not cg:
         return ""
@@ -107,15 +107,15 @@ def details(pid: str, proc_rows: list) -> dict:
                 f"| grep -v '^/proc' | sort -u | head -15"])
     out["files"] = [x for x in fds.splitlines() if x.startswith("/")]
 
-    # --- контекст запуска (timeline закрепляем вверху во вкладке) ---
-    out["lineage"] = _ancestry(pid)              # init → … → процесс
-    out["unit"] = _unit(pid)                     # какой systemd-юнит запустил
-    # флаги окружения живого процесса (LD_PRELOAD и т.п. = сигнал persistence)
+    # --- launch context (the timeline is pinned at the top of the tab) ---
+    out["lineage"] = _ancestry(pid)              # init -> ... -> the process
+    out["unit"] = _unit(pid)                     # which systemd unit started it
+    # environment flags of the live process (LD_PRELOAD etc. = a persistence signal)
     env = _run(["bash", "-c",
                 f"tr '\\0' '\\n' < /proc/{pid}/environ 2>/dev/null | "
                 f"grep -E '^(LD_PRELOAD|LD_LIBRARY_PATH|PROMPT_COMMAND)='"])
     out["env_flags"] = [x for x in env.splitlines() if x][:5]
-    # слушающие/установленные unix-сокеты процесса (IPC)
+    # listening/established unix sockets of the process (IPC)
     xs = _run(["ss", "-xap"])
     ux = []
     for ln in xs.splitlines():

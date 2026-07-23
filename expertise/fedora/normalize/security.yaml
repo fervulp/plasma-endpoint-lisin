@@ -3,10 +3,10 @@ id: LS-N-20
 type: normalization_rule
 version: 3.0.0
 title: Security posture
-# Плагин нормализации: Python-код прямо в правиле (самодостаточно — правило
-# можно передать другому пользователю как вклад). Функция обязательна:
-#   normalize(text) -> list[dict]   (text = stdout точки входа)
-# В namespace доступны re, json. Колонки таблицы = ключи dict.
+# A normalization plugin: Python code right in the rule (self-contained - the rule
+# can be handed to another user as a contribution). The function is mandatory:
+#   normalize(text) -> list[dict]   (text = the stdout of the input)
+# re and json are available in the namespace. The table columns = the dict keys.
 code: |
   def normalize(text):
       rows = []

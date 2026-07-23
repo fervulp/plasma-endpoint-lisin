@@ -3,9 +3,9 @@ id: LS-E-9
 type: enrichment
 version: 1.0.0
 title: Package age
-# ВОЗРАСТ УСТАНОВКИ. Пакет, поставленный сегодня, интереснее того, что
-# стоит два года: свежая установка рядом с инцидентом — зацепка.
-# Считаем дни от даты установки, ничего не выдумывая.
+# THE AGE OF THE INSTALLATION. A package installed today is more interesting than
+# one that has been there for two years: a fresh install next to an incident is a lead.
+# We count the days from the installation date, inventing nothing.
 code: |
   def enrich(rows):
       import datetime

@@ -10,7 +10,7 @@ command: |
       [ -n "$line" ] && printf '%s\t%s\n' "$f" "$line"
     done < "$f"
   done
-  # приватные ключи — только факт наличия, без содержимого
+  # private keys - only the fact that they exist, without the content
   for f in "$HOME"/.ssh/id_* /etc/ssh/ssh_host_*_key; do
     case "$f" in *.pub) continue;; esac
     [ -f "$f" ] && printf '%s\tPRIVATE\n' "$f"

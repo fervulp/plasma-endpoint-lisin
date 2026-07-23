@@ -3,14 +3,15 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 
-// Уязвимости — не инвентарь «что есть», а список задач «что пропатчить».
-// Поэтому в строке сразу: статус (открыта/закрыта), балл CVSS с вектором,
-// критичность вендора, какие УСТАНОВЛЕННЫЕ пакеты затронуты, какая версия
-// стоит и какая чинит, дата бюллетеня, источник данных и готовая команда.
+// Vulnerabilities are not an inventory of "what exists" but a list of tasks,
+// "what to patch". So a row shows at once: the status (open/closed), the CVSS
+// score with its vector, the vendor severity, which INSTALLED packages are
+// affected, which version is present and which one fixes it, the advisory date,
+// the data source and a ready command.
 //
-// Закрытые показываются намеренно: обновив систему, пользователь должен
-// увидеть ответ «патч установлен», а не пустой экран, по которому нельзя
-// отличить успешное обновление от сломавшегося сбора данных.
+// Closed ones are shown deliberately: after updating the system a user must see
+// the answer "the patch is installed" rather than an empty screen, from which a
+// successful update cannot be told apart from a broken data collection.
 Item {
     id: view
     property var d: ({ rows: [], total: 0, open: 0, closed: 0,
@@ -20,19 +21,19 @@ Item {
     property string statusFilter: "open"
     property string cvssFilter: ""
     property string search: ""
-    // Запрос из общей строки: либо условия вида `поле оп 'значение'`,
-    // либо просто текст — тогда ищем его по всем полям строки.
+    // The query from the shared bar: either conditions of the form
+    // `field op 'value'`, or plain text - then we search it over all row fields.
     property string query: ""
     property var hiddenCols: []
-    // сортировка кликом по заголовку: направление показывается иконкой
+    // sorting by a click on the header: the direction is shown by an icon
     property string sortCol: ""
     property bool sortDesc: false
     function sortBy(k) {
         if (sortCol === k) sortDesc = !sortDesc
         else { sortCol = k; sortDesc = false }
     }
-    // СТАРЫЙ РАЗБОР УСЛОВИЯ ОСТАВЛЕН НЕ БЫЛ: он делил строку по « AND » и
-    // не понимал ни OR, ни NOT, ни MATCH. Теперь фильтрует база (vulnRows).
+    // THE OLD CONDITION PARSER WAS NOT KEPT: it split the string on " AND " and
+    // understood neither OR nor NOT nor MATCH. Now the database filters (vulnRows).
     function matchQueryUnused(x) {
         var q = String(view.query || "").trim()
         if (q === "") return true
@@ -40,7 +41,7 @@ Item {
         var ok = true
         for (var i = 0; i < parts.length; i++) {
             var m = parts[i].match(/^"?([\w_]+)"?\s*(=|<>|LIKE|NOT LIKE|>|<|>=|<=)\s*'(.*)'$/)
-            if (!m) {                       // не условие — свободный поиск
+            if (!m) {                       // not a condition - a free text search
                 var hay = ""
                 for (var k in x) hay += " " + String(x[k])
                 if (hay.toLowerCase().indexOf(parts[i].toLowerCase().trim()) < 0) ok = false
@@ -72,8 +73,8 @@ Item {
         return c.length ? c.join(" AND ") : "(no filter — all advisories)"
     }
 
-    // сводка (счётчики по критичности) — из полного набора; сами строки —
-    // по условию, собранному строкой запроса и чипами
+    // the summary (counters by severity) comes from the full set; the rows
+    // themselves come from the condition assembled by the query bar and the chips
     function refresh() {
         view.d = backend.vulnerabilities()
         view.reloadRows()
@@ -87,11 +88,11 @@ Item {
         if (q !== "") c.push(view.hasOperator(q) ? q : view.freeText(q))
         return c.join(" AND ")
     }
-    // есть ли в строке оператор — тогда это условие, иначе свободный поиск
+    // does the string contain an operator - then it is a condition, otherwise free text
     function hasOperator(q) {
         return /(=|<>|<|>|LIKE|IS NULL|IS NOT NULL)/i.test(q)
     }
-    // свободный текст ищем по осмысленным полям бюллетеня
+    // free text is searched over the meaningful fields of an advisory
     function freeText(q) {
         var f = ["title", "packages", "cve", "advisory", "severity",
                  "cvss_rating", "description", "installed_version", "fixed_version"]
@@ -116,8 +117,8 @@ Item {
         function onStateReady(s) { view.refresh() }
     }
 
-    // цвет по БАЛЛУ CVSS — он сравним между бюллетенями, в отличие от
-    // словесной критичности, которую каждый вендор трактует по-своему
+    // the colour comes from the CVSS SCORE - it is comparable between advisories,
+    // unlike the wording of severity, which every vendor interprets its own way
     function cvssColor(r) {
         return r === "Critical" ? "#c0392b" : r === "High" ? "#e74c3c"
              : r === "Medium" ? "#e67e22" : r === "Low" ? "#f1c40f"
@@ -184,14 +185,14 @@ Item {
         ]
     }
 
-    // строки приходят уже отфильтрованными базой
+    // the rows arrive already filtered by the database
     property var shown: view.rowsFiltered
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
-        // ---- шапка: ответ на вопрос «всё ли закрыто» одной строкой ----
+    // ---- the header: the answer to "is everything closed" in one line ----
         Kirigami.AbstractCard {
             Layout.fillWidth: true
             Layout.margins: Kirigami.Units.smallSpacing
@@ -262,7 +263,7 @@ Item {
         // off-screen helper: TextEdit is the supported way to reach the clipboard
         TextEdit { id: clipHelper; visible: false }
 
-        // ---- фильтры: статус и уровень CVSS ----
+        // ---- filters: status and CVSS level ----
         Flow {
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -302,8 +303,8 @@ Item {
             }
         }
 
-        // ЕДИНАЯ СТРОКА ЗАПРОСА — та же, что во всех остальных таблицах.
-        // Можно набрать условие руками или накликать конструктором.
+        // THE SINGLE QUERY BAR - the same one as in every other table.
+        // One can type a condition by hand or click it together in the builder.
         QueryBar {
             id: qbar
             Layout.fillWidth: true
@@ -311,12 +312,12 @@ Item {
             Layout.rightMargin: Kirigami.Units.largeSpacing
             Layout.topMargin: Kirigami.Units.smallSpacing
             fields: view.cols.map(function (c) { return { name: c.k } })
-            // от ОПИСАНИЯ колонок, а не от текущих видимых: shownCols сам
-            // зависит от результата запроса — вышла бы петля привязки
+        // from the DESCRIPTION of the columns, not from the currently visible ones:
+        // shownCols itself depends on the query result - that would be a binding loop
             defaultSelect: view.cols.map(function (c) { return c.k })
             placeholder: "severity = 'Important'   ·   or just type text to search"
             onApplied: function (spec, sql) {
-                // SELECT задаёт видимые колонки таблицы
+                // SELECT sets the visible columns of the table
                 var hide = []
                 if (spec.select.length)
                     for (var i = 0; i < view.cols.length; i++)

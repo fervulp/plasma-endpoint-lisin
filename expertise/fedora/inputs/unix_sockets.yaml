@@ -3,7 +3,7 @@ id: LS-I-36
 type: input
 version: 1.0.0
 title: Unix sockets
-# Локальная IPC-поверхность: слушающие unix-сокеты + владелец (если свой).
+# The local IPC surface: listening unix sockets + the owner (if it is ours).
 command: ss -xlpH 2>/dev/null
 interval: 60
 enabled: true

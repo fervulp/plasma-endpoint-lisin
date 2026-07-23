@@ -4,9 +4,9 @@ type: input
 version: 3.0.0
 title: Applications (flatpak/appimage/bin)
 command: |
-  # --- flatpak: приложения + ПОЛНЫЙ набор зависимостей в depends ---
-  # расширения runtime (GL/codecs/ffmpeg…) — компоненты платформы; собираем
-  # их список один раз и включаем в depends каждого приложения.
+  # --- flatpak: applications + the FULL set of dependencies in depends ---
+  # runtime extensions (GL/codecs/ffmpeg...) are platform components; we collect
+  # the list once and include it in the depends of every application.
   exts=$(flatpak list --runtime --columns=application 2>/dev/null | \
          grep -E '\.(Platform|Sdk)\..+' | sort -u | tr '\n' ',' | \
          sed 's/,$//; s/,/, /g')
@@ -20,7 +20,7 @@ command: |
     [ -n "$exts" ] && dep="$dep, $exts"
     printf 'flatpak\t%s\t%s\t%s\t\t%s\t%s\n' "$nm" "$app" "$ver" "$dep" "$desc"
   done
-  # runtime и расширения — тоже в инвентарь, отдельным kind (это зависимости)
+  # runtimes and extensions go into the inventory too, under their own kind (they are dependencies)
   flatpak list --runtime --columns=name,application,branch,description 2>/dev/null | \
   while IFS=$'\t' read -r nm rid br desc; do
     [ -n "$rid" ] || continue
@@ -31,7 +31,7 @@ command: |
     [ -d "$d" ] && find "$d" -maxdepth 2 -iname '*.appimage' \
       -printf 'appimage\t%f\t\t\t%p\t\n' 2>/dev/null
   done
-  # --- бинарники не из rpm + зависимости (ldd) ---
+  # --- binaries not from rpm + their dependencies (ldd) ---
   for d in /opt /usr/local/bin "$HOME/.local/bin" "$HOME/.bin" "$HOME/.config/bin"; do
     [ -d "$d" ] || continue
     find "$d" -maxdepth 3 -type f -executable 2>/dev/null | while read -r f; do

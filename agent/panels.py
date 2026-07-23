@@ -1,9 +1,10 @@
-"""Тематические панели расследования: файлы, привилегии, сеть.
+"""Thematic investigation panels: files, privileges, network.
 
-Общая лента событий отвечает «что произошло вообще». Аналитику при разборе
-нужен срез по теме: что творилось с файлами, кто повышал права, с кем
-разговаривала машина. Здесь три таких среза — каждый агрегирует события и
-состояние так, чтобы ответ был виден без листания сырых строк.
+The common event feed answers "what happened at all". While working through a
+case an analyst needs a slice by topic: what happened to the files, who
+escalated privileges, who the machine talked to. Here are three such slices -
+each aggregates events and state so that the answer is visible without scrolling
+through raw rows.
 """
 import sqlite3
 
@@ -30,7 +31,7 @@ def _eq(eventsdb, sql, args=()):
 
 # --------------------------------------------------------------------------
 def file_activity(db, eventsdb, limit=200) -> dict:
-    """Файлы: что создавали, меняли, удаляли и чьи это файлы."""
+    """Files: what was created, changed, deleted and whose files they are."""
     if eventsdb is None:
         return {"events": [], "by_action": [], "by_dir": [], "total": 0}
 
@@ -56,10 +57,11 @@ def file_activity(db, eventsdb, limit=200) -> dict:
         FROM events WHERE event_category = 'file'
         GROUP BY package_name ORDER BY n DESC LIMIT 12""")
 
-    # КТО ИЗМЕНИЛ. rpm -Va честно не знает автора правки — он лишь сверяет
-    # файл с эталоном пакета. Автора знает АУДИТ ЯДРА, поэтому связываем по
-    # пути: если по этому файлу были audit-события, показываем субъекта и
-    # время. Где данных нет — так и пишем, а не подставляем догадку.
+    # WHO CHANGED IT. rpm -Va honestly does not know the author of a change - it
+    # only compares the file with the package reference. The author is known to
+    # the KERNEL AUDIT, so we link by path: if there were audit events for this
+    # file, we show the subject and the time. Where there is no data we say so
+    # plainly instead of substituting a guess.
     who = {}
     for r in _eq(eventsdb, """
             SELECT file_path, MAX(ts) AS ts,
@@ -82,7 +84,7 @@ def file_activity(db, eventsdb, limit=200) -> dict:
             e["changed_by"] = ""
             e["changed_by_user"] = ""
             e["changed_at"] = ""
-            # честно: сверка rpm показывает ФАКТ расхождения, но не автора
+            # honestly: the rpm check shows the FACT of a divergence, not the author
             e["who_source"] = "rpm -Va: the editor is not recorded"
 
     by_who = _eq(eventsdb, """
@@ -91,7 +93,7 @@ def file_activity(db, eventsdb, limit=200) -> dict:
         FROM events WHERE COALESCE(file_path,'') <> ''
         GROUP BY value ORDER BY n DESC LIMIT 12""")
 
-    # график активности по часам — виден ритм и всплески
+    # an activity chart by hour - the rhythm and the spikes become visible
     series = _eq(eventsdb, """
         SELECT substr(ts,1,13) AS bucket, COUNT(*) AS n FROM events
         WHERE event_category='file' GROUP BY bucket
@@ -108,7 +110,7 @@ def file_activity(db, eventsdb, limit=200) -> dict:
 
 # --------------------------------------------------------------------------
 def privesc_activity(db, eventsdb, limit=150) -> dict:
-    """Повышение привилегий: и события (кто что делал), и постоянные векторы."""
+    """Privilege escalation: both events (who did what) and standing vectors."""
     events, auth_fail, sudo_cmd = [], [], []
     if eventsdb is not None:
         events = _eq(eventsdb, f"""
@@ -131,9 +133,10 @@ def privesc_activity(db, eventsdb, limit=150) -> dict:
 
     con = _ro(db.path)
     try:
-        # ВРЕМЯ ОБЯЗАТЕЛЬНО (положение 6): вектор без даты нельзя связать с
-        # инцидентом. changed — mtime носителя вектора, age_days — возраст.
-        # Сортировка по свежести: недавно появившееся важнее давно лежащего.
+        # THE TIME IS MANDATORY (principle 6): a vector without a date cannot be
+        # tied to an incident. changed is the mtime of the vector's carrier,
+        # age_days is its age. Sorted by freshness: something that appeared
+        # recently matters more than something that has been lying around.
         vectors = _q(con, "SELECT kind, name, detail, risk, nopasswd, source, "
                           "changed, age_days FROM privesc "
                           "ORDER BY changed DESC, risk DESC LIMIT 200")
@@ -151,11 +154,12 @@ def privesc_activity(db, eventsdb, limit=150) -> dict:
 
 # --------------------------------------------------------------------------
 def network_flows(db, eventsdb, limit=60) -> dict:
-    """С кем и как часто разговаривает машина.
+    """Who the machine talks to, and how often.
 
-    Объём трафика в байтах нам недоступен без root (conntrack/eBPF), поэтому
-    честная метрика — ЧИСЛО СЕССИЙ: сколько раз соединение открывалось.
-    Пишем это прямо в поле unit, чтобы не выдавать сессии за байты.
+    The traffic volume in bytes is unavailable to us without root
+    (conntrack/eBPF), so the honest metric is the NUMBER OF SESSIONS: how many
+    times a connection was opened. We write that into the unit field so as not to
+    pass sessions off as bytes.
     """
     flows, dns, by_asn = [], [], []
     if eventsdb is not None:
@@ -193,7 +197,7 @@ def network_flows(db, eventsdb, limit=60) -> dict:
               AND COALESCE(destination_ip,'') <> ''
             GROUP BY destination_as_org ORDER BY n DESC LIMIT 15""")
 
-    # к кому машина ходит прямо сейчас — из снимка сокетов
+    # who the machine is talking to right now - from the socket snapshot
     con = _ro(db.path)
     try:
         live = _q(con, "SELECT proto, local, remote, process, exposure "
@@ -204,10 +208,10 @@ def network_flows(db, eventsdb, limit=60) -> dict:
 
     ext = sum(1 for f in flows if f.get("direction") == "external")
 
-    # РЕДКИЕ СЕССИИ. Массовый трафик (браузер, мессенджер) виден и так;
-    # опасное обычно малозаметно: несколько соединений к одному адресу,
-    # владелец неизвестен, живёт в узком окне времени. Признак чисто
-    # структурный — никаких списков «плохих» адресов.
+    # RARE SESSIONS. Bulk traffic (a browser, a messenger) is visible anyway;
+    # the dangerous thing is usually inconspicuous: a few connections to one
+    # address, an unknown owner, living in a narrow time window. The property is
+    # purely structural - no lists of "bad" addresses.
     for f in flows:
         n = int(f.get("sessions") or 0)
         hours = int(f.get("active_hours") or 0)
@@ -222,9 +226,9 @@ def network_flows(db, eventsdb, limit=60) -> dict:
             marks.append("matched a threat feed")
         f["rare"] = ", ".join(marks) if len(marks) >= 2 else ""
 
-    # ГРАФИК: сессии по часам. Ровный ритм = автоматика (опрос, синхронизация),
-    # всплеск = разовая активность. Считаем в Python, чтобы интерфейс только
-    # рисовал и точки не прыгали между перерисовками.
+    # THE CHART: sessions by hour. An even rhythm means automation (polling,
+    # synchronisation), a spike means one-off activity. Computed in Python so that
+    # the interface only draws it and the points do not jump between repaints.
     series = _eq(eventsdb, """
         SELECT substr(ts,1,13) AS bucket, COUNT(*) AS n,
                SUM(CASE WHEN network_direction='external' THEN 1 ELSE 0 END) AS ext
@@ -232,7 +236,7 @@ def network_flows(db, eventsdb, limit=60) -> dict:
         GROUP BY bucket ORDER BY bucket DESC LIMIT 48""") if eventsdb else []
     series = list(reversed(series))
 
-    # КТО создаёт сессии — то, ради чего дашборд и нужен
+    # WHO creates the sessions - the very thing the dashboard exists for
     by_proc = _eq(eventsdb, """
         SELECT COALESCE(NULLIF(process_name,''),'(owner unknown)') AS value,
                COUNT(*) AS n, COUNT(DISTINCT destination_ip) AS ips,
@@ -248,11 +252,12 @@ def network_flows(db, eventsdb, limit=60) -> dict:
 
 
 def flow_detail(db, eventsdb, ip: str) -> dict:
-    """Разбор одного направления: кто говорил, когда, чем и куда смотреть.
+    """A breakdown of one direction: who talked, when, with what and where to look.
 
-    Дашборд обязан отвечать не «сколько», а «что делать». Поэтому здесь:
-    участники (процессы и их пакеты), лента событий со временем, живые
-    сокеты и ГОТОВЫЕ переходы в «Состояние» — чтобы не искать вручную.
+    A dashboard must answer not "how many" but "what to do". Hence: the
+    participants (processes and their packages), a feed of events with times,
+    live sockets and READY jumps into "State" - so that nothing has to be
+    searched for by hand.
     """
     out = {"ip": ip, "events": [], "processes": [], "live": [], "explore": []}
     if eventsdb is not None:
@@ -277,7 +282,7 @@ def flow_detail(db, eventsdb, ip: str) -> dict:
                        "owner_cmd, owner_user FROM ports WHERE remote LIKE ?",
                   (str(ip) + ":%",))
         out["live"] = rows
-        # чем является процесс: пакет и назначение — из инвентаря
+        # what the process is: the package and the purpose - from the inventory
         names = {r["name"] for r in out["processes"] if r["name"] != "(unknown)"}
         pkg = []
         for n in list(names)[:10]:
@@ -287,9 +292,9 @@ def flow_detail(db, eventsdb, ip: str) -> dict:
     finally:
         con.close()
 
-    # куда смотреть дальше — переходы, а не совет «посмотрите сами»
-    # Переходы: у каждого — КУДА идти и С КАКИМ условием. Раньше у «событий
-    # по адресу» не было ни таблицы, ни условия, поэтому кнопка была мертва.
+    # where to look next - jumps, not the advice "go and look yourself"
+    # Jumps: each has a DESTINATION and a CONDITION. The one for events by
+    # address used to have neither a table nor a condition, so the button was dead.
     esc = str(ip).replace("'", "''")
     out["explore"] = [
         {"label": "Sockets for this address", "kind": "state", "table": "ports",

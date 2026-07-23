@@ -3,67 +3,32 @@ id: LS-N-41
 type: normalization_rule
 version: 1.0.0
 title: Package events → event taxonomy
-# Пишет в ТУ ЖЕ таксономию, что и journal — поэтому попадает в то же окно.
-code: |
-  def normalize(text):
-      import datetime, socket
-      host = socket.gethostname()
-      rows = []
-      for ln in text.splitlines():
-          f = ln.split("\t")
-          if len(f) < 3:
-              continue
-          try:
-              ts = datetime.datetime.fromtimestamp(
-                  int(f[0]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-          except Exception:
-              continue
-          name, ver = f[1], f[2]
-          rows.append({
-              "ts": ts,
-              # стабильный id: пакет+версия+время установки не меняются
-              "event_id": "rpm:" + name + ":" + ver + ":" + f[0],
-              "event_kind": "event",
-              "event_category": "package",
-              "event_type": "installation",
-              "event_action": "package_installed",
-              "event_outcome": "success",
-              "event_severity": 20,
-              "event_module": "rpmdb",
-              "event_dataset": "rpm.installed",
-              "event_provider": "rpm",
-              "host_name": host,
-              "package_name": name,
-              "package_version": ver,
-              "message": "installed " + name + " " + ver,
-          })
-      # --- КТО → НАД ЧЕМ (единая ось для чтения события) ---
-      for r in rows:
-          if r.get("subject_type"):
-              continue
-          cat = r.get("event_category", "")
-          if r.get("user_name"):
-              r["subject_type"], r["subject_name"] = "user", r["user_name"]
-          elif r.get("service_name"):
-              r["subject_type"], r["subject_name"] = "service", r["service_name"]
-          elif r.get("process_name"):
-              r["subject_type"], r["subject_name"] = "process", r["process_name"]
-          else:
-              r["subject_type"], r["subject_name"] = "system", r.get("host_name", "")
-          if r.get("file_path"):
-              r["object_type"], r["object_name"] = "file", r["file_path"]
-          elif r.get("destination_ip"):
-              r["object_type"] = "socket"
-              r["object_name"] = "%s:%s" % (r["destination_ip"], r.get("destination_port") or "")
-          elif r.get("package_name"):
-              r["object_type"], r["object_name"] = "package", r["package_name"]
-          elif cat == "process" and r.get("process_executable"):
-              r["object_type"], r["object_name"] = "process", r["process_executable"]
-          elif cat in ("authentication", "iam"):
-              r["object_type"] = "account"
-              r["object_name"] = r.get("user_target_name") or r.get("user_name", "")
-          elif r.get("service_name"):
-              r["object_type"], r["object_name"] = "service", r["service_name"]
-          else:
-              r["object_type"], r["object_name"] = "", ""
-      return rows
+code: "def normalize(text):\n    import datetime, socket\n    host = socket.gethostname()\n    rows =\
+  \ []\n    for ln in text.splitlines():\n        f = ln.split(\"\\t\")\n        if len(f) < 3:\n    \
+  \        continue\n        try:\n            ts = datetime.datetime.fromtimestamp(\n               \
+  \ int(f[0]), datetime.timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n        except Exception:\n  \
+  \          continue\n        name, ver = f[1], f[2]\n        rows.append({\n            \"ts\": ts,\n\
+  \            # a stable id: package + version + installation time do not change\n            \"event_id\"\
+  : \"rpm:\" + name + \":\" + ver + \":\" + f[0],\n            \"event_kind\": \"event\",\n          \
+  \  \"event_category\": \"package\",\n            \"event_type\": \"installation\",\n            \"event_action\"\
+  : \"package_installed\",\n            \"event_outcome\": \"success\",\n            \"event_severity\"\
+  : 20,\n            \"event_module\": \"rpmdb\",\n            \"event_dataset\": \"rpm.installed\",\n\
+  \            \"event_provider\": \"rpm\",\n            \"host_name\": host,\n            \"package_name\"\
+  : name,\n            \"package_version\": ver,\n            \"message\": \"installed \" + name + \"\
+  \ \" + ver,\n        })\n    # --- WHO -> OVER WHAT (the single axis for reading an event) ---\n   \
+  \ for r in rows:\n        if r.get(\"subject_type\"):\n            continue\n        cat = r.get(\"\
+  event_category\", \"\")\n        if r.get(\"user_name\"):\n            r[\"subject_type\"], r[\"subject_name\"\
+  ] = \"user\", r[\"user_name\"]\n        elif r.get(\"service_name\"):\n            r[\"subject_type\"\
+  ], r[\"subject_name\"] = \"service\", r[\"service_name\"]\n        elif r.get(\"process_name\"):\n \
+  \           r[\"subject_type\"], r[\"subject_name\"] = \"process\", r[\"process_name\"]\n        else:\n\
+  \            r[\"subject_type\"], r[\"subject_name\"] = \"system\", r.get(\"host_name\", \"\")\n   \
+  \     if r.get(\"file_path\"):\n            r[\"object_type\"], r[\"object_name\"] = \"file\", r[\"\
+  file_path\"]\n        elif r.get(\"destination_ip\"):\n            r[\"object_type\"] = \"socket\"\n\
+  \            r[\"object_name\"] = \"%s:%s\" % (r[\"destination_ip\"], r.get(\"destination_port\") or\
+  \ \"\")\n        elif r.get(\"package_name\"):\n            r[\"object_type\"], r[\"object_name\"] =\
+  \ \"package\", r[\"package_name\"]\n        elif cat == \"process\" and r.get(\"process_executable\"\
+  ):\n            r[\"object_type\"], r[\"object_name\"] = \"process\", r[\"process_executable\"]\n  \
+  \      elif cat in (\"authentication\", \"iam\"):\n            r[\"object_type\"] = \"account\"\n  \
+  \          r[\"object_name\"] = r.get(\"user_target_name\") or r.get(\"user_name\", \"\")\n        elif\
+  \ r.get(\"service_name\"):\n            r[\"object_type\"], r[\"object_name\"] = \"service\", r[\"service_name\"\
+  ]\n        else:\n            r[\"object_type\"], r[\"object_name\"] = \"\", \"\"\n    return rows\n"

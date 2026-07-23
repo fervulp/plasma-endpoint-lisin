@@ -3,11 +3,11 @@ id: LS-I-44
 type: input
 version: 1.0.0
 title: Network connection events (socket diff)
-# СЕТЕВЫЕ СОБЫТИЯ: снимок сокетов сравнивается с предыдущим — появившиеся и
-# исчезнувшие соединения становятся событиями. Аудит ядра даёт connect() лишь
-# при своём правиле и без объёмов; здесь видно ЛЮБОЕ соединение процесса,
-# включая входящие, без root. Ограничение то же, что у procmon: соединение
-# короче интервала будет пропущено.
+# NETWORK EVENTS: a socket snapshot is compared with the previous one - the
+# connections that appeared and disappeared become events. The kernel audit gives
+# connect() only with a rule of its own and without volumes; here ANY connection
+# of a process is visible, including inbound ones, without root. The limitation is
+# the same as for procmon: a connection shorter than the interval is missed.
 command: ss -tunaOpn 2>/dev/null
 interval: 20
 enabled: true

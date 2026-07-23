@@ -11,7 +11,7 @@ Kirigami.Page {
     title: "SQL"
     padding: 0
 
-    property bool embedded: false     // внутри Settings → без своих actions/footer
+    property bool embedded: false     // inside Settings -> without its own actions/footer
     property var s: root.sysState
     property var tabsModel: s ? s.tabs : []
     property var result: null      // {columns, rows, error}
@@ -25,14 +25,14 @@ Kirigami.Page {
     property var pagedRows: rows.slice(pageIndex * pageLimit,
                                        (pageIndex + 1) * pageLimit)
 
-    // текущая таблица для управляющих кнопок
+    // the current table for the control buttons
     property string curTable: tableBox.currentIndex >= 0 && tabsModel.length
                               ? tabsModel[tableBox.currentIndex].name : ""
     property bool curBuiltin: tableBox.currentIndex >= 0 && tabsModel.length
                               ? tabsModel[tableBox.currentIndex].builtin : true
 
-    // Запрос из общей строки: в ручном режиме это готовый SQL, в режиме
-    // конструктора — только условие, которое дописывается к текущей таблице.
+    // The query from the shared bar: in manual mode this is ready SQL, in builder
+    // mode only the condition, which is appended to the current table.
     function applyQuery(sql) {
         var q = String(sql || "").trim()
         if (q === "") return
@@ -60,7 +60,7 @@ Kirigami.Page {
         }
     ]
 
-    // панель управления таблицами (компонент — чтобы показать и во встроенном виде)
+    // the table control panel (a component - so that it can be shown embedded too)
     Component {
         id: tableTools
         Row {
@@ -91,7 +91,7 @@ Kirigami.Page {
         RowLayout {
             anchors.fill: parent
             spacing: Kirigami.Units.smallSpacing
-            Loader {                       // управление таблицами в футере (standalone)
+            Loader {                       // table controls in the footer (standalone)
                 active: !page.embedded
                 sourceComponent: page.embedded ? null : tableTools
             }
@@ -103,8 +103,8 @@ Kirigami.Page {
                         Math.min((page.pageIndex + 1) * page.pageLimit,
                                  page.rows.length) + " of " + page.rows.length
             }
-            // ЧЕСТНО О НЕПОЛНОТЕ (положение 7): раньше выборка молча резалась
-            // на 1000 строк, и «of 1000» читалось как «это всё».
+            // HONEST ABOUT INCOMPLETENESS (principle 7): the result used to be cut
+            // to 1000 rows silently, and "of 1000" read as "that is everything".
             QQC2.Label {
                 visible: page.result && page.result.truncated === true
                 color: "#e67e22"
@@ -124,7 +124,7 @@ Kirigami.Page {
                 onClicked: page.pageIndex++
             }
             QQC2.ComboBox {
-                // сколько строк показывать; «all» = без ограничения
+                // how many rows to show; "all" = no limit
                 model: [{ t: "50", v: 50 }, { t: "100", v: 100 }, { t: "200", v: 200 },
                         { t: "500", v: 500 }, { t: "1000", v: 1000 },
                         { t: "all", v: 0 }]
@@ -156,9 +156,9 @@ Kirigami.Page {
             }
         }
 
-        // ОБЩАЯ СТРОКА ЗАПРОСА (положение 15). На этой странице по умолчанию
-        // ручной ввод SQL, но тот же конструктор доступен кнопкой — правила
-        // одни и те же во всём приложении.
+        // THE SHARED QUERY BAR (principle 15). On this page manual SQL input is
+        // the default, but the same builder is available on a button - the rules
+        // are the same everywhere in the application.
         QueryBar {
             id: qbar
             Layout.fillWidth: true
@@ -168,12 +168,12 @@ Kirigami.Page {
             manualText: page.curTable
                         ? 'SELECT * FROM "' + page.curTable + '"' : ""
             fields: page.cols.map(function (c) { return { name: c } })
-            // выборка начинается с полей, которые таблица показывает сейчас
+            // the selection starts with the fields the table shows right now
             defaultSelect: page.cols
             placeholder: "SELECT * FROM ports WHERE port = '22'"
             onApplied: function (spec, sql) {
-                // SELECT из конструктора = какие колонки показывать.
-                // Фильтры и сортировка строятся ОТНОСИТЕЛЬНО этих полей.
+                // SELECT from the builder = which columns to show.
+                // Filters and sorting are built RELATIVE to these fields.
                 var hide = []
                 if (spec.select.length)
                     for (var i = 0; i < page.cols.length; i++)
@@ -184,7 +184,7 @@ Kirigami.Page {
             }
         }
 
-        Loader {                           // управление таблицами сверху (embedded)
+        Loader {                           // table controls on top (embedded)
             active: page.embedded
             Layout.fillWidth: true
             Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -205,10 +205,10 @@ Kirigami.Page {
             Layout.fillHeight: true
             spacing: 0
 
-        // ОБЩАЯ ТАБЛИЦА (положение 15): здесь была своя реализация с
-        // колонками по 170 px и собственной шапкой. Теперь тот же компонент,
-        // что в остальных разделах: выбор колонок, порядок, зебра,
-        // recycling, клик по строке -> боковая панель.
+        // THE SHARED TABLE (principle 15): there used to be a local implementation
+        // here with 170 px columns and its own header. Now it is the same
+        // component as in the other sections: column choice, order, zebra
+        // striping, recycling, a click on a row -> the side panel.
         DataTable {
             id: sqlTable
             Layout.fillWidth: true
@@ -222,13 +222,13 @@ Kirigami.Page {
             }
             rows: page.pagedRows
             onRowActivated: function (row) { page.lastSel = row }
-            // клик по заголовку дописывает ORDER BY в тот же запрос
+            // a click on the header appends ORDER BY to the same query
             onSortRequested: function (field, desc) {
                 qbar.addSort(field, desc)
                 qbar.apply()
             }
             onConditionRequested: function (field, op, value) {
-                // «+» на ячейке дописывает условие в запрос — как в событиях
+                // "+" on a cell appends a condition to the query - as in events
                 qbar.addCondition(field, op, value)
             }
         }

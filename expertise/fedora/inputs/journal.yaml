@@ -3,15 +3,15 @@ id: LS-I-40
 type: input
 version: 1.0.0
 title: System journal (events + kernel audit)
-# СОБЫТИЯ «с самого низа системы»: journald отдаёт не только syslog, но и
-# записи подсистемы АУДИТА ЯДРА (_TRANSPORT=audit) — SYSCALL/SOCKADDR/
-# PROCTITLE/PATH. Это даёт exec-события и сетевые connect() на уровне
-# системных вызовов БЕЗ root (достаточно членства в wheel/systemd-journal;
-# /var/log/audit/audit.log при этом читать нельзя).
+# EVENTS "from the very bottom of the system": journald returns not only syslog
+# but also records of the KERNEL AUDIT subsystem (_TRANSPORT=audit) -
+# SYSCALL/SOCKADDR/PROCTITLE/PATH. That gives exec events and network connect()
+# at the system call level WITHOUT root (membership in wheel/systemd-journal is
+# enough; /var/log/audit/audit.log cannot be read at the same time).
 #
-# Окно с ЗАПАСОМ (70 с при интервале 60 с): дублей не будет — точка выхода
-# events дедуплицирует по event_id (UNIQUE + INSERT OR IGNORE), поэтому
-# курсор на диске хранить не нужно и пропусков при рестарте не случается.
+# The window has a MARGIN (70 s at an interval of 60 s): there will be no
+# duplicates - the events output deduplicates by event_id (UNIQUE + INSERT OR
+# IGNORE), so no cursor has to be stored on disk and nothing is missed on restart.
 command: journalctl -o json --no-pager --since "-70 seconds" -n 5000 2>/dev/null
 interval: 60
 enabled: true

@@ -3,149 +3,64 @@ id: LS-N-42
 type: normalization_rule
 version: 1.0.0
 title: Process start/stop → event taxonomy
-# Diff снимков процессов. Ключ процесса — pid + starttime из /proc/PID/stat
-# (22-е поле, тики с загрузки): переиспользованный PID не считается тем же
-# процессом. Состояние между прогонами — ~/.local/share/lisin/proc_seen.json.
-code: |
-  def normalize(text):
-      import datetime, json as _j, os, socket
-      from pathlib import Path
-
-      STATE = Path.home() / ".local/share/lisin/proc_seen.json"
-      host = socket.gethostname()
-      now = datetime.datetime.now(datetime.timezone.utc)
-
-      def boot_id():
-          try:
-              return open("/proc/sys/kernel/random/boot_id").read().strip()
-          except OSError:
-              return ""
-
-      def starttime(pid):
-          """Поле 22 из /proc/PID/stat — тики с загрузки. Стабильный ключ:
-          отличает НОВЫЙ процесс от переиспользованного PID."""
-          try:
-              data = open("/proc/%s/stat" % pid).read()
-              tail = data[data.rfind(")") + 2:].split()
-              return tail[19] if len(tail) > 19 else ""
-          except (OSError, IndexError):
-              return ""
-
-      cur = {}
-      for ln in text.splitlines():
-          f = ln.strip().split(None, 3)
-          if len(f) < 4:
-              continue
-          pid, ppid, user, cmd = f[0], f[1], f[2], f[3]
-          if not pid.isdigit():
-              continue
-          cur[pid] = {"pid": pid, "ppid": ppid, "user": user,
-                      "cmd": cmd[:400], "st": starttime(pid)}
-
-      prev, prev_boot = {}, ""
-      try:
-          saved = _j.loads(STATE.read_text())
-          prev, prev_boot = saved.get("procs", {}), saved.get("boot", "")
-      except Exception:
-          pass
-
-      bid = boot_id()
-      try:
-          STATE.parent.mkdir(parents=True, exist_ok=True)
-          STATE.write_text(_j.dumps({"boot": bid, "procs": cur}))
-      except OSError:
-          pass
-
-      # первый прогон (или перезагрузка) — базовая линия, событий не плодим
-      if not prev or prev_boot != bid:
-          return []
-
-      ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-      rows = []
-
-      def base(cmd):
-          cmd = (cmd or "").strip()
-          if not cmd or cmd.startswith("["):
-              return cmd.strip("[]").split("/")[0][:40]
-          return cmd.split(None, 1)[0].rsplit("/", 1)[-1][:40]
-
-      def mk(p, started):
-          exe = ""
-          if started:
-              try:
-                  exe = os.readlink("/proc/%s/exe" % p["pid"]).split(" (deleted)")[0]
-              except OSError:
-                  exe = ""
-          tok = (p.get("cmd") or "").split(None, 1)[0]
-          kernel = (p.get("cmd") or "").strip().startswith("[")
-          sev = 20 if started else 15
-          if started and exe:
-              if exe.startswith(("/tmp/", "/dev/shm/", "/var/tmp/")):
-                  sev = 70
-              elif exe.startswith(os.path.expanduser("~")) and "/.local/bin" not in exe:
-                  sev = 45
-          if p.get("user") == "root" and started:
-              sev += 5
-          return {
-              "ts": ts,
-              "event_id": "proc:%s:%s:%s:%s" % (bid[:8], p["pid"], p.get("st", ""),
-                                                "start" if started else "end"),
-              "event_kind": "event",
-              "event_category": "process",
-              "event_type": "start" if started else "end",
-              "event_action": "process_started" if started else "process_ended",
-              "event_outcome": "success",
-              "event_severity": min(100, sev),
-              "event_module": "procmon",
-              "event_dataset": "proc.diff",
-              "event_provider": "procmon",
-              "host_name": host,
-              "host_boot_id": bid,
-              "user_name": p.get("user", ""),
-              "related_user": p.get("user", ""),
-              "process_pid": p["pid"],
-              "parent_pid": p.get("ppid", ""),
-              "process_name": base(p.get("cmd")),
-              "process_executable": exe or (tok if tok.startswith("/") else ""),
-              "process_command_line": p.get("cmd", ""),
-              "message": ("started " if started else "exited ") + (p.get("cmd") or "")[:200],
-              "tags": "kernel-thread" if kernel else "",
-          }
-
-      for pid, p in cur.items():
-          old = prev.get(pid)
-          if old is None or old.get("st") != p.get("st"):
-              rows.append(mk(p, True))          # новый процесс (или PID переиспользован)
-      for pid, p in prev.items():
-          if pid not in cur:
-              rows.append(mk(p, False))         # процесс исчез
-      # --- КТО → НАД ЧЕМ (единая ось для чтения события) ---
-      for r in rows:
-          if r.get("subject_type"):
-              continue
-          cat = r.get("event_category", "")
-          if r.get("user_name"):
-              r["subject_type"], r["subject_name"] = "user", r["user_name"]
-          elif r.get("service_name"):
-              r["subject_type"], r["subject_name"] = "service", r["service_name"]
-          elif r.get("process_name"):
-              r["subject_type"], r["subject_name"] = "process", r["process_name"]
-          else:
-              r["subject_type"], r["subject_name"] = "system", r.get("host_name", "")
-          if r.get("file_path"):
-              r["object_type"], r["object_name"] = "file", r["file_path"]
-          elif r.get("destination_ip"):
-              r["object_type"] = "socket"
-              r["object_name"] = "%s:%s" % (r["destination_ip"], r.get("destination_port") or "")
-          elif r.get("package_name"):
-              r["object_type"], r["object_name"] = "package", r["package_name"]
-          elif cat == "process" and r.get("process_executable"):
-              r["object_type"], r["object_name"] = "process", r["process_executable"]
-          elif cat in ("authentication", "iam"):
-              r["object_type"] = "account"
-              r["object_name"] = r.get("user_target_name") or r.get("user_name", "")
-          elif r.get("service_name"):
-              r["object_type"], r["object_name"] = "service", r["service_name"]
-          else:
-              r["object_type"], r["object_name"] = "", ""
-      return rows
+code: "def normalize(text):\n    import datetime, json as _j, os, socket\n    from pathlib import Path\n\
+  \n    STATE = Path.home() / \".local/share/lisin/proc_seen.json\"\n    host = socket.gethostname()\n\
+  \    now = datetime.datetime.now(datetime.timezone.utc)\n\n    def boot_id():\n        try:\n      \
+  \      return open(\"/proc/sys/kernel/random/boot_id\").read().strip()\n        except OSError:\n  \
+  \          return \"\"\n\n    def starttime(pid):\n        \"\"\"Field 22 of /proc/PID/stat - ticks\
+  \ since boot. A stable key: it tells a NEW\n        process from a reused PID.\"\"\"\n        try:\n\
+  \            data = open(\"/proc/%s/stat\" % pid).read()\n            tail = data[data.rfind(\")\")\
+  \ + 2:].split()\n            return tail[19] if len(tail) > 19 else \"\"\n        except (OSError, IndexError):\n\
+  \            return \"\"\n\n    cur = {}\n    for ln in text.splitlines():\n        f = ln.strip().split(None,\
+  \ 3)\n        if len(f) < 4:\n            continue\n        pid, ppid, user, cmd = f[0], f[1], f[2],\
+  \ f[3]\n        if not pid.isdigit():\n            continue\n        cur[pid] = {\"pid\": pid, \"ppid\"\
+  : ppid, \"user\": user,\n                    \"cmd\": cmd[:400], \"st\": starttime(pid)}\n\n    prev,\
+  \ prev_boot = {}, \"\"\n    try:\n        saved = _j.loads(STATE.read_text())\n        prev, prev_boot\
+  \ = saved.get(\"procs\", {}), saved.get(\"boot\", \"\")\n    except Exception:\n        pass\n\n   \
+  \ bid = boot_id()\n    try:\n        STATE.parent.mkdir(parents=True, exist_ok=True)\n        STATE.write_text(_j.dumps({\"\
+  boot\": bid, \"procs\": cur}))\n    except OSError:\n        pass\n\n    # the first run (or a reboot)\
+  \ is the baseline, we produce no events\n    if not prev or prev_boot != bid:\n        return []\n\n\
+  \    ts = now.strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n    rows = []\n\n    def base(cmd):\n        cmd = (cmd\
+  \ or \"\").strip()\n        if not cmd or cmd.startswith(\"[\"):\n            return cmd.strip(\"[]\"\
+  ).split(\"/\")[0][:40]\n        return cmd.split(None, 1)[0].rsplit(\"/\", 1)[-1][:40]\n\n    def mk(p,\
+  \ started):\n        exe = \"\"\n        if started:\n            try:\n                exe = os.readlink(\"\
+  /proc/%s/exe\" % p[\"pid\"]).split(\" (deleted)\")[0]\n            except OSError:\n               \
+  \ exe = \"\"\n        tok = (p.get(\"cmd\") or \"\").split(None, 1)[0]\n        kernel = (p.get(\"cmd\"\
+  ) or \"\").strip().startswith(\"[\")\n        sev = 20 if started else 15\n        if started and exe:\n\
+  \            if exe.startswith((\"/tmp/\", \"/dev/shm/\", \"/var/tmp/\")):\n                sev = 70\n\
+  \            elif exe.startswith(os.path.expanduser(\"~\")) and \"/.local/bin\" not in exe:\n      \
+  \          sev = 45\n        if p.get(\"user\") == \"root\" and started:\n            sev += 5\n   \
+  \     return {\n            \"ts\": ts,\n            \"event_id\": \"proc:%s:%s:%s:%s\" % (bid[:8],\
+  \ p[\"pid\"], p.get(\"st\", \"\"),\n                                              \"start\" if started\
+  \ else \"end\"),\n            \"event_kind\": \"event\",\n            \"event_category\": \"process\"\
+  ,\n            \"event_type\": \"start\" if started else \"end\",\n            \"event_action\": \"\
+  process_started\" if started else \"process_ended\",\n            \"event_outcome\": \"success\",\n\
+  \            \"event_severity\": min(100, sev),\n            \"event_module\": \"procmon\",\n      \
+  \      \"event_dataset\": \"proc.diff\",\n            \"event_provider\": \"procmon\",\n           \
+  \ \"host_name\": host,\n            \"host_boot_id\": bid,\n            \"user_name\": p.get(\"user\"\
+  , \"\"),\n            \"related_user\": p.get(\"user\", \"\"),\n            \"process_pid\": p[\"pid\"\
+  ],\n            \"parent_pid\": p.get(\"ppid\", \"\"),\n            \"process_name\": base(p.get(\"\
+  cmd\")),\n            \"process_executable\": exe or (tok if tok.startswith(\"/\") else \"\"),\n   \
+  \         \"process_command_line\": p.get(\"cmd\", \"\"),\n            \"message\": (\"started \" if\
+  \ started else \"exited \") + (p.get(\"cmd\") or \"\")[:200],\n            \"tags\": \"kernel-thread\"\
+  \ if kernel else \"\",\n        }\n\n    for pid, p in cur.items():\n        old = prev.get(pid)\n \
+  \       if old is None or old.get(\"st\") != p.get(\"st\"):\n            rows.append(mk(p, True))  \
+  \        # a new process (or a reused PID)\n    for pid, p in prev.items():\n        if pid not in cur:\n\
+  \            rows.append(mk(p, False))         # the process is gone\n    # --- WHO -> OVER WHAT (the\
+  \ single axis for reading an event) ---\n    for r in rows:\n        if r.get(\"subject_type\"):\n \
+  \           continue\n        cat = r.get(\"event_category\", \"\")\n        if r.get(\"user_name\"\
+  ):\n            r[\"subject_type\"], r[\"subject_name\"] = \"user\", r[\"user_name\"]\n        elif\
+  \ r.get(\"service_name\"):\n            r[\"subject_type\"], r[\"subject_name\"] = \"service\", r[\"\
+  service_name\"]\n        elif r.get(\"process_name\"):\n            r[\"subject_type\"], r[\"subject_name\"\
+  ] = \"process\", r[\"process_name\"]\n        else:\n            r[\"subject_type\"], r[\"subject_name\"\
+  ] = \"system\", r.get(\"host_name\", \"\")\n        if r.get(\"file_path\"):\n            r[\"object_type\"\
+  ], r[\"object_name\"] = \"file\", r[\"file_path\"]\n        elif r.get(\"destination_ip\"):\n      \
+  \      r[\"object_type\"] = \"socket\"\n            r[\"object_name\"] = \"%s:%s\" % (r[\"destination_ip\"\
+  ], r.get(\"destination_port\") or \"\")\n        elif r.get(\"package_name\"):\n            r[\"object_type\"\
+  ], r[\"object_name\"] = \"package\", r[\"package_name\"]\n        elif cat == \"process\" and r.get(\"\
+  process_executable\"):\n            r[\"object_type\"], r[\"object_name\"] = \"process\", r[\"process_executable\"\
+  ]\n        elif cat in (\"authentication\", \"iam\"):\n            r[\"object_type\"] = \"account\"\n\
+  \            r[\"object_name\"] = r.get(\"user_target_name\") or r.get(\"user_name\", \"\")\n      \
+  \  elif r.get(\"service_name\"):\n            r[\"object_type\"], r[\"object_name\"] = \"service\",\
+  \ r[\"service_name\"]\n        else:\n            r[\"object_type\"], r[\"object_name\"] = \"\", \"\"\
+  \n    return rows\n"

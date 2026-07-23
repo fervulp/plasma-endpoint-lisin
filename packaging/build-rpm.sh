@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Сборка rpm: packaging/build-rpm.sh (нужен rpmdevtools/rpm-build).
+# Building the rpm: packaging/build-rpm.sh (needs rpmdevtools/rpm-build).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TOP="$HOME/rpmbuild"

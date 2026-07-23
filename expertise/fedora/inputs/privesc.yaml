@@ -3,17 +3,17 @@ id: LS-I-39
 type: input
 version: 1.1.0
 title: Privilege escalation surface
-# Векторы повышения привилегий, доступные под пользователем:
+# Privilege escalation vectors available to a normal user:
 #  - file capabilities (getcap): cap_setuid/cap_dac_override/... = privesc;
-#  - sudo -n -l: права sudo без запроса пароля (NOPASSWD/кэш) — сильный сигнал;
-#  - /etc/sudoers[.d]: строки правил, если файл читаем (обычно root-only —
-#    тогда молча пусто, как hardware/audit).
+#  - sudo -n -l: sudo rights without a password prompt (NOPASSWD/cache) - a strong signal;
+#  - /etc/sudoers[.d]: the rule lines, if the file is readable (usually root only -
+#    then it is silently empty, like hardware/audit).
 #
-# ВРЕМЯ (секция MTIME): аналитику мало знать, ЧТО можно использовать для
-# повышения прав — нужно знать, КОГДА этот вектор появился. Свежий
-# cap_setuid или правило NOPASSWD рядом по времени с инцидентом — зацепка,
-# а такой же вектор двухлетней давности — штатная настройка системы.
-# Берём mtime самого носителя вектора (бинарник с capability, файл sudoers).
+# THE TIME (the MTIME section): it is not enough for an analyst to know WHAT can
+# be used to escalate - they need to know WHEN this vector appeared. A fresh
+# cap_setuid or a NOPASSWD rule close in time to an incident is a lead, while the
+# same vector from two years ago is a routine system setting.
+# We take the mtime of the carrier of the vector itself (the binary with the capability, the sudoers file).
 command: |
   echo "===CAPS==="
   caps=$(getcap -r /usr /opt "$HOME/.local" 2>/dev/null)

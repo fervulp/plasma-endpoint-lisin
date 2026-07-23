@@ -3,9 +3,9 @@ id: LS-N-58
 type: normalization_rule
 version: 1.0.0
 title: Browser history
-# История посещений — из тех же профилей, что и расширения (один обход диска).
-# Колонка host выделена отдельно: по домену удобно и группировать, и
-# сопоставлять с сетевыми соединениями из таблицы сокетов.
+# The visit history comes from the same profiles as the extensions (one disk walk).
+# The host column is separate: grouping by domain and matching against the network
+# connections from the socket table are both convenient.
 code: |
   def normalize(text):
       rows = []

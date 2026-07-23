@@ -1,11 +1,12 @@
-"""Данные для дашборда «Состояние».
+"""Data for the "State" dashboard.
 
-Собирает в одну структуру то, что иначе лежит по разным таблицам: процессы
-(граф запуска, как в SIEM/EDR), потребление ресурсов, зависимости программ,
-сеть (экспозиция портов и куда реально ходим). Чистый stdlib, только чтение.
+It gathers into one structure what otherwise lies in different tables:
+processes (the launch graph, as in a SIEM/EDR), resource usage, program
+dependencies, network (port exposure and where we actually go). Pure stdlib,
+read only.
 
-Раскладку графа считаем ЗДЕСЬ (x/y узлов), чтобы QML только рисовал —
-так расположение детерминировано и не прыгает между перерисовками.
+The graph layout is computed HERE (the x/y of the nodes) so that QML only draws
+it - that way the placement is deterministic and does not jump between repaints.
 """
 import os
 import sqlite3
@@ -38,8 +39,8 @@ def _base(cmd):
     cmd = (cmd or "").strip()
     if not cmd:
         return ""
-    # поток ядра «[kworker/0:1-events]» → «kworker», иначе имена резались в
-    # мусор вида «0]» и группировались как попало
+    # a kernel thread "[kworker/0:1-events]" -> "kworker", otherwise the names
+    # were cut into rubbish like "0]" and grouped at random
     if cmd.startswith("["):
         return cmd.strip("[]").split("/", 1)[0].split(":", 1)[0][:28]
     tok = cmd.split(None, 1)[0]
@@ -57,12 +58,13 @@ def _pid_of(process_field):
 
 
 def process_detail(db, eventsdb, pid):
-    """EDR-разбор ОДНОГО процесса: сколько ест, как запустился, что сделал,
-    какой программе принадлежит, от чего та зависит, что лежит рядом с его
-    бинарником и какой systemd-юнит за него отвечает.
+    """An EDR breakdown of ONE process: how much it eats, how it started, what it
+    did, which program it belongs to, what that program depends on, and which
+    systemd unit is responsible for it.
 
-    Всё собирается по связям между таблицами: processes → applications
-    (пакет + его depends/required_by) → ports (сокеты) → events (что делал).
+    Everything is gathered through the links between tables: processes ->
+    applications (the package plus its depends/required_by) -> ports (sockets) ->
+    events (what it did).
     """
     import os
     pid = str(pid)
@@ -91,7 +93,7 @@ def process_detail(db, eventsdb, pid):
     if not exe and cmd and not cmd.startswith("["):
         exe = cmd.split(None, 1)[0]
 
-    # --- как запустился: цепочка предков ---
+    # --- how it started: the chain of ancestors ---
     chain, cur, guard = [], pid, 0
     while cur in procs and guard < 24:
         r = procs[cur]
@@ -104,7 +106,7 @@ def process_detail(db, eventsdb, pid):
         cur, guard = nxt, guard + 1
     chain.reverse()
 
-    # --- systemd-юнит, который отвечает за процесс ---
+    # --- the systemd unit responsible for the process ---
     unit = ""
     try:
         cg = open("/proc/%s/cgroup" % pid).read()
@@ -120,12 +122,12 @@ def process_detail(db, eventsdb, pid):
         pass
     unit_row = next((s for s in services if s.get("unit") == unit), None)
 
-    # --- какой программе принадлежит бинарник ---
+    # --- which program the binary belongs to ---
     base = exe.rsplit("/", 1)[-1] if exe else ""
     pkg = None
-    # СНАЧАЛА берём УЖЕ ОБОГАЩЁННЫЙ пакет из строки процесса: обогащение
-    # proc_purpose разворачивает интерпретатор (python3 -> tuned), а тут
-    # своя резолвинг-логика этого не делала и показывала «python3».
+    # FIRST we take the ALREADY ENRICHED package from the process row: the
+    # proc_purpose enrichment unwraps the interpreter (python3 -> tuned), while
+    # the resolving logic here did not and showed "python3".
     row_pkg = (r.get("package") or "").strip()
     if row_pkg:
         pkg = next((a for a in apps if a.get("name") == row_pkg), {"name": row_pkg})
@@ -138,8 +140,8 @@ def process_detail(db, eventsdb, pid):
         cand = [a for a in apps if (a.get("name") or "").lower() == low]
         pkg = cand[0] if cand else None
     if pkg is None and exe:
-        # авторитетный ответ от rpm: /usr/bin/Telegram → telegram-desktop
-        # (в инвентаре путь у rpm-строк не заполнен, а имя пакета ≠ имя файла)
+        # the authoritative answer from rpm: /usr/bin/Telegram -> telegram-desktop
+        # (in the inventory rpm rows have no path, and the package name != the file name)
         import subprocess
         try:
             out = subprocess.run(["rpm", "-qf", "--qf", "%{NAME}", exe],
@@ -149,26 +151,28 @@ def process_detail(db, eventsdb, pid):
         if out and "not owned" not in out and " " not in out:
             pkg = next((a for a in apps if a.get("name") == out), {"name": out})
 
-    # СОСЕДИ БИНАРНИКА УБРАНЫ. Показывали ±18 имён файлов рядом в
-    # каталоге — в /usr/bin это тысячи пакетных файлов, и список ничего
-    # не давал. Исходный смысл (заметить подброшенный файл рядом с
-    # легитимным) уже закрыт признаком «вне пакетов»: он структурный и
-    # работает в любом каталоге, а не только в алфавитном окне.
+    # THE NEIGHBOURS OF THE BINARY WERE REMOVED. They showed +-18 file names
+    # nearby in the directory - in /usr/bin that is thousands of packaged files,
+    # and the list gave nothing. The original point (noticing a planted file next
+    # to a legitimate one) is already covered by the "outside any package"
+    # property: it is structural and works in any directory, not only in an
+    # alphabetical window.
     neighbours = []
     bindir = exe.rsplit("/", 1)[0] if "/" in exe else ""
 
-    # --- ФАЙЛЫ, КОТОРЫЕ ПРОЦЕСС ДЕРЖИТ ОТКРЫТЫМИ ---
-    # Из таблицы open_files (её наполняет конвейер), а не чтением /proc в
-    # обход. Сокеты и каналы отсеиваем: они показаны отдельной секцией, а
-    # здесь нужен ответ на вопрос «с какими файлами он работает».
+    # --- THE FILES THE PROCESS HOLDS OPEN ---
+    # From the open_files table (which the pipeline fills), not by reading /proc
+    # behind its back. Sockets and pipes are filtered out: they are shown in a
+    # separate section, and here we need the answer to "which files does it work
+    # with".
     files = []
     try:
-        # ОДИН ПУТЬ — ОДНА СТРОКА: процесс держит один и тот же файл
-        # несколькими дескрипторами (у zen-bin /dev/dri/renderD128 шесть
-        # раз), и список превращался в повтор одной строки.
-        # ТОТ ЖЕ НАБОР И ТОТ ЖЕ ПОТОЛОК, ЧТО В ГРАФЕ (links.around):
-        # раньше здесь не было 'директория' и стоял LIMIT 60, поэтому граф
-        # показывал 110 файлов, а панель — 60, и было непонятно, кому верить.
+        # ONE PATH - ONE ROW: a process holds the same file through several
+        # descriptors (zen-bin holds /dev/dri/renderD128 six times), and the list
+        # turned into a repetition of one row.
+        # THE SAME SET AND THE SAME CEILING AS IN THE GRAPH (links.around):
+        # this place used to lack 'directory' and had LIMIT 60, so the graph
+        # showed 110 files and the panel 60, and it was unclear which to believe.
         for r in db.query(
                 "SELECT path, kind, MAX(deleted) deleted, COUNT(*) n "
                 "FROM open_files WHERE pid='%s' "
@@ -182,13 +186,13 @@ def process_detail(db, eventsdb, pid):
     except Exception:
         files = []
 
-    # --- сокеты процесса ---
+    # --- the sockets of the process ---
     socks = [{"proto": p.get("proto", ""), "local": p.get("local", ""),
               "remote": p.get("remote", ""), "state": p.get("state", ""),
               "exposure": p.get("exposure", "")}
              for p in ports if _pid_of(p.get("process", "")) == pid]
 
-    # --- что процесс делал: события по этому pid ---
+    # --- what the process did: events for this pid ---
     did = []
     if eventsdb is not None:
         try:
@@ -201,11 +205,11 @@ def process_detail(db, eventsdb, pid):
             did = q.get("rows", [])
         except Exception:
             did = []
-    # НЕ ОБРЕЗАЕМ МОЛЧА: если упёрлись в потолок, панель скажет об этом прямо
+    # NO SILENT TRUNCATION: if we hit the ceiling, the panel says so plainly
     did_truncated = len(did) > 200
     did = did[:200]
 
-    # --- дети процесса ---
+    # --- the children of the process ---
     kids = [{"pid": p, "command": (r.get("command") or "")[:120],
              "rss": round(_f(r.get("rss_mb")), 1)}
             for p, r in procs.items() if str(r.get("ppid") or "") == pid][:25]
@@ -244,7 +248,7 @@ _EXE_CACHE = {}
 
 
 def readlink_exe(pid):
-    """/proc/PID/exe → путь (пусто, если нет прав/процесс умер)."""
+    """/proc/PID/exe -> the path (empty if there are no rights / the process died)."""
     import os
     if pid in _EXE_CACHE:
         return _EXE_CACHE[pid]
@@ -270,7 +274,7 @@ def build(db, eventsdb=None, top=18):
     by_pid = {str(r["pid"]): r for r in procs}
     live = [r for r in procs if not (r.get("command") or "").strip().startswith("[")]
 
-    # ---- сеть по процессам ----
+    # ---- network by process ----
     net_by_pid = defaultdict(list)
     exposure = defaultdict(int)
     for p in ports:
@@ -281,7 +285,7 @@ def build(db, eventsdb=None, top=18):
         if pid:
             net_by_pid[pid].append(p)
 
-    # ---- граф запуска: топ по RSS + ВСЕ их предки ----
+    # ---- the launch graph: the top by RSS + ALL their ancestors ----
     ranked = sorted(live, key=lambda r: -_f(r.get("rss_mb")))[:top]
     keep = set()
     for r in ranked:
@@ -304,7 +308,7 @@ def build(db, eventsdb=None, top=18):
 
     for pid in keep:
         dep_of(pid)
-    # порядок: по глубине, внутри — по родителю и имени (стабильно)
+    # order: by depth, and within it by parent and name (stable)
     for pid in sorted(keep, key=lambda p: (depth[p],
                                            str(by_pid[p].get("ppid") or ""),
                                            _base(by_pid[p].get("command")))):
@@ -343,11 +347,11 @@ def build(db, eventsdb=None, top=18):
     edges = [[n["ppid"], n["pid"]] for n in nodes
              if n["ppid"] in keep and n["ppid"] != n["pid"]]
 
-    # ---- ПОЛНОЕ дерево процессов с оценкой риска ----
-    # Показывать только «топ по памяти» нельзя: опасное обычно МАЛЕНЬКОЕ
-    # (дроппер в /tmp, reverse-shell, минер-загрузчик). Поэтому отдаём ВСЕ
-    # процессы деревом, а вверх всплывают они не по размеру, а по РИСКУ —
-    # так это устроено в Process Explorer / EDR-консолях.
+    # ---- the FULL process tree with a risk score ----
+    # Showing only "the top by memory" is wrong: the dangerous thing is usually
+    # SMALL (a dropper in /tmp, a reverse shell, a miner loader). So we return ALL
+    # processes as a tree, and what floats to the top is decided not by size but
+    # by RISK - the way it is done in Process Explorer and EDR consoles.
     import os
     pkg_names = {(a.get("name") or "").lower() for a in apps}
     pkg_paths = {a.get("path") for a in apps if a.get("path")}
@@ -416,15 +420,15 @@ def build(db, eventsdb=None, top=18):
                 worst = n["exposure"]
             elif n.get("exposure") and not worst:
                 worst = n["exposure"]
-        # сколько объектов держит открытыми — это ресурс, и он виден без
-        # root: по нему сразу заметен процесс, который «течёт» дескрипторами
+        # how many objects it holds open - that is a resource, and it is visible
+        # without root: it immediately shows a process leaking descriptors
         try:
             nfd = len(os.listdir("/proc/%s/fd" % pid))
         except OSError:
             nfd = 0
-        # АДРЕСА ПРОЦЕССА строкой — чтобы процесс искался ПО IP и ПОРТУ.
-        # Без этого поиск шёл только по имени/команде/пользователю, и на
-        # вопрос «кто соединён с 198.51.100.7» ответить было нечем.
+        # THE ADDRESSES OF THE PROCESS as a string - so that a process can be
+        # found BY IP AND PORT. Without it the search covered only the name, the
+        # command line and the user, and "who is connected to 198.51.100.7" had no answer.
         from . import links as _links
         addrs, remote_n, external = [], 0, False
         for n in nets:
@@ -445,7 +449,7 @@ def build(db, eventsdb=None, top=18):
             "unpackaged": not (r.get("package") or "").strip() and not kernel,
             "pid": pid, "ppid": str(r.get("ppid") or ""),
             "name": _base(cmd) or "?", "command": cmd[:200],
-            # «что это и зачем» — из обогащения proc_purpose
+            # "what this is and what it is for" - from the proc_purpose enrichment
             "title": r.get("title", "") or "", "purpose": r.get("purpose", "") or "",
             "user": r.get("user", ""), "rss": round(_f(r.get("rss_mb")), 1),
             "cpu": round(_f(r.get("cpu")), 1), "elapsed": r.get("elapsed", ""),
@@ -455,19 +459,19 @@ def build(db, eventsdb=None, top=18):
             "risk": sc, "why": ", ".join(why), "files": nfd,
             "children": len(kids_of.get(pid, [])),
         })
-        # ДЕРЕВО ПОКАЗЫВАЕТСЯ ПОЛНОСТЬЮ. Раньше одинаковые дети-листья
-        # (≥3 с одним именем) схлопывались в строку «имя ×N» — дерево было
-        # короче, но нужный процесс мог оказаться внутри группы, и найти его
-        # было нечем. Полное дерево длиннее, зато в нём виден каждый процесс.
+        # THE TREE IS SHOWN IN FULL. Identical leaf children (3 or more with the
+        # same name) used to collapse into a row "name xN" - the tree was shorter,
+        # but the process you needed could end up inside a group with no way to
+        # find it. A full tree is longer, but every process is visible in it.
         kids = sorted(kids_of.get(pid, []),
                       key=lambda k: -_f(by_pid.get(k, {}).get("rss_mb")))
         for k in kids:
             walk(k, depth + 1)
 
-    # СУММЫ ПО ПОДДЕРЕВУ. Свёрнутая ветка должна показывать, сколько ест ВСЯ
-    # ветка, иначе браузер с 17 процессами выглядит лёгким: у корня 200 МБ, а
-    # на деле 2 ГБ. Считаем снизу вверх по уже построенному дереву — оно в
-    # DFS-порядке, поэтому достаточно одного прохода с конца.
+    # SUMS OVER THE SUBTREE. A collapsed branch must show how much the WHOLE
+    # branch eats, otherwise a browser with 17 processes looks light: 200 MB at
+    # the root while in reality it is 2 GB. We count bottom up over the already
+    # built tree - it is in DFS order, so a single pass from the end is enough.
     def sum_subtree(rows):
         acc = {}
         for node in reversed(rows):
@@ -499,10 +503,10 @@ def build(db, eventsdb=None, top=18):
              if str(r.get("ppid") or "") not in by_pid or str(r.get("ppid")) == "0"]
     for rt in sorted(roots, key=lambda k: -_f(by_pid.get(k, {}).get("rss_mb"))):
         walk(rt, 0)
-    for r in procs:                      # осиротевшие (родитель уже умер)
+    for r in procs:                      # orphaned (the parent has already died)
         walk(str(r["pid"]), 0)
 
-    # ---- потребление ----
+    # ---- consumption ----
     top_rss = [{"name": _base(r.get("command")), "pid": str(r["pid"]),
                 "user": r.get("user", ""), "value": round(_f(r.get("rss_mb")), 1)}
                for r in sorted(live, key=lambda r: -_f(r.get("rss_mb")))[:10]]
@@ -511,7 +515,7 @@ def build(db, eventsdb=None, top=18):
                for r in sorted(live, key=lambda r: -_f(r.get("cpu")))[:10]
                if _f(r.get("cpu")) > 0]
 
-    # ---- зависимости: программы с наибольшим числом компонентов ----
+    # ---- dependencies: the programs with the most components ----
     try:
         inv = entities.programs(db)
     except Exception:
@@ -521,7 +525,7 @@ def build(db, eventsdb=None, top=18):
                 for e in sorted(progs, key=lambda e: -e.get("components", 0))[:10]
                 if e.get("components", 0) > 0]
 
-    # ---- сеть: куда реально ходим (из событий, уже обогащённых ASN) ----
+    # ---- network: where we actually go (from events already enriched with ASN) ----
     top_dest = []
     if eventsdb is not None:
         try:
@@ -577,8 +581,8 @@ def build(db, eventsdb=None, top=18):
         "top_cpu": top_cpu,
         "top_deps": top_deps,
         "top_dest": top_dest,
-        # максимум для сравнительных шкал в интерфейсе (шкала относительная,
-        # а не абсолютная: важно «кто тяжелее», а не сколько именно)
+        # the maximum for the comparative scales in the interface (the scale is
+        # relative, not absolute: what matters is "who is heavier", not by how much)
         "max_rss": max([t["rss"] for t in tree] or [0]),
         "exposure": [{"value": k, "count": v}
                      for k, v in sorted(exposure.items(), key=lambda x: -x[1])],

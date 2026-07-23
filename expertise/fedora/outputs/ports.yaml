@@ -9,7 +9,7 @@ key:
 - local
 - remote
 icon: network-connect
-# ПЕРЕХОДЫ ЗДЕСЬ НЕ ОТСЛЕЖИВАЕМ. Проверено на живых данных: сокеты текучи —
-# за один прогон 16 появилось, 28 исчезло, и лента заполнялась бы сводками
-# «массовое изменение» каждые 20 секунд. Открытие и закрытие соединений уже
-# даёт источник netmon, там это событие по существу, а не разница снимков.
+# WE DO NOT TRACK TRANSITIONS HERE. Verified on live data: sockets are fluid - in
+# one run 16 appeared and 28 disappeared, and the feed would fill with
+# "mass change" summaries every 20 seconds. Opening and closing connections is
+# already covered by the netmon source, where it is an event in substance rather

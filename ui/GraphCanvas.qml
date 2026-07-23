@@ -4,23 +4,23 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "Fmt.js" as Fmt
 
-// ПОЛОТНО ГРАФА — переиспользуемый компонент расследования.
+// THE GRAPH CANVAS - a reusable investigation component.
 //
-// Собрано по разобранным практикам зрелых EDR (SentinelOne Storyline,
-// Defender, Elastic, Cortex, Chronicle) + графовой визуализации
+// Assembled from the studied practice of mature EDRs (SentinelOne Storyline,
+// Defender, Elastic, Cortex, Chronicle) plus graph visualisation:
 // (Cambridge Intelligence combos, DEPCOMM):
-//   * КАТЕГОРИИ-КЛАСТЕРЫ: связанное сгруппировано; крупная группа свёрнута в
-//     мета-узел со счётчиком, раскрывается на месте (клик) — «starburst» не
-//     заваливает канву;
-//   * цвет ПОЛОСЫ = категория, цвет+иконка+форма = тип сущности, красная
-//     рамка = риск (тип и риск ортогональны, как в Defender);
-//   * наведение подсвечивает соседей и гасит остальное (focus+context);
-//   * КНОПКИ-ДЕЙСТВИЯ на узле: провалиться в State/События, сделать центром
-//     (пивот), WHOIS — «drill deeper» одним жестом;
-//   * панель масштаба + «вписать всё».
+//   * CATEGORY CLUSTERS: related things are grouped; a large group is collapsed
+//     into a meta node with a counter and expands in place (a click) - a
+//     "starburst" does not bury the canvas;
+//   * the colour of the STRIPE = the category, colour+icon+shape = the entity
+//     type, a red frame = risk (type and risk are orthogonal, as in Defender);
+//   * hovering highlights the neighbours and dims the rest (focus+context);
+//   * ACTION BUTTONS on a node: drill into State/Events, make it the centre
+//     (pivot), WHOIS - "drill deeper" in one gesture;
+//   * a zoom panel + "fit everything".
 //
-// Раскладка (x/y) и решение «свернуть/раскрыть» приходят ГОТОВЫМИ из Python;
-// QML только рисует и шлёт сигналы. id узлов стабильны → анимация бесплатна.
+// The layout (x/y) and the collapse/expand decision arrive READY from Python;
+// QML only draws and emits signals. Node ids are stable -> animation is free.
 Item {
     id: canvasRoot
 
@@ -28,40 +28,40 @@ Item {
     property string selectedId: ""
     property string hoveredId: ""
     property real zoom: 1.0
-    // масштаб меняется плавно: резкий скачок сбивает ориентацию
+    // the scale changes smoothly: an abrupt jump breaks orientation
     Behavior on zoom { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
     property int worldW: graph && graph.width ? graph.width : 1100
     property int worldH: graph && graph.height ? graph.height : 780
 
-    signal nodeActivated(var node)          // клик по узлу → боковая панель
-    signal toggleCategory(string category)  // клик по мета-узлу → раскрыть
-    signal anchorRequested(var node)        // «сделать центром» (пивот)
-    signal drillRequested(string action, var node)  // провалиться
+    signal nodeActivated(var node)          // a click on a node -> the side panel
+    signal toggleCategory(string category)  // a click on a meta node -> expand
+    signal anchorRequested(var node)        // "make it the centre" (pivot)
+    signal drillRequested(string action, var node)  // drill down
 
-    // ЗА КАЖДЫМ ТИПОМ ЗАКРЕПЛЁН СВОЙ ЦВЕТ — он не меняется между графами,
-    // поэтому «оранжевое = удалённый адрес» запоминается и читается без
-    // легенды. Процессы намеренно СЕРЫЕ: их на полотне больше всего, и
-    // цветом должно выделяться то, что вокруг них, а не они сами.
+    // EVERY TYPE HAS ITS OWN FIXED COLOUR - it does not change between graphs, so
+    // "orange = a remote address" is memorised and read without a legend.
+    // Processes are deliberately GREY: there are more of them on the canvas than
+    // anything else, and what should stand out is what is around them.
     function colorFor(kind) {
-        return kind === "process"   ? "#6e7276"   // серый — их больше всего
-             : kind === "user"      ? "#2980b9"   // синий
-             : kind === "package"   ? "#27ae60"   // зелёный
-             : kind === "service"   ? "#2471a3"   // тёмно-синий
-             : kind === "remote"    ? "#e67e22"   // оранжевый
-             : kind === "listen"    ? "#c0392b"   // красный
-             : kind === "socket"    ? "#8e44ad"   // фиолетовый
-             : kind === "config"    ? "#16a085"   // бирюзовый
-             : kind === "file"      ? "#5d6d7e"   // сланцевый
-             : kind === "dir"       ? "#34495e"   // тёмно-сланцевый
-             : kind === "action"    ? "#b7950b"   // оливковый
-             : kind === "vuln"      ? "#922b21"   // тёмно-красный
-             : kind === "persist"   ? "#6c3483"   // тёмно-фиолетовый
-             : kind === "suid"      ? "#d35400"   // тыквенный
-             : kind === "privesc"   ? "#a04000"   // коричнево-оранжевый
-             : kind === "scheduled" ? "#148f77"   // тёмно-бирюзовый
-             : kind === "kmod"      ? "#7d3c98"   // лиловый
-             : kind === "group"     ? "#4a5158"   // нейтральный, блок-заголовок
-             : kind === "warning"   ? "#cb4335"   // ярко-красный
+        return kind === "process"   ? "#6e7276"   // grey - there are more of them
+             : kind === "user"      ? "#2980b9"   // blue
+             : kind === "package"   ? "#27ae60"   // green
+             : kind === "service"   ? "#2471a3"   // dark blue
+             : kind === "remote"    ? "#e67e22"   // orange
+             : kind === "listen"    ? "#c0392b"   // red
+             : kind === "socket"    ? "#8e44ad"   // violet
+             : kind === "config"    ? "#16a085"   // teal
+             : kind === "file"      ? "#5d6d7e"   // slate
+             : kind === "dir"       ? "#34495e"   // dark slate
+             : kind === "action"    ? "#b7950b"   // olive
+             : kind === "vuln"      ? "#922b21"   // dark red
+             : kind === "persist"   ? "#6c3483"   // dark violet
+             : kind === "suid"      ? "#d35400"   // pumpkin
+             : kind === "privesc"   ? "#a04000"   // brown orange
+             : kind === "scheduled" ? "#148f77"   // dark teal
+             : kind === "kmod"      ? "#7d3c98"   // lilac
+             : kind === "group"     ? "#4a5158"   // neutral, a block header
+             : kind === "warning"   ? "#cb4335"   // bright red
              : Kirigami.Theme.disabledTextColor
     }
     function iconFor(kind) {
@@ -85,7 +85,7 @@ Item {
              : kind === "group"     ? "folder-open"
              : "dialog-information"
     }
-    // цвет категории — из данных (Python шлёт color на узле); запасной по имени
+    // the category colour comes from the data (Python sends color on the node); a fallback by name
     function categoryColor(node) {
         if (node && node.color) return node.color
         return canvasRoot.colorFor(node ? node.kind : "")
@@ -161,7 +161,7 @@ Item {
         repaintPulse.restart()
     }
 
-    // рёбра рисуются на Canvas; во время анимации узлов их надо перерисовывать
+    // the edges are drawn on a Canvas; while the nodes animate they must be repainted
     Timer {
         id: repaintPulse
         interval: 16; repeat: true
@@ -242,21 +242,21 @@ Item {
                         var lit = hov === "" || e.a === hov || e.b === hov
                         var member = e.rel === "member"
                         var conn = e.rel === "connected"
-                        // цвет ребра по смыслу связи
+                        // the edge colour follows the meaning of the link
                         var col = conn ? Qt.rgba(0.90, 0.49, 0.13, lit ? 0.75 : 0.2)
                                        : Qt.alpha(Kirigami.Theme.textColor, lit ? 0.5 : 0.1)
                         ctx.strokeStyle = col
                         ctx.fillStyle = col
-                        // ЛИНИИ СПЛОШНЫЕ И ПЛАВНЫЕ. Пунктир у мета-рёбер убран
-                        // (рябил и читался как «связь ненастоящая»); толщина
-                        // по-прежнему отличает пучок от одиночной связи.
+                        // THE LINES ARE SOLID AND SMOOTH. The dashes on meta edges
+                        // were removed (they shimmered and read as "the link is not
+                        // real"); the thickness still tells a bundle from a single link.
                         ctx.lineWidth = member ? Math.min(5, 1.6 + (e.count || 1) / 5)
                                                : (lit && hov !== "" ? 2.2 : 1.5)
                         ctx.setLineDash([])
-                        // Кубическая кривая с управляющими точками ВДОЛЬ
-                        // основного направления: линия выходит и входит по
-                        // касательной, поэтому изгиб мягкий при любом взаимном
-                        // положении узлов (лесенка идёт вниз, дерево — вбок).
+                        // A cubic curve with the control points ALONG the main
+                        // direction: the line leaves and enters tangentially, so the
+                        // bend is soft whatever the mutual position of the nodes
+                        // (the ladder goes down, the tree goes sideways).
                         // Python may hand us a routing corridor: a free
                         // vertical band between the process tree and the
                         // category column. Going through it keeps the curve
@@ -291,8 +291,8 @@ Item {
                         ctx.moveTo(a.x, a.y)
                         ctx.bezierCurveTo(c1x, c1y, c2x, c2y, b.x, b.y)
                         ctx.stroke()
-                        // стрелка по касательной в конце (от 2-й управляющей
-                        // точки к узлу) — не для мета-рёбер, там пучок свёрнут
+                        // the arrow follows the tangent at the end (from the second
+                        // control point to the node) - not for meta edges, the bundle is collapsed there
                         if (!member) {
                             var ang = Math.atan2(b.y - c2y, b.x - c2x)
                             var hx = b.x - Math.cos(ang) * 17, hy = b.y - Math.sin(ang) * 17
@@ -302,10 +302,10 @@ Item {
                             ctx.lineTo(hx - Math.cos(ang + 0.4) * 7, hy - Math.sin(ang + 0.4) * 7)
                             ctx.closePath(); ctx.fill()
                         }
-                        // середина кривой (t=0.5) — туда ставим подпись
+                        // the middle of the curve (t=0.5) - that is where the label goes
                         var lx = 0.125 * a.x + 0.375 * c1x + 0.375 * c2x + 0.125 * b.x
                         var ly = 0.125 * a.y + 0.375 * c1y + 0.375 * c2y + 0.125 * b.y
-                        // подпись: ×N на мета-ребре всегда; отношение — при наведении
+                        // the label: xN on a meta edge always; the relation - on hover
                         if (member && e.count) {
                             ctx.fillStyle = Kirigami.Theme.textColor
                             ctx.fillText("×" + e.count, lx - 6, ly - 2)
@@ -334,18 +334,18 @@ Item {
                                   : modelData.focus ? "#f1c40f"
                                   : modelData.risk ? "#e74c3c"
                                   : Qt.alpha(Kirigami.Theme.textColor, 0.4)
-                    // ОДНА ФОРМА У ВСЕХ УЗЛОВ: прямоугольник с прямыми углами.
-                    // Овалы вперемешку с блоками читались как «разные
-                    // сущности», хотя тип показан иконкой и цветом.
+                    // ONE SHAPE FOR ALL NODES: a rectangle with square corners.
+                    // Ovals mixed with blocks read as "different entities",
+                    // although the type is already shown by the icon and the colour.
                     radius: 0
                     opacity: dim ? 0.4 : 1.0
                     Behavior on opacity { NumberAnimation { duration: 140 } }
                     Behavior on x { NumberAnimation { duration: 190; easing.type: Easing.OutCubic } }
                     Behavior on y { NumberAnimation { duration: 190; easing.type: Easing.OutCubic } }
-                    // ширина ограничена: длинная подпись раньше растягивала
-                    // узел, он налезал на соседние и на рёбра
-                    // ширина НЕ БОЛЬШЕ шага раскладки (200 px в Python),
-                    // иначе соседние узлы налезают друг на друга
+                    // the width is limited: a long label used to stretch the node
+                    // and it covered its neighbours and the edges
+                    // the width is NO MORE than the layout step (200 px in Python),
+                    // otherwise neighbouring nodes overlap
                     readonly property int maxW: 184
                     width: Math.min(maxW, (rowc.implicitWidth + 20) * scaleF)
                     height: (rowc.implicitHeight + 8) * scaleF
@@ -359,9 +359,9 @@ Item {
                         anchors.horizontalCenterOffset: 2
                         spacing: Kirigami.Units.smallSpacing
                         Kirigami.Icon {
-                            // у блока — иконка его содержимого (процессы,
-                            // события, файлы), иначе безымянные блоки не
-                            // отличить друг от друга
+                            // a block gets the icon of its contents (processes,
+                            // events, files), otherwise unnamed blocks cannot be
+                            // told apart
                             source: canvasRoot.iconFor(
                                 chip.isGroup && modelData.icon_kind
                                 ? modelData.icon_kind : modelData.kind)
@@ -383,8 +383,8 @@ Item {
                                     : Kirigami.Theme.smallFont.pointSize
                             }
                             QQC2.Label {
-                                // ВРЕМЯ — в местной зоне: события хранятся в
-                                // UTC, перевод делает граница UI (Fmt.js)
+                                // THE TIME is in the local zone: events are stored
+                                // in UTC, the UI boundary converts them (Fmt.js)
                                 text: {
                                     var s = modelData.sub || ""
                                     var w = modelData.when || ""
@@ -408,7 +408,7 @@ Item {
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
                             }
                         }
-                        // счётчик у мета-узла категории
+                        // the counter on a category meta node
                         Rectangle {
                             visible: chip.isGroup && modelData.count > 0
                             radius: height / 2
@@ -425,7 +425,7 @@ Item {
                         }
                     }
 
-                    // бейдж риска/статуса в углу (OPEN, УДАЛЁН, +N…)
+                    // the risk/status badge in the corner (OPEN, DELETED, +N...)
                     Rectangle {
                         visible: (modelData.badge || "") !== "" && !chip.isGroup
                         anchors { right: parent.right; top: parent.top; margins: -4 }
@@ -476,7 +476,7 @@ Item {
                             }
                         }
                     }
-                    // двойной клик по сущности-якорю = пивот (сделать центром)
+                    // a double click on an anchor entity = pivot (make it the centre)
                     TapHandler {
                         acceptedButtons: Qt.LeftButton
                         onDoubleTapped: {
@@ -485,7 +485,7 @@ Item {
                         }
                     }
 
-                    // ---- КНОПКИ-ДЕЙСТВИЯ (drill), появляются на выбранном/наведённом ----
+                    // ---- ACTION BUTTONS (drill), shown on the selected/hovered node ----
                     Row {
                         z: 20
                         anchors { bottom: parent.top; right: parent.right; bottomMargin: 1 }
@@ -529,8 +529,8 @@ Item {
             }
         }
 
-        // ЩИПОК НА ТАЧПАДЕ: два пальца по диагонали — приближение к точке
-        // между ними. Работает вместе с Ctrl+колесо (у мыши щипка нет).
+        // A PINCH ON THE TOUCHPAD: two fingers diagonally - zoom towards the point
+        // between them. It works together with Ctrl+wheel (a mouse has no pinch).
         PinchHandler {
             target: null
             property real startZoom: 1
@@ -580,7 +580,7 @@ Item {
         }
     }
 
-    // ---- панель масштаба ----
+    // ---- the zoom panel ----
     Row {
         anchors { right: parent.right; top: parent.top; margins: Kirigami.Units.smallSpacing }
         spacing: 2

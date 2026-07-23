@@ -30,7 +30,7 @@ FormCard.FormCardPage {
         }
         FormCard.FormDelegateSeparator {}
 
-        // график CPU/RAM за последние 30 минут (сэмпл каждые 10 с)
+        // a CPU/RAM chart for the last 30 minutes (sampled every 10 seconds)
         FormCard.AbstractFormDelegate {
             background: null
             contentItem: ColumnLayout {
@@ -61,7 +61,7 @@ FormCard.FormCardPage {
                     onPaint: {
                         const ctx = getContext("2d")
                         ctx.clearRect(0, 0, width, height)
-                        // сетка 0/50/100 %
+                        // the 0/50/100 % grid
                         ctx.strokeStyle = Qt.alpha(Kirigami.Theme.textColor, 0.15)
                         ctx.lineWidth = 1
                         for (const p of [0, 0.5, 1]) {
@@ -72,7 +72,7 @@ FormCard.FormCardPage {
                         }
                         const s = series
                         if (!s || s.length < 2) return
-                        const n = 181   // фикс. окно 30 мин
+                        const n = 181   // a fixed 30 minute window
                         function drawLine(key, color) {
                             ctx.strokeStyle = color
                             ctx.lineWidth = 2

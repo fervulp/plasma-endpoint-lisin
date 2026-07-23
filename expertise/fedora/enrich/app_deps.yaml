@@ -3,17 +3,31 @@ id: LS-E-3
 type: enrichment
 version: 1.0.1
 title: Application dependency links (deps / required_by)
-code: "def enrich(rows):\n    import sqlite3\n    from pathlib import Path\n    db = Path.home() / \".local/share/lisin/state.db\"\n    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % db, uri=True)\n\
-  \        con.row_factory = sqlite3.Row\n        inv = [dict(r) for r in con.execute(\n            'SELECT name, app_id, depends, recommends FROM applications')]\n        con.close()\n    except Exception:\n\
-  \        inv = []\n\n    # строки текущего потока тоже участвуют (на первом прогоне их ещё нет в БД)\n    seen = set()\n    allrows = []\n    for r in list(inv) + list(rows):\n        nm = (r.get(\"name\"\
-  ) or \"\").strip()\n        if not nm:\n            continue\n        k = (nm, (r.get(\"app_id\") or \"\").strip())\n        if k in seen:\n            continue\n        seen.add(k)\n        allrows.append(r)\n\
-  \n    alias = {}\n    for r in allrows:\n        nm = (r.get(\"name\") or \"\").strip()\n        alias.setdefault(nm, nm)\n        aid = (r.get(\"app_id\") or \"\").strip()\n        if aid:\n        \
-  \    alias.setdefault(aid, nm)\n\n    def tokens(r):\n        # СЛАБЫЕ ЗАВИСИМОСТИ УЧИТЫВАЮТСЯ НАРАВНЕ. Проверено на btop:\n        # `dnf remove btop` уносит и rocm-smi, потому что btop его\n       \
-  \ # РЕКОМЕНДУЕТ и больше он никому не нужен. Считать только strong-\n        # зависимости — значит показывать неполную картину удаления.\n        # Вид связи сохраняется отдельно, чтобы «требует» и «рекомендует»\n\
-  \        # можно было отличить.\n        raw = ((r.get(\"depends\") or \"\") + \" \" + (r.get(\"recommends\") or \"\")\n               ).replace(\",\", \" \")\n        for tok in raw.split():\n      \
-  \      if \"(\" in tok or \")\" in tok:\n                continue      # capability rtld(GNU_HASH) — не пакет\n            tok = tok.strip()\n            if not tok:\n                continue\n      \
-  \      t = alias.get(tok)\n            if t is None and \"/\" in tok:\n                t = alias.get(tok.split(\"/\", 1)[0])\n            if t:\n                yield t\n\n    deps_of, req_by = {}, {}\n\
-  \    for r in allrows:\n        nm = (r.get(\"name\") or \"\").strip()\n        d = set()\n        for t in tokens(r):\n            if t != nm:\n                d.add(t)\n        deps_of[nm] = d\n   \
-  \     for t in d:\n            req_by.setdefault(t, set()).add(nm)\n\n    for r in rows:\n        nm = (r.get(\"name\") or \"\").strip()\n        d = deps_of.get(nm) or set()\n        rb = req_by.get(nm)\
-  \ or set()\n        r[\"deps_count\"] = len(d)\n        r[\"required_by\"] = len(rb)\n        # кому именно нужен пакет — видно прямо в строке (первые 12 имён)\n        r[\"required_by_names\"] = \",\
-  \ \".join(sorted(rb)[:12])\n    return rows\n"
+code: "def enrich(rows):\n    import sqlite3\n    from pathlib import Path\n    db = Path.home() / \"\
+  .local/share/lisin/state.db\"\n    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % db, uri=True)\n\
+  \        con.row_factory = sqlite3.Row\n        inv = [dict(r) for r in con.execute(\n            'SELECT\
+  \ name, app_id, depends, recommends FROM applications')]\n        con.close()\n    except Exception:\n\
+  \        inv = []\n\n    # the rows of the current flow take part too (on the first run they are not\
+  \ in the DB yet)\n    seen = set()\n    allrows = []\n    for r in list(inv) + list(rows):\n       \
+  \ nm = (r.get(\"name\") or \"\").strip()\n        if not nm:\n            continue\n        k = (nm,\
+  \ (r.get(\"app_id\") or \"\").strip())\n        if k in seen:\n            continue\n        seen.add(k)\n\
+  \        allrows.append(r)\n\n    alias = {}\n    for r in allrows:\n        nm = (r.get(\"name\") or\
+  \ \"\").strip()\n        alias.setdefault(nm, nm)\n        aid = (r.get(\"app_id\") or \"\").strip()\n\
+  \        if aid:\n            alias.setdefault(aid, nm)\n\n    def tokens(r):\n        # WEAK DEPENDENCIES\
+  \ COUNT EQUALLY. Verified on btop: `dnf remove btop`\n        # also removes rocm-smi, because btop\
+  \ RECOMMENDS it and nothing else\n        # needs it. Counting only strong dependencies means showing\
+  \ an\n        # incomplete picture of what a removal would take with it.\n        # The kind of link\
+  \ is kept separately so that \"requires\" and\n        # \"recommends\" can be told apart.\n       \
+  \ raw = ((r.get(\"depends\") or \"\") + \" \" + (r.get(\"recommends\") or \"\")\n               ).replace(\"\
+  ,\", \" \")\n        for tok in raw.split():\n            if \"(\" in tok or \")\" in tok:\n       \
+  \         continue      # a capability like rtld(GNU_HASH) is not a package\n            tok = tok.strip()\n\
+  \            if not tok:\n                continue\n            t = alias.get(tok)\n            if t\
+  \ is None and \"/\" in tok:\n                t = alias.get(tok.split(\"/\", 1)[0])\n            if t:\n\
+  \                yield t\n\n    deps_of, req_by = {}, {}\n    for r in allrows:\n        nm = (r.get(\"\
+  name\") or \"\").strip()\n        d = set()\n        for t in tokens(r):\n            if t != nm:\n\
+  \                d.add(t)\n        deps_of[nm] = d\n        for t in d:\n            req_by.setdefault(t,\
+  \ set()).add(nm)\n\n    for r in rows:\n        nm = (r.get(\"name\") or \"\").strip()\n        d =\
+  \ deps_of.get(nm) or set()\n        rb = req_by.get(nm) or set()\n        r[\"deps_count\"] = len(d)\n\
+  \        r[\"required_by\"] = len(rb)\n        # who exactly needs the package - visible right in the\
+  \ row (the first 12 names)\n        r[\"required_by_names\"] = \", \".join(sorted(rb)[:12])\n    return\
+  \ rows\n"

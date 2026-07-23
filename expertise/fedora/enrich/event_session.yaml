@@ -3,71 +3,24 @@ id: LS-E-22
 type: enrichment
 version: 1.0.0
 title: Session and startup around the event
-# КОНТЕКСТ СОБЫТИЯ: в каком запуске системы оно произошло и был ли в это
-# время кто-то в системе. Одно и то же действие читается по-разному, когда
-# за машиной сидел пользователь и когда она стояла без сеанса.
-# Границы берём из состояния (таблицы boot_sessions и logins) — то есть из
-# того же конвейера, а не отдельным опросом системы.
-code: |
-  import sqlite3
-  from pathlib import Path
-
-  _CACHE = {}
-
-  def _load():
-      boots, sessions = [], []
-      try:
-          con = sqlite3.connect("file:%s?mode=ro" % (Path.home() /
-                                ".local/share/lisin/state.db"), uri=True)
-          try:
-              for bid, st, en in con.execute(
-                      "SELECT boot_id, started, ended FROM boot_sessions "
-                      "WHERE kind = 'boot' AND started <> ''"):
-                  boots.append((st or "", en or "", bid or ""))
-          except Exception:
-              pass
-          try:
-              for user, frm, start, end in con.execute(
-                      "SELECT user, host, start, until FROM logins"):
-                  if start:
-                      sessions.append((start, end or "", user or "", frm or ""))
-          except Exception:
-              pass
-          con.close()
-      except Exception:
-          pass
-      boots.sort()
-      # У ТЕКУЩЕГО ЗАПУСКА КОНЦА НЕТ. journalctl отдаёт «последнюю запись»,
-      # и она отстаёт от реального времени — по ней свежие события выпадали
-      # из своего же запуска.
-      if boots:
-          last = boots[-1]
-          boots[-1] = (last[0], "", last[2])
-      sessions.sort()
-      return boots, sessions
-
-  def _find(spans, ts):
-      # последний промежуток, начавшийся не позже события
-      hit = None
-      for span in spans:
-          if span[0] <= ts and (not span[1] or span[1] >= ts):
-              hit = span
-      return hit
-
-  def enrich(rows):
-      # границы читаем заново на каждый прогон: сеанс мог начаться минуту назад
-      boots, sessions = _load()
-      for r in rows:
-          ts = str(r.get("ts") or "")[:19].replace("Z", "")
-          if not ts:
-              continue
-          b = _find(boots, ts)
-          if b:
-              r["boot_id"] = b[2]
-              r["boot_at"] = b[0]
-          s = _find(sessions, ts)
-          if s:
-              r["session_user"] = s[2]
-              r["session_from"] = s[3]
-              r["session_started"] = s[0]
-      return rows
+code: "import sqlite3\nfrom pathlib import Path\n\n_CACHE = {}\n\ndef _load():\n    boots, sessions =\
+  \ [], []\n    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % (Path.home() /\n           \
+  \                   \".local/share/lisin/state.db\"), uri=True)\n        try:\n            for bid,\
+  \ st, en in con.execute(\n                    \"SELECT boot_id, started, ended FROM boot_sessions \"\
+  \n                    \"WHERE kind = 'boot' AND started <> ''\"):\n                boots.append((st\
+  \ or \"\", en or \"\", bid or \"\"))\n        except Exception:\n            pass\n        try:\n  \
+  \          for user, frm, start, end in con.execute(\n                    \"SELECT user, host, start,\
+  \ until FROM logins\"):\n                if start:\n                    sessions.append((start, end\
+  \ or \"\", user or \"\", frm or \"\"))\n        except Exception:\n            pass\n        con.close()\n\
+  \    except Exception:\n        pass\n    boots.sort()\n    # THE CURRENT BOOT HAS NO END. journalctl\
+  \ returns \"the last record\",\n    # and it lags behind real time - by it fresh events fell out of\
+  \ their\n    # own boot.\n    if boots:\n        last = boots[-1]\n        boots[-1] = (last[0], \"\"\
+  , last[2])\n    sessions.sort()\n    return boots, sessions\n\ndef _find(spans, ts):\n    # the last\
+  \ interval that started no later than the event\n    hit = None\n    for span in spans:\n        if\
+  \ span[0] <= ts and (not span[1] or span[1] >= ts):\n            hit = span\n    return hit\n\ndef enrich(rows):\n\
+  \    # the boundaries are re-read on every run: a session may have started a minute ago\n    boots,\
+  \ sessions = _load()\n    for r in rows:\n        ts = str(r.get(\"ts\") or \"\")[:19].replace(\"Z\"\
+  , \"\")\n        if not ts:\n            continue\n        b = _find(boots, ts)\n        if b:\n   \
+  \         r[\"boot_id\"] = b[2]\n            r[\"boot_at\"] = b[0]\n        s = _find(sessions, ts)\n\
+  \        if s:\n            r[\"session_user\"] = s[2]\n            r[\"session_from\"] = s[3]\n   \
+  \         r[\"session_started\"] = s[0]\n    return rows\n"

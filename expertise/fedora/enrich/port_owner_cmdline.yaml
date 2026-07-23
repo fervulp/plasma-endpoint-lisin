@@ -3,26 +3,26 @@ id: LS-E-23
 type: enrichment
 version: 1.0.0
 title: Recover socket owner from the process command line
-# ss показывает владельца только для своих процессов. Соединение демона под
-# другим пользователем остаётся без владельца. Если удалённый адрес стоит в
-# командной строке процесса отдельным аргументом — это и есть владелец.
-# Признак структурный, никаких имён программ.
+# ss shows the owner only for our own processes. A connection of a daemon running
+# as another user is left without an owner. If the remote address stands in the
+# command line of a process as a separate argument, that process is the owner.
+# The property is structural, no program names.
 code: |
   def enrich(rows):
-      """Восстановить владельца сокета, когда ss его не показал.
+      """Recover the owner of a socket when ss did not show it.
 
-      ss печатает users:(...) только для СВОИХ процессов. Соединение демона,
-      работающего под другим пользователем (openvpn под nm-openvpn, служба под
-      root), в снимке есть, а владелец пуст — и «кто это соединение открыл»
-      ответа не имело.
+      ss prints users:(...) only for OUR OWN processes. A connection of a daemon
+      running as another user (a VPN client under its own service account, a
+      service under root) is present in the snapshot but the owner is empty - and
+      "who opened this connection" had no answer.
 
-      Признак СТРУКТУРНЫЙ, а не список имён: если удалённый адрес соединения
-      встречается в КОМАНДНОЙ СТРОКЕ процесса (клиенту адрес сервера передают
-      аргументом: --remote, -H, host:port), то этот процесс и есть владелец.
-      Работает для любой программы, которой адрес назначения задан явно.
+      The property is STRUCTURAL, not a list of names: if the remote address of a
+      connection occurs in the COMMAND LINE of a process (a client is given the
+      server address as an argument: --remote, -H, host:port), then that process is
+      the owner. It works for any program given the destination explicitly.
 
-      Догадка помечается: process_source = "matched by command line", чтобы
-      точное совпадение от вероятного отличалось.
+      The guess is marked: process_source = "matched by command line", so that an
+      exact match is distinguished from a probable one.
       """
       import sqlite3
       from pathlib import Path
@@ -51,12 +51,12 @@ code: |
           if not host or host in ("0.0.0.0", "::", "127.0.0.1"):
               continue
           for pid, cmd in procs:
-              # адрес должен стоять в команде как отдельный аргумент,
-              # иначе «192.0.2.1» совпало бы с «192.0.2.10»
+              # the address must stand in the command as a separate argument,
+              # otherwise "192.0.2.1" would match "192.0.2.10"
               toks = cmd.replace("=", " ").replace(":", " ").split()
               if host not in toks:
                   continue
-              # порт в команде — подтверждение, но не требование
+              # the port in the command is a confirmation, not a requirement
               name = cmd.split()[0].rsplit("/", 1)[-1]
               r["process"] = "%s (%s)" % (name, pid)
               r["owner_cmd"] = cmd[:200]

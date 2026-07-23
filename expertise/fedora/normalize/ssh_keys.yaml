@@ -3,18 +3,34 @@ id: LS-N-25
 type: normalization_rule
 version: 4.0.1
 title: SSH keys
-code: "def normalize(text):\n    files, order = {}, []\n    for ln in text.split(\"\\n\"):\n        kv = ln.split(\"\\t\", 1)\n        if kv and kv[0] != \"\":\n            path = kv[0]\n            body\
-  \ = kv[1] if len(kv) > 1 else \"\"\n            if path not in files:\n                files[path] = body\n                order.append(path)\n            else:\n                files[path] = files[path]\
-  \ + \"\\n\" + body\n    rows = []\n    for path in order:\n        content = files[path]\n        if content == \"PRIVATE\":\n            rows.append({\"path\": path, \"kind\": \"private\", \"type\":\
-  \ \"private\",\n                         \"comment\": \"\", \"weak\": \"\", \"types\": \"private key\",\n                         \"count\": 1, \"key\": \"\"})\n        elif \"PRIVATE KEY\" in content:\n\
-  \            rows.append({\"path\": path, \"kind\": \"private\", \"type\": \"private\",\n                         \"comment\": \"\", \"weak\": \"\",\n                         \"types\": \"private key\
-  \ stored as .pub (!)\",\n                         \"count\": 1, \"key\": \"\"})\n        else:\n            # ЧЕЙ ЭТО КЛЮЧ И КАКОЙ. Формат публичного ключа задан OpenSSH:\n            # \"<алгоритм> <base64>\
-  \ [комментарий]\". Комментарий по умолчанию\n            # user@host — то есть кто и откуда его сгенерировал. Раньше мы\n            # хранили только сводку по алгоритмам, а владельца выбрасывали;\n \
-  \           # при разборе инцидента именно он и нужен.\n            ln0 = content.split(\"\\n\")\n            uniq, owners, weak = [], [], []\n            for l in ln0:\n                parts = l.strip().split(\"\
-  \ \", 2)\n                if not parts or not parts[0]:\n                    continue\n                t = parts[0]\n                if not (t.startswith(\"ssh-\") or t.startswith(\"ecdsa\")\n       \
-  \                 or t.startswith(\"sk-\")):\n                    continue\n                if t not in uniq:\n                    uniq.append(t)\n                if len(parts) > 2 and parts[2].strip():\n\
-  \                    c = parts[2].strip()\n                    if c not in owners:\n                        owners.append(c)\n                # длина ключа выводится из base64: 1 символ = 6 бит.\n   \
-  \             # ssh-rsa короче 2048 бит считается слабым (рекомендация\n                # OpenSSH и NIST SP 800-57) — это методика, а не список.\n                if t == \"ssh-rsa\" and len(parts) > 1:\n\
-  \                    bits = int(len(parts[1]) * 6 * 0.75)\n                    if bits and bits < 2048:\n                        weak.append(\"ssh-rsa ~%d bits\" % bits)\n            rows.append({\"path\"\
-  : path, \"kind\": \"public\",\n                         \"type\": \" \".join(uniq) if uniq else \"key\",\n                         \"comment\": \", \".join(owners[:6]),\n                         \"weak\"\
-  : \", \".join(weak),\n                         \"types\": \" \".join(uniq) if uniq else \"key\",\n                         \"count\": len(ln0), \"key\": content})\n    return rows\n"
+code: "def normalize(text):\n    files, order = {}, []\n    for ln in text.split(\"\\n\"):\n        kv\
+  \ = ln.split(\"\\t\", 1)\n        if kv and kv[0] != \"\":\n            path = kv[0]\n            body\
+  \ = kv[1] if len(kv) > 1 else \"\"\n            if path not in files:\n                files[path] =\
+  \ body\n                order.append(path)\n            else:\n                files[path] = files[path]\
+  \ + \"\\n\" + body\n    rows = []\n    for path in order:\n        content = files[path]\n        if\
+  \ content == \"PRIVATE\":\n            rows.append({\"path\": path, \"kind\": \"private\", \"type\"\
+  : \"private\",\n                         \"comment\": \"\", \"weak\": \"\", \"types\": \"private key\"\
+  ,\n                         \"count\": 1, \"key\": \"\"})\n        elif \"PRIVATE KEY\" in content:\n\
+  \            rows.append({\"path\": path, \"kind\": \"private\", \"type\": \"private\",\n          \
+  \               \"comment\": \"\", \"weak\": \"\",\n                         \"types\": \"private key\
+  \ stored as .pub (!)\",\n                         \"count\": 1, \"key\": \"\"})\n        else:\n   \
+  \         # WHOSE KEY THIS IS AND WHICH ONE. The public key format is set by OpenSSH:\n            #\
+  \ \"<algorithm> <base64> [comment]\". The comment defaults to user@host -\n            # that is, who\
+  \ generated it and where. We used to store only a summary\n            # by algorithm and threw the\
+  \ owner away; during an investigation it is\n            # exactly the owner that is needed.\n     \
+  \       ln0 = content.split(\"\\n\")\n            uniq, owners, weak = [], [], []\n            for l\
+  \ in ln0:\n                parts = l.strip().split(\" \", 2)\n                if not parts or not parts[0]:\n\
+  \                    continue\n                t = parts[0]\n                if not (t.startswith(\"\
+  ssh-\") or t.startswith(\"ecdsa\")\n                        or t.startswith(\"sk-\")):\n           \
+  \         continue\n                if t not in uniq:\n                    uniq.append(t)\n        \
+  \        if len(parts) > 2 and parts[2].strip():\n                    c = parts[2].strip()\n       \
+  \             if c not in owners:\n                        owners.append(c)\n                # the key\
+  \ length follows from the base64: 1 character = 6 bits.\n                # an ssh-rsa shorter than 2048\
+  \ bits counts as weak (the OpenSSH and\n                # NIST SP 800-57 recommendation) - that is a\
+  \ method, not a list.\n                if t == \"ssh-rsa\" and len(parts) > 1:\n                   \
+  \ bits = int(len(parts[1]) * 6 * 0.75)\n                    if bits and bits < 2048:\n             \
+  \           weak.append(\"ssh-rsa ~%d bits\" % bits)\n            rows.append({\"path\": path, \"kind\"\
+  : \"public\",\n                         \"type\": \" \".join(uniq) if uniq else \"key\",\n         \
+  \                \"comment\": \", \".join(owners[:6]),\n                         \"weak\": \", \".join(weak),\n\
+  \                         \"types\": \" \".join(uniq) if uniq else \"key\",\n                      \
+  \   \"count\": len(ln0), \"key\": content})\n    return rows\n"

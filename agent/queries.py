@@ -1,10 +1,10 @@
-"""Сохранённые запросы поиска по событиям.
+"""Saved event search queries.
 
-Живут в ЭКСПЕРТИЗЕ, но вне fedora: expertise/queries/<каталог>/<имя>.yaml.
-Это пользовательские объекты — их удобно раскладывать по каталогам
-(«Инциденты», «Сеть», «Логины»), делиться ими и держать под git, как и
-остальную экспертизу. Тип объекта — `query`, поэтому он виден в разделе
-«Экспертиза» наравне с правилами.
+They live in the EXPERTISE but outside fedora:
+expertise/queries/<directory>/<name>.yaml. These are user objects - it is
+convenient to arrange them in directories ("Incidents", "Network", "Logins"),
+share them and keep them under git, like the rest of the expertise. The object
+type is `query`, so it shows up in the "Expertise" section next to the rules.
 """
 import re
 from pathlib import Path
@@ -22,7 +22,7 @@ def _san(name: str) -> str:
 
 
 def dirs() -> list:
-    """Каталоги запросов (всегда есть хотя бы 'general')."""
+    """Query directories (there is always at least 'general')."""
     ROOT.mkdir(parents=True, exist_ok=True)
     out = sorted(p.name for p in ROOT.iterdir() if p.is_dir())
     return out or ["general"]
@@ -35,7 +35,7 @@ def make_dir(name: str) -> str:
 
 
 def save(directory: str, name: str, sql: str, description: str = "") -> str:
-    """Сохраняет запрос. Возвращает ref (путь от корня экспертизы)."""
+    """Saves a query. Returns the ref (path from the expertise root)."""
     d = _san(directory or "general")
     n = _san(name)
     (ROOT / d).mkdir(parents=True, exist_ok=True)
@@ -49,7 +49,7 @@ def save(directory: str, name: str, sql: str, description: str = "") -> str:
 
 
 def listing() -> list:
-    """Все сохранённые запросы: [{dir, name, title, sql, ref}]."""
+    """All saved queries: [{dir, name, title, sql, ref}]."""
     ROOT.mkdir(parents=True, exist_ok=True)
     out = []
     for f in sorted(ROOT.rglob("*.yaml")):

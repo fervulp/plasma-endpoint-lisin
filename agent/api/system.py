@@ -1,11 +1,11 @@
-"""Служебное: ошибки модулей, метрики, настройки, AI-помощник и чаты."""
+"""System: module errors, metrics, settings."""
 
 from PySide6.QtCore import Slot
 
 
 class SystemApi:
-    # Миксин Backend: слоты регистрируются в metaObject при
-    # наследовании Backend(QObject, ...) — проверено.
+    # A Backend mixin: the slots are registered in metaObject on
+    # inheritance Backend(QObject, ...) - verified.
 
     @Slot(result="QVariant")
     def errorsLog(self):
@@ -27,7 +27,7 @@ class SystemApi:
         from agent import metrics
         return metrics.resource_usage()
 
-    # -------- настройки --------
+    # -------- settings --------
     @Slot(result="QVariant")
     def getSettings(self):
         from agent import config
@@ -38,4 +38,4 @@ class SystemApi:
         from agent import config
         config.set_(key, value)
 
-    # -------- SQL-поиск по состоянию --------
+    # -------- SQL search over the state --------

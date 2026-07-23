@@ -3,8 +3,8 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 
-// Раздел «Дашборды» — отдельная вкладка верхнего уровня (не внутри State).
-// Дашбордов может быть несколько; выбранный по умолчанию — «State».
+// The "Dashboards" section - a separate top-level tab (not inside State).
+// There may be several dashboards; the default one is "State".
 Kirigami.Page {
     id: page
     title: "Dashboards"
@@ -16,7 +16,7 @@ Kirigami.Page {
         anchors.fill: parent
         spacing: 0
 
-        // список дашбордов слева — как вкладки в «Состоянии»
+        // the list of dashboards on the left - like the tabs in "State"
         Item {
             Layout.preferredWidth: Kirigami.Units.gridUnit * 11
             Layout.fillHeight: true

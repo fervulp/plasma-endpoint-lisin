@@ -68,7 +68,7 @@ ColumnLayout {
     }
 
     Kirigami.Separator { Layout.fillWidth: true }
-    RowLayout {   // управление снизу
+    RowLayout {   // controls at the bottom
         Layout.fillWidth: true
         Layout.margins: Kirigami.Units.smallSpacing
         QQC2.Label {

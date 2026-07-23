@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# Расширение доступа для агента LiSin. ЗАПУСКАТЬ ОТ ROOT:
-#     sudo packaging/lisin-grant-access <пользователь>
+# Access extension for the LiSin agent. RUN AS ROOT:
+#     sudo packaging/lisin-grant-access <user>
 #
-# Что делает и ЗАЧЕМ (каждый пункт закрывает конкретную дыру в данных):
-#   1) правила auditd на exec/файлы/логины  → заполнит process_*, file_*,
-#      source_ip у событий (сейчас их даёт только поллинг, короткие процессы
-#      теряются);
-#   2) группа для чтения /var/log/audit    → полный аудит вместо того куска,
-#      что пролезает через journald;
-#   3) systemd-юнит                        → агент собирает постоянно, а не
-#      пока открыто окно.
-# Ничего не делает молча: перед каждым шагом печатает, что именно меняет.
+# What it does and WHY (each item closes a specific gap in the data):
+#   1) auditd rules on exec/files/logins  -> fills process_*, file_*,
+#      source_ip on events (right now only polling provides them, and short
+#      lived processes are lost);
+#   2) a group that may read /var/log/audit -> the full audit instead of the
+#      slice that leaks through journald;
+#   3) a systemd unit                      -> the agent collects all the time,
+#      not only while the window is open.
+# It does nothing silently: before every step it prints what exactly it changes.
 set -euo pipefail
 USER_NAME="${1:-}"
-[ -z "$USER_NAME" ] && { echo "использование: $0 <пользователь>"; exit 1; }
-[ "$(id -u)" -eq 0 ] || { echo "нужен root: sudo $0 $USER_NAME"; exit 1; }
+[ -z "$USER_NAME" ] && { echo "usage: $0 <user>"; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "root required: sudo $0 $USER_NAME"; exit 1; }
 
 RULES=/etc/audit/rules.d/lisin.rules
-echo "==> 1/3 правила auditd -> $RULES"
+echo "==> 1/3 auditd rules -> $RULES"
 cat > "$RULES" <<'RULES'
-## LiSin: запуск процессов (даёт execve с аргументами и родителем)
+## LiSin: process execution (gives execve with arguments and the parent)
 -a always,exit -F arch=b64 -S execve,execveat -k lisin_exec
-## LiSin: изменение ключевых конфигов и путей автозапуска
+## LiSin: changes to key configuration files and autostart paths
 -w /etc/passwd    -p wa -k lisin_identity
 -w /etc/shadow    -p wa -k lisin_identity
 -w /etc/sudoers   -p wa -k lisin_identity
@@ -29,16 +29,16 @@ cat > "$RULES" <<'RULES'
 -w /etc/cron.d    -p wa -k lisin_persist
 -w /etc/systemd/system -p wa -k lisin_persist
 -w /etc/ld.so.preload  -p wa -k lisin_persist
-## LiSin: модули ядра
+## LiSin: kernel modules
 -a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k lisin_module
 RULES
 augenrules --load 2>/dev/null || service auditd restart 2>/dev/null || true
-echo "    загружено правил: $(auditctl -l | wc -l)"
+echo "    rules loaded: $(auditctl -l | wc -l)"
 
-echo "==> 2/3 доступ на чтение журнала аудита пользователю $USER_NAME"
+echo "==> 2/3 read access to the audit log for $USER_NAME"
 if getent group audit >/dev/null; then
   usermod -aG audit "$USER_NAME"
-  # log_group=audit заставляет auditd класть логи с группой audit
+  # log_group=audit makes auditd write the logs with the audit group
   if grep -q '^log_group' /etc/audit/auditd.conf; then
     sed -i 's/^log_group.*/log_group = audit/' /etc/audit/auditd.conf
   else
@@ -47,12 +47,12 @@ if getent group audit >/dev/null; then
   chgrp audit /var/log/audit /var/log/audit/* 2>/dev/null || true
   chmod 0750 /var/log/audit 2>/dev/null || true
   chmod 0640 /var/log/audit/audit.log 2>/dev/null || true
-  echo "    $USER_NAME добавлен в группу audit (нужен перелогин)"
+  echo "    $USER_NAME added to the audit group (a re-login is needed)"
 else
-  echo "    группы audit нет — пропускаю"
+  echo "    there is no audit group - skipping"
 fi
 
-echo "==> 3/3 systemd-юнит (сбор идёт постоянно, не только при открытом окне)"
+echo "==> 3/3 systemd unit (collection runs all the time, not only while the window is open)"
 cat > /etc/systemd/system/lisin-agent.service <<UNIT
 [Unit]
 Description=LiSin EDR agent (collector)
@@ -70,8 +70,8 @@ Restart=on-failure
 WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
-echo "    юнит создан. Включить: systemctl enable --now lisin-agent"
+echo "    unit created. Enable it with: systemctl enable --now lisin-agent"
 echo
-echo "ГОТОВО. Перелогиньтесь, чтобы группа audit применилась, и проверьте:"
-echo "  auditctl -l | head        # правила на месте"
-echo "  head -1 /var/log/audit/audit.log   # журнал читается"
+echo "DONE. Log out and back in so that the audit group applies, then check:"
+echo "  auditctl -l | head        # the rules are in place"
+echo "  head -1 /var/log/audit/audit.log   # the log is readable"

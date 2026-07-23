@@ -3,68 +3,39 @@ id: LS-N-18
 type: normalization_rule
 version: 2.0.0
 title: Login history
-# ВХОДЫ В СИСТЕМУ: кто, откуда, когда вошёл и когда вышел. Раньше всё время
-# лежало одной строкой «с - по (длительность)» — по ней нельзя ни отсортировать,
-# ни сопоставить с событием. Теперь отдельные колонки, время в UTC (как у
-# событий), а «ещё в системе» видно отдельным признаком.
-code: |
-  import re
-  from datetime import datetime, timezone
-
-  _TS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?")
-
-  def _utc(s):
-      if not s:
-          return ""
-      try:
-          d = datetime.fromisoformat(s)
-      except ValueError:
-          return ""
-      if d.tzinfo is None:
-          d = d.replace(tzinfo=timezone.utc)
-      return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-  def normalize(text):
-      rows = []
-      for line in (text or "").splitlines():
-          f = line.split()
-          if len(f) < 4 or f[0] in ("wtmp", "btmp", "reboot", ""):
-              continue
-          stamps = _TS.findall(line)
-          if not stamps:
-              continue
-          still = "still logged in" in line or "still running" in line
-          dur = ""
-          m = re.search(r"\((\d+\+)?[\d:]+\)", line)
-          if m:
-              dur = m.group(0).strip("()")
-          # у части строк `last` поля «откуда» нет — там сразу время
-          frm = f[2] if not _TS.match(f[2]) else ""
-          rows.append({
-              "user": f[0],
-              "tty": f[1],
-              "from": frm,
-              "start": _utc(stamps[0]),
-              "until": "" if still else (_utc(stamps[1]) if len(stamps) > 1 else ""),
-              "duration": dur,
-              "active": "yes" if still else "",
-          })
-      return rows
+code: "import re\nfrom datetime import datetime, timezone\n\n_TS = re.compile(r\"\\d{4}-\\d{2}-\\d{2}T\\\
+  d{2}:\\d{2}:\\d{2}(?:[+-]\\d{2}:\\d{2})?\")\n\ndef _utc(s):\n    if not s:\n        return \"\"\n  \
+  \  try:\n        d = datetime.fromisoformat(s)\n    except ValueError:\n        return \"\"\n    if\
+  \ d.tzinfo is None:\n        d = d.replace(tzinfo=timezone.utc)\n    return d.astimezone(timezone.utc).strftime(\"\
+  %Y-%m-%dT%H:%M:%SZ\")\n\ndef normalize(text):\n    rows = []\n    for line in (text or \"\").splitlines():\n\
+  \        f = line.split()\n        if len(f) < 4 or f[0] in (\"wtmp\", \"btmp\", \"reboot\", \"\"):\n\
+  \            continue\n        stamps = _TS.findall(line)\n        if not stamps:\n            continue\n\
+  \        still = \"still logged in\" in line or \"still running\" in line\n        dur = \"\"\n    \
+  \    m = re.search(r\"\\((\\d+\\+)?[\\d:]+\\)\", line)\n        if m:\n            dur = m.group(0).strip(\"\
+  ()\")\n        # some `last` rows have no \"from\" field - the time comes straight away\n        frm\
+  \ = f[2] if not _TS.match(f[2]) else \"\"\n        rows.append({\n            \"user\": f[0],\n    \
+  \        \"tty\": f[1],\n            \"from\": frm,\n            \"start\": _utc(stamps[0]),\n     \
+  \       \"until\": \"\" if still else (_utc(stamps[1]) if len(stamps) > 1 else \"\"),\n            \"\
+  duration\": dur,\n            \"active\": \"yes\" if still else \"\",\n        })\n    return rows\n"
 tests:
-  - name: вход с выходом
-    input: "local    pts/2        :0               2026-07-19T02:25:33+03:00 - 2026-07-19T02:27:19+03:00  (00:01)\n"
-    rows: 1
-    row0:
-      user: local
-      tty: pts/2
-      from: ":0"
-      start: 2026-07-18T23:25:33Z
-      until: 2026-07-18T23:27:19Z
-      active: ""
-  - name: сеанс ещё открыт
-    input: "local    tty2         :1               2026-07-22T09:00:00+03:00   still logged in\n"
-    rows: 1
-    row0:
-      start: 2026-07-22T06:00:00Z
-      until: ""
-      active: yes
+- name: a login with a logout
+  input: 'local    pts/2        :0               2026-07-19T02:25:33+03:00 - 2026-07-19T02:27:19+03:00  (00:01)
+
+    '
+  rows: 1
+  row0:
+    user: local
+    tty: pts/2
+    from: :0
+    start: 2026-07-18 23:25:33+00:00
+    until: 2026-07-18 23:27:19+00:00
+    active: ''
+- name: the session is still open
+  input: 'local    tty2         :1               2026-07-22T09:00:00+03:00   still logged in
+
+    '
+  rows: 1
+  row0:
+    start: 2026-07-22 06:00:00+00:00
+    until: ''
+    active: true

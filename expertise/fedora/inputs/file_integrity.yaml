@@ -3,11 +3,11 @@ id: LS-I-43
 type: input
 version: 1.0.0
 title: File integrity (rpm verify)
-# ЦЕЛОСТНОСТЬ ФАЙЛОВ без root и без audit-правил: rpm сверяет установленные
-# файлы с эталоном из базы пакетов (размер, контрольная сумма, права,
-# владелец, mtime, capabilities). Ограничиваемся конфигами (--configfiles):
-# полная проверка считает хэши всех файлов системы и идёт минутами, а конфиги
-# проверяются за доли секунды и именно они интересны для безопасности.
+# FILE INTEGRITY without root and without audit rules: rpm compares the installed
+# files with the reference from the package database (size, checksum, permissions,
+# owner, mtime, capabilities). We limit ourselves to configs (--configfiles): a
+# full check hashes every file of the system and takes minutes, while the configs
+# are checked in a fraction of a second and they are the interesting ones.
 command: rpm -Va --configfiles --nodeps --noscripts 2>/dev/null
 interval: 900
 enabled: true

@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
-# ПОДПИСЬ ПАКЕТА LiSin.
+# SIGNING THE LiSin PACKAGE.
 #
-# Пакет собирается неподписанным (packaging/build-rpm.sh). Подпись нужна,
-# когда пакет ставят НЕ на этой машине: без неё dnf на целевой системе не
-# может проверить, что пакет не подменили по дороге, и требует --nogpgcheck.
+# The package is built unsigned (packaging/build-rpm.sh). A signature is needed
+# when the package is installed on ANOTHER machine: without it dnf on the target
+# system cannot verify that the package was not tampered with on the way, and
+# demands --nogpgcheck.
 #
-# Требуется один раз от root:
+# Needed once, as root:
 #     sudo dnf install rpm-sign
 #
-# Дальше всё делается под обычным пользователем.
+# Everything else is done as a normal user.
 #
-#   ./packaging/sign-rpm.sh --make-key      # создать ключ подписи (один раз)
-#   ./packaging/sign-rpm.sh                 # подписать свежий пакет
-#   ./packaging/sign-rpm.sh --export        # выгрузить открытый ключ для целевой машины
+#   ./packaging/sign-rpm.sh --make-key      # create the signing key (once)
+#   ./packaging/sign-rpm.sh                 # sign the freshly built package
+#   ./packaging/sign-rpm.sh --export        # export the public key for the target machine
 #
-# Переменные:
-#   KEY_NAME  — имя владельца ключа (по умолчанию LiSin packaging)
-#   KEY_MAIL  — адрес в ключе
-#   RPM_FILE  — какой пакет подписывать (по умолчанию последний собранный)
+# Variables:
+#   KEY_NAME  - the name of the key owner (LiSin packaging by default)
+#   KEY_MAIL  - the address inside the key
+#   RPM_FILE  - which package to sign (the last built one by default)
 set -euo pipefail
 
 KEY_NAME="${KEY_NAME:-LiSin packaging}"
@@ -27,38 +28,38 @@ RPM_FILE="${RPM_FILE:-$(ls -t "$RPM_DIR"/lisin-*.rpm 2>/dev/null | head -1 || tr
 
 need_rpmsign() {
     command -v rpmsign >/dev/null || {
-        echo "Нет rpmsign. Установите: sudo dnf install rpm-sign" >&2
+        echo "No rpmsign. Install it: sudo dnf install rpm-sign" >&2
         exit 1
     }
 }
 
 case "${1:-}" in
 --make-key)
-    # ПАРОЛЬНАЯ ФРАЗА СПРАШИВАЕТСЯ gpg: ключ без пароля подписывает молча,
-    # то есть любой, кто получил доступ к ~/.gnupg, подпишет что угодно от
-    # вашего имени. Осознанный выбор оставлен за вами.
+    # THE PASSPHRASE IS ASKED BY gpg: a key without one signs silently, which
+    # means anyone who gets access to ~/.gnupg can sign anything in your name.
+    # The choice is deliberately left to you.
     gpg --full-generate-key
     echo
-    echo "Готово. Теперь пропишите ключ в макросы rpm:"
+    echo "Done. Now register the key in the rpm macros:"
     echo "  echo '%_gpg_name $KEY_NAME' >> ~/.rpmmacros"
     ;;
 --export)
     gpg --armor --export "$KEY_NAME" > RPM-GPG-KEY-lisin
-    echo "Открытый ключ: $(pwd)/RPM-GPG-KEY-lisin"
-    echo "На целевой машине:"
+    echo "Public key: $(pwd)/RPM-GPG-KEY-lisin"
+    echo "On the target machine:"
     echo "  sudo rpm --import RPM-GPG-KEY-lisin"
     ;;
 *)
     need_rpmsign
-    [ -n "$RPM_FILE" ] || { echo "Пакет не найден в $RPM_DIR" >&2; exit 1; }
+    [ -n "$RPM_FILE" ] || { echo "No package found in $RPM_DIR" >&2; exit 1; }
     grep -q "_gpg_name" ~/.rpmmacros 2>/dev/null || {
-        echo "В ~/.rpmmacros нет _gpg_name — укажите ключ:" >&2
+        echo "There is no _gpg_name in ~/.rpmmacros - name the key:" >&2
         echo "  echo '%_gpg_name $KEY_NAME' >> ~/.rpmmacros" >&2
         exit 1
     }
     rpmsign --addsign "$RPM_FILE"
     echo
-    # ПРОВЕРКА, А НЕ ВЕРА НА СЛОВО: подпись должна читаться из самого пакета
+    # VERIFY, DO NOT TAKE IT ON TRUST: the signature must be readable from the package itself
     rpm -qip "$RPM_FILE" | grep -i signature
     rpm --checksig "$RPM_FILE"
     ;;

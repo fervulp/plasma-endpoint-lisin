@@ -1,4 +1,4 @@
-"""Метрики хоста и потребление ресурсов LiSin."""
+"""Host metrics and LiSin resource usage."""
 import collections
 import os
 import subprocess
@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 class Sampler:
-    """Сэмплер CPU/RAM: скользящее окно 30 мин по 10 с."""
+    """CPU/RAM sampler: a sliding 30 minute window sampled every 10 seconds."""
 
     def __init__(self):
         self.series = collections.deque(maxlen=181)

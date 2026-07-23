@@ -2,19 +2,19 @@ name: file_perm_changed
 id: LS-FN-11
 type: finding
 version: 1.0.0
-title: Права на файлах пакетов изменены
+title: Permissions changed on packaged files
 severity: medium
 source: events
 sql: SELECT ts, file_path, event_action, subject_name, process_name FROM events WHERE event_module='fim'
   AND event_action IN ('file_permissions_changed','file_caps_changed') ORDER BY ts DESC LIMIT 200
 evidence: '{ts}  {file_path}  ({event_action}, {subject_name})'
-why: 'rpm сверил файлы с эталоном из пакета: права или capabilities отличаются от установленных. Так выглядит
-  и ручная правка, и закрепление атакующего.'
-action: Сравните с эталоном (rpm -V <пакет>) и верните исходные права или объясните расхождение.
+why: 'rpm compared the files with the package reference: the permissions or the capabilities differ from
+  what was installed. That is what both a manual edit and an attacker gaining persistence look like.'
+action: Compare with the reference (rpm -V <package>) and restore the original permissions, or explain the difference.
 explore_table: ''
 explore_col: ''
 explore_val: ''
 tag: integrity
 time_col: ts
 basis: mismatch
-reference: Расхождение с эталоном пакета (rpm -Va)
+reference: A divergence from the package reference (rpm -Va)

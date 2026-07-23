@@ -3,7 +3,7 @@ id: LS-I-34
 type: input
 version: 1.0.0
 title: at jobs
-# Разовые задания at → в таблицу scheduled (kind=at).
+# One-off at jobs -> the scheduled table (kind=at).
 command: |
   if command -v atq >/dev/null 2>&1; then
     atq 2>/dev/null | while read -r jid rest; do

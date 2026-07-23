@@ -3,13 +3,22 @@ id: LS-N-15
 type: normalization_rule
 version: 1.1.0
 title: Scheduled
-code: "def normalize(text):\n    p1 = text.split(\"---USER---\")\n    sysj = p1[0]\n    rest = p1[1] if len(p1) > 1 else \"\"\n    p2 = rest.split(\"---UFILES---\")\n    userj = p2[0]\n    ufiles = p2[1]\
-  \ if len(p2) > 1 else \"\"\n    def load(s):\n        try:\n            return json.loads(s) or []\n        except Exception:\n            return []\n    def _us(v):\n        \"\"\"микросекунды эпохи\
-  \ -> человеческое время; 0 и мусор -> пусто\"\"\"\n        try:\n            n = int(v)\n        except (TypeError, ValueError):\n            return \"\"\n        if n <= 0 or n > 4102444800000000:  \
-  \    # позже 2100 года = «никогда»\n            return \"\"\n        import datetime\n        return datetime.datetime.fromtimestamp(\n            n / 1000000).strftime(\"%Y-%m-%d %H:%M\")\n\n    rows\
-  \ = []\n    for scope, blk in ((\"system\", sysj), (\"user\", userj)):\n        for t in load(blk):\n            # systemctl отдаёт next/last в микросекундах от эпохи — мы их\n            # выбрасывали,\
-  \ хотя «когда сработает в следующий раз» это как раз\n            # то, ради чего смотрят на таймеры (положение 6: время обязательно)\n            rows.append({\"kind\": \"timer\", \"name\": t.get(\"\
-  unit\", \"\"), \"scope\": scope,\n                         \"detail\": \"activates \" + t.get(\"activates\", \"\"),\n                         \"next\": _us(t.get(\"next\")), \"last\": _us(t.get(\"last\"\
-  )),\n                         \"source\": \"\", \"content\": \"\"})\n    for ln in ufiles.split(\"\\n\"):\n        path = ln.strip()\n        if path:\n            rows.append({\"kind\": \"timer\", \"\
-  name\": path.split(\"/\")[-1], \"scope\": \"user\",\n                         \"detail\": \"~/.config unit\", \"next\": \"\", \"last\": \"\",\n                         \"source\": path, \"content\": \"\
-  \"})\n    return rows\n"
+code: "def normalize(text):\n    p1 = text.split(\"---USER---\")\n    sysj = p1[0]\n    rest = p1[1] if\
+  \ len(p1) > 1 else \"\"\n    p2 = rest.split(\"---UFILES---\")\n    userj = p2[0]\n    ufiles = p2[1]\
+  \ if len(p2) > 1 else \"\"\n    def load(s):\n        try:\n            return json.loads(s) or []\n\
+  \        except Exception:\n            return []\n    def _us(v):\n        \"\"\"epoch microseconds\
+  \ -> human time; 0 and rubbish -> empty\"\"\"\n        try:\n            n = int(v)\n        except\
+  \ (TypeError, ValueError):\n            return \"\"\n        if n <= 0 or n > 4102444800000000:    \
+  \  # later than the year 2100 = \"never\"\n            return \"\"\n        import datetime\n      \
+  \  return datetime.datetime.fromtimestamp(\n            n / 1000000).strftime(\"%Y-%m-%d %H:%M\")\n\n\
+  \    rows = []\n    for scope, blk in ((\"system\", sysj), (\"user\", userj)):\n        for t in load(blk):\n\
+  \            # systemctl returns next/last in epoch microseconds - we used to throw\n            # them\
+  \ away, although \"when it fires next\" is exactly what people look\n            # at timers for (principle\
+  \ 6: the time is mandatory)\n            rows.append({\"kind\": \"timer\", \"name\": t.get(\"unit\"\
+  , \"\"), \"scope\": scope,\n                         \"detail\": \"activates \" + t.get(\"activates\"\
+  , \"\"),\n                         \"next\": _us(t.get(\"next\")), \"last\": _us(t.get(\"last\")),\n\
+  \                         \"source\": \"\", \"content\": \"\"})\n    for ln in ufiles.split(\"\\n\"\
+  ):\n        path = ln.strip()\n        if path:\n            rows.append({\"kind\": \"timer\", \"name\"\
+  : path.split(\"/\")[-1], \"scope\": \"user\",\n                         \"detail\": \"~/.config unit\"\
+  , \"next\": \"\", \"last\": \"\",\n                         \"source\": path, \"content\": \"\"})\n\
+  \    return rows\n"

@@ -18,9 +18,9 @@ Kirigami.ApplicationWindow {
     }
     Component.onCompleted: backend.reload()   // input scheduling lives in the backend
 
-    // Переход «исследовать в состоянии»: событие → нужная таблица State,
-    // отфильтрованная по значению. Счётчик n нужен, чтобы повторный клик по
-    // тому же значению тоже менял свойство и обработчик сработал.
+    // The "explore in state" jump: an event -> the right State table, filtered by
+    // the value. The counter n is needed so that clicking the same value again
+    // also changes the property and the handler fires.
     property var stateFocus: null
     function focusState(table, col, val) {
         stateFocus = { table: table, col: col, val: String(val),
@@ -28,9 +28,9 @@ Kirigami.ApplicationWindow {
         open("state")
     }
 
-    // Переход в «События» с готовым условием WHERE. Счётчик n нужен по той
-    // же причине, что и в focusState: повторный клик по тому же значению не
-    // менял бы свойство, и обработчик не сработал бы.
+    // A jump into "Events" with a ready WHERE condition. The counter n is needed
+    // for the same reason as in focusState: clicking the same value again would
+    // not change the property and the handler would not fire.
     property var eventFocus: null
     function focusEvents(where) {
         eventFocus = { where: String(where),
@@ -38,17 +38,17 @@ Kirigami.ApplicationWindow {
         open("events")
     }
 
-    // Переход в КОНКРЕТНУЮ цепочку (из раздела «Изменения»): показать, что
-    // происходило вокруг этого перехода состояния.
+    // A jump into a SPECIFIC chain: show what was happening around this state
+    // transition.
     property var chainFocus: null
     function focusChain(cid) {
         chainFocus = { id: String(cid), n: (chainFocus ? chainFocus.n + 1 : 1) }
         open("events")
     }
 
-    // Переход «показать процесс в графе»: из события — к дашборду, где этот
-    // процесс стоит в центре. Работает, только пока процесс жив; проверку
-    // делает вызывающая сторона (livePids).
+    // The "show the process in the graph" jump: from an event to the dashboard
+    // where this process is in the centre. It works only while the process is
+    // alive; the check is done by the caller (livePids).
     property var processFocus: null
     function focusProcess(pid) {
         processFocus = { pid: String(pid),
@@ -76,7 +76,7 @@ Kirigami.ApplicationWindow {
     globalDrawer: Kirigami.GlobalDrawer {
         modal: false
         collapsible: true
-        // серый фон на всю высоту (Window-палитра), белым остаётся контент
+        // a grey background over the full height (the Window palette), the content stays light
         Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
 

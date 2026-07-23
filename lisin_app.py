@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""LiSin — лёгкий локальный EDR для Fedora. Kirigami GUI.
+"""LiSin - a lightweight local EDR for Fedora. Kirigami GUI.
 
-Запуск (важно обойти pip-PySide6 из user site):
+Start it (it is important to bypass a pip-installed PySide6 from the user site):
   PYTHONNOUSERSITE=1 QT_QUICK_CONTROLS_STYLE=org.kde.desktop python3 lisin_app.py
 
-Backend собран из МИКСИНОВ по разделам (agent/api/): состояние, события,
-дашборды, экспертиза, служебное. Здесь остаётся только ядро — планировщик
-конвейера, сбор ошибок и запуск окна. Чтобы добавить слот, правь нужный
-миксин, а не этот файл.
+The Backend is assembled from MIXINS by section (agent/api/): state, events,
+dashboards, expertise, system. Only the core stays here - the pipeline
+scheduler, error collection and starting the window. To add a slot, edit the
+relevant mixin, not this file.
 """
 import sys
 import threading
@@ -26,11 +26,11 @@ from agent.statedb import StateDB
 
 class Backend(QObject, StateApi, EventsApi, DashboardApi, ExpertiseApi,
               SystemApi):
-    """Мост QML ↔ агент. Сами слоты живут в миксинах agent/api/*."""
+    """The QML <-> agent bridge. The slots themselves live in agent/api/*."""
 
     stateReady = Signal("QVariant")
     pipelineReady = Signal("QVariant")
-    # идёт ли сейчас сбор по требованию (кнопка «Collect now»)
+    # whether an on-demand collection is running right now (the "Collect now" button)
     collectingChanged = Signal()
 
     def __init__(self):
@@ -46,7 +46,7 @@ class Backend(QObject, StateApi, EventsApi, DashboardApi, ExpertiseApi,
         self._last_sample = 0.0
         threading.Thread(target=self._scheduler, daemon=True).start()
 
-    # -------- планировщик точек входа + сэмплер метрик --------
+    # -------- the input scheduler + the metrics sampler --------
     def _scheduler(self):
         while True:
             now = time.time()
@@ -60,7 +60,7 @@ class Backend(QObject, StateApi, EventsApi, DashboardApi, ExpertiseApi,
             time.sleep(2)
 
     def _collect_errors(self):
-        # поток ошибок модулей EDR: ошибки узлов конвейера + парсинга YAML
+        # the error stream of the EDR modules: pipeline node errors + YAML parsing
         for (pipe, node), st in self.pipe.status.items():
             if st.get("error"):
                 sig = (pipe, node, st["error"])
@@ -90,7 +90,7 @@ class Backend(QObject, StateApi, EventsApi, DashboardApi, ExpertiseApi,
 
 
 def _acquire_single_instance() -> bool:
-    """Единственный писатель: второй экземпляр не стартует (не затирает БД)."""
+    """A single writer: a second instance does not start (it would clobber the DB)."""
     global _instance_lock
     import fcntl
     lock_path = Path.home() / ".local/share/lisin/lisin.lock"
@@ -105,8 +105,8 @@ def _acquire_single_instance() -> bool:
 
 def main():
     if not _acquire_single_instance():
-        sys.stderr.write("LiSin уже запущен — второй экземпляр не стартует "
-                         "(во избежание затирания БД). Закройте первый.\n")
+        sys.stderr.write("LiSin is already running - a second instance will not "
+                         "start (to avoid clobbering the database). Close the first one.\n")
         sys.exit(1)
 
     app = QGuiApplication(sys.argv)

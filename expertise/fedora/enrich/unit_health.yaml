@@ -3,8 +3,8 @@ id: LS-E-10
 type: enrichment
 version: 1.0.0
 title: Service health link
-# СВЯЗЬ СЕРВИСА С ЕГО СОСТОЯНИЕМ: помечаем юниты, которые сейчас в failed.
-# Таблица services говорит «enabled», но не говорит «упал» — теперь говорит.
+# LINKING A SERVICE WITH ITS STATE: we mark the units that are currently failed.
+# The services table said "enabled" but not "it crashed" - now it does.
 code: |
   def enrich(rows):
       import sqlite3

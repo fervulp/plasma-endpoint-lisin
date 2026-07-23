@@ -1,0 +1,20 @@
+name: file_perm_burst
+id: LS-C-3
+type: correlation_rule
+version: 1.0.0
+title: A burst of permission changes on packaged files
+severity: medium
+tactic: defense_evasion
+technique: T1222
+category: file
+enabled: true
+# A single divergence from the package reference happens after a manual config
+# edit. But several at once in a short window is a sign of a script changing
+# permissions in bulk (including for persistence).
+where: >-
+  event_module = 'fim'
+  AND event_action IN ('file_permissions_changed', 'file_caps_changed')
+group_by: []
+threshold: 3
+window: 3600
+message: "Permissions changed at once on {count} packaged files"

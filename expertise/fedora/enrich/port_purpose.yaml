@@ -3,20 +3,20 @@ id: LS-E-5
 type: enrichment
 version: 2.0.0
 title: Port meaning (from /etc/services + owning package)
-# ЧТО ЗА ПОРТ И ЗАЧЕМ — ИЗ СИСТЕМЫ, без рукописного списка портов.
-# Источник 1: /etc/services (11 тыс. строк) — официальное имя службы и
-#   комментарий IANA к порту.
-# Источник 2: пакет процесса, который реально слушает порт, — его описание
-#   говорит, ЗАЧЕМ порт открыт именно здесь (обогащение proc_purpose уже
-#   положило описание в processes, тут читаем его из БД состояния).
-# Риск не выдумываем: он выводится из того, КУДА смотрит сокет
-# (exposure) и приватный ли адрес — это факт, а не мнение.
+# WHAT A PORT IS AND WHAT FOR - FROM THE SYSTEM, without a hand-written port list.
+# Source 1: /etc/services (11 thousand lines) - the official service name and the
+#   IANA comment for the port.
+# Source 2: the package of the process that actually listens on the port - its
+#   description says WHY the port is open here (the proc_purpose enrichment has
+#   already put the description into processes, here we read it from the state database).
+# We do not invent the risk: it follows from WHERE the socket faces (exposure) and
+# whether the address is private - that is a fact, not an opinion.
 code: |
   def enrich(rows):
       import sqlite3
       from pathlib import Path
 
-      # 1) /etc/services: (порт, протокол) -> (имя, комментарий)
+      # 1) /etc/services: (port, protocol) -> (name, comment)
       svc = {}
       try:
           for ln in open("/etc/services", errors="replace"):
@@ -32,7 +32,7 @@ code: |
       except OSError:
           pass
 
-      # 2) описание пакета процесса-владельца (его положил proc_purpose)
+      # 2) the package description of the owning process (put there by proc_purpose)
       owner = {}
       try:
           db = Path.home() / ".local/share/lisin/state.db"
@@ -51,14 +51,14 @@ code: |
           proto = str(r.get("proto") or "").replace("6", "")
           name, comment = svc.get((port, proto), ("", ""))
           r["service"] = name
-          # чей это порт на самом деле — важнее словарного описания
+          # whose port it actually is matters more than a dictionary description
           m = re.search(r"\((\d+)\)\s*$", str(r.get("process") or ""))
           own = owner.get(m.group(1)) if m else None
-          # ВАЖНО: имя из /etc/services достоверно только для well-known портов
-          # (<1024). Для 15000 реестр скажет «hydap», хотя порт слушает наш
-          # процесс, — такое «назначение» хуже пустого. Поэтому назначение даём
-          # либо от реального владельца, либо от IANA для well-known, иначе
-          # оставляем пустым и не выдумываем.
+          # IMPORTANT: the name from /etc/services is reliable only for well-known
+          # ports (<1024). For 15000 the registry says "hydap" although our own
+          # process listens there - such a "purpose" is worse than an empty one. So
+          # we take the purpose either from the real owner or from IANA for
+          # well-known ports, otherwise we leave it empty and invent nothing.
           try:
               pnum = int(port)
           except (TypeError, ValueError):
@@ -69,7 +69,7 @@ code: |
               r["service_purpose"] = comment
           else:
               r["service_purpose"] = ""
-          # риск — из факта доступности, а не из мнения о номере порта
+          # the risk comes from the fact of exposure, not from an opinion about the port number
           exp = str(r.get("exposure") or "")
           if exp.startswith("OPEN"):
               r["service_risk"] = "high"

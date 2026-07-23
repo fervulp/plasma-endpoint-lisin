@@ -1,4 +1,4 @@
-"""Экспертиза и конвейеры: каталог, CRUD правил, граф, запуск и тесты правил."""
+"""Expertise and pipelines: the catalogue, rule CRUD, the graph, running and testing rules."""
 import json
 import threading
 from pathlib import Path
@@ -10,8 +10,8 @@ from agent.pipeline import EXPERTISE
 
 
 class ExpertiseApi:
-    # Миксин Backend: слоты регистрируются в metaObject при
-    # наследовании Backend(QObject, ...) — проверено.
+    # A Backend mixin: the slots are registered in metaObject on
+    # inheritance Backend(QObject, ...) - verified.
 
     @Slot(result="QVariant")
     def pipelinesInfo(self):
@@ -23,7 +23,7 @@ class ExpertiseApi:
 
     @Slot(str, result="QVariant")
     def pipelineFlows(self, name):
-        # конвейер как список потоков (витрина вместо графа)
+        # the pipeline as a list of flows (a showcase instead of the graph)
         return self.pipe.flows(name)
 
     @Slot(str, result="QVariant")
@@ -32,7 +32,7 @@ class ExpertiseApi:
 
     @Slot(str, str, result="QVariant")
     def nodePeek(self, pipe, node_id):
-        # последнее выполнение узла: что пришло / что ушло
+        # the last execution of a node: what came in / what went out
         p = self.pipe.peek.get((pipe, node_id), {})
         import json as _j
         def fmt_rows(rows):
@@ -61,12 +61,12 @@ class ExpertiseApi:
 
     @Slot(str, str)
     def savePipelineLayout(self, name, graph_json):
-        """Сохранить ТОЛЬКО координаты узлов рабочего конвейера.
+        """Save ONLY the coordinates of the nodes of the working pipeline.
 
-        Перетаскивание — оформление, а не изменение конвейера: связи и
-        привязки не меняются. Поэтому раскладка пишется сразу в рабочий
-        файл, без черновика и без «применить конфигурацию» — иначе, чтобы
-        просто разложить узлы поудобнее, пришлось бы входить в режим правки.
+        Dragging is presentation, not a change of the pipeline: the edges and the
+        bindings do not change. So the layout is written straight into the working
+        file, with no draft and no "apply configuration" - otherwise, just to lay
+        the nodes out more conveniently, one would have to enter edit mode.
         """
         g = json.loads(graph_json)
         pos = {n["id"]: (n.get("x", 0), n.get("y", 0))
@@ -83,7 +83,7 @@ class ExpertiseApi:
         self.pipe.discard_draft(name)
         self._emit_pipe()
 
-    # -------- детали процесса (EDR-обзор) --------
+    # -------- process details (the EDR overview) --------
     @Slot(str)
     def createPipeline(self, title):
         self.pipe.create_pipeline(title)
@@ -102,7 +102,7 @@ class ExpertiseApi:
         self.pipe.set_enabled(ref, enabled)
         self._emit_pipe()
 
-    # -------- AI-помощник --------
+    # -------- helper --------
     @Slot(result="QVariant")
     def expertiseDirs(self):
         return self.pipe.expertise_dirs()
@@ -219,13 +219,13 @@ class ExpertiseApi:
         self._emit_pipe()
         return ""
 
-    # -------- правки БД состояния --------
+    # -------- edits to the state database --------
 
-    # -------- запуск и тесты правила прямо из UI --------
+    # -------- running and testing a rule straight from the UI --------
     @Slot(str, str, result="QVariant")
     def ruleRun(self, ref, sample):
-        """«Выполнить сейчас»: прогнать правило на живом входе (или на
-        вставленном образце) и вернуть получившиеся строки."""
+        """"Run now": execute the rule against the live input (or against a
+        pasted sample) and return the resulting rows."""
         from agent import ruletest
         try:
             return ruletest.run_now(self.pipe, ref, sample or "")
@@ -234,7 +234,7 @@ class ExpertiseApi:
 
     @Slot(str, result="QVariant")
     def ruleTests(self, ref):
-        """Прогнать секцию tests: внутри правила (приём из R-Vision)."""
+        """Run the tests: section inside the rule (a technique from R-Vision)."""
         from agent import ruletest
         try:
             return ruletest.run_tests(self.pipe, ref)
@@ -243,7 +243,7 @@ class ExpertiseApi:
 
     @Slot(str, result="QVariant")
     def ruleInput(self, ref):
-        """Какая точка входа подключена к правилу (для подсказки в UI)."""
+        """Which input is connected to the rule (for a hint in the UI)."""
         from agent import ruletest
         try:
             return ruletest.input_for(self.pipe, ref)

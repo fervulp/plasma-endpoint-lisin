@@ -3,7 +3,7 @@ id: LS-N-38
 type: normalization_rule
 version: 1.0.0
 title: Persistence surface
-# vector<TAB>path<TAB>detail → строка. Python-плагин.
+# vector<TAB>path<TAB>detail -> a row. A Python plugin.
 code: |
   def normalize(text):
       rows = []

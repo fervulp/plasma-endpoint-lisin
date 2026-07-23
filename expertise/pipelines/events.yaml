@@ -68,7 +68,7 @@ nodes:
   y: 680
 - id: cor_detect
   kind: correlation
-  ref: detections/exec_from_temp
+  ref: correlation/exec_from_temp
   x: 1000
   y: 40
 - id: en_file_pkg
@@ -96,6 +96,21 @@ nodes:
   ref: fedora/enrich/event_process_link
   x: 1080
   y: 1080
+- id: co_auth_bruteforce
+  kind: correlation
+  ref: correlation/auth_bruteforce
+  x: 1000
+  y: 160
+- id: co_external_beacon
+  kind: correlation
+  ref: correlation/external_beacon
+  x: 1000
+  y: 280
+- id: co_file_perm_burst
+  kind: correlation
+  ref: correlation/file_perm_burst
+  x: 1000
+  y: 400
 edges:
 - - in_journal
   - no_journal
@@ -133,3 +148,9 @@ edges:
   - out_events
 - - en_proc_link
   - en_session
+- - out_events
+  - co_auth_bruteforce
+- - out_events
+  - co_external_beacon
+- - out_events
+  - co_file_perm_burst

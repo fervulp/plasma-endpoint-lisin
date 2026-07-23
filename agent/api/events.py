@@ -1,11 +1,11 @@
-"""События: лента, SQL-условия, группировка, история и сохранённые запросы."""
+"""Events: the feed, SQL conditions, grouping, history and saved queries."""
 import re
 
 from PySide6.QtCore import Slot
 
-# --- приём из RQL R-Vision: поиск по подсетям оператором IN ---
-# В RQL пишут `sourceIp IN '192.0.2.0/24'`. SQLite про IP ничего не знает,
-# поэтому переводим CIDR в префиксный LIKE (для /8, /16, /24 и /32).
+# --- a technique from R-Vision RQL: subnet search with the IN operator ---
+# In RQL one writes `sourceIp IN '192.0.2.0/24'`. SQLite knows nothing about IP,
+# so we translate the CIDR into a prefix LIKE (for /8, /16, /24 and /32).
 _CIDR_RE = re.compile(
     r"""(?i)\b("?\w+"?)\s+(NOT\s+)?IN\s+'(\d{1,3}(?:\.\d{1,3}){3})/(\d{1,2})'""")
 
@@ -23,24 +23,24 @@ def _rql_cidr(where: str) -> str:
         elif bits == 8:
             pat = o[0] + ".%"
         else:
-            return m.group(0)      # нестандартный префикс — оставляем как есть
+            return m.group(0)      # a non-standard prefix is left as it is
         op = "NOT LIKE" if neg.strip() else "LIKE"
         return f"{field} {op} '{pat}'"
     return _CIDR_RE.sub(sub, where or "")
 
 
-# сколько строк просматривает статистика полей: порог показывается в UI
+# how many rows the field statistics scans: the limit is shown in the UI
 SCAN_LIMIT = 20000
 
 
 class EventsApi:
-    # Миксин Backend: слоты регистрируются в metaObject при
-    # наследовании Backend(QObject, ...) — проверено.
+    # A Backend mixin: the slots are registered in metaObject on
+    # inheritance Backend(QObject, ...) - verified.
 
-    # -------- цепочки событий --------
-    # Отдельная запись почти ничего не значит; значение появляется, когда
-    # видна последовательность. Цепочка связывает события родословной
-    # процессов (а где процесса нет — по пользователю, и это помечается).
+    # -------- event chains --------
+    # A separate record means almost nothing; the meaning appears when the
+    # sequence is visible. A chain links events by process ancestry (and where
+    # there is no process, by user, which is marked as such).
     @Slot(result="QVariant")
     def eventChains(self):
         from agent import chains
@@ -59,8 +59,8 @@ class EventsApi:
 
     @Slot(int, int, str, str, str, str, result="QVariant")
     def eventList(self, limit, offset, q, category, module, outcome):
-        """Лента событий с фильтрами. Имена колонок — литералы из кода,
-        значения — только через параметры (никакой склейки SQL из данных)."""
+        """The event feed with filters. Column names are literals from the code,
+        values go only through parameters (no SQL glued together from data)."""
         db = self.pipe.events()
         where, params = [], []
         if q and q.strip():
@@ -92,11 +92,11 @@ class EventsApi:
             return {"total": 0, "error": str(e), "by_category": [],
                     "by_module": [], "by_outcome": []}
 
-    # -------- события: SQL, группировка, история запросов --------
+    # -------- events: SQL, grouping, query history --------
     @Slot(str, result="QVariant")
     def eventQuery(self, sql):
-        """Произвольный SELECT к events.db (mode=ro). Только SELECT —
-        всё остальное отклоняем ещё до открытия соединения."""
+        """An arbitrary SELECT against events.db (mode=ro). SELECT only -
+        everything else is rejected before the connection is even opened."""
         s = (sql or "").strip().rstrip(";")
         if not re.match(r"(?is)^\s*select\b", s):
             return {"columns": [], "rows": [], "error": "Only SELECT is allowed"}
@@ -109,12 +109,12 @@ class EventsApi:
 
     @Slot(str, int, int, str, result="QVariant")
     def eventRows(self, where, limit, offset, order=""):
-        """Лента событий по SQL-условию WHERE (его строит панель фильтров:
-        + добавляет значение, − исключает). База открыта только на чтение.
+        """The event feed by an SQL WHERE condition (built by the filter panel:
+        + adds a value, - excludes it). The database is opened read only.
 
-        order — порядок сортировки из запроса («ts DESC, user»). Имена полей
-        СВЕРЯЮТСЯ С ТАКСОНОМИЕЙ, направление — только ASC/DESC: в SQL не
-        попадает ничего постороннего.
+        order is the sort order from the query ("ts DESC, user"). Field names ARE
+        CHECKED AGAINST THE TAXONOMY and the direction may only be ASC/DESC:
+        nothing foreign gets into the SQL.
         """
         db = self.pipe.events()
         w = _rql_cidr((where or "").strip())
@@ -128,7 +128,7 @@ class EventsApi:
             return {"rows": [], "columns": [], "total": 0, "error": str(e)}
 
     def _safe_order(self, order):
-        """Разбор ORDER BY: только известные поля и ASC/DESC."""
+        """Parsing ORDER BY: only known fields and ASC/DESC."""
         from agent import taxonomy as tx
         names = set(tx.names(tx.load())) | {"_id"}
         out = []
@@ -142,8 +142,8 @@ class EventsApi:
 
     @Slot(str)
     def eventSqlRemember(self, sql):
-        """Запомнить SQL-условие (WHERE), собранное кнопками +/− или набранное
-        руками, чтобы оно попало в историю и в подсказки похожих."""
+        """Remember the SQL condition (WHERE), assembled with the +/- buttons or
+        typed by hand, so that it lands in the history and in the similar hints."""
         s = (sql or "").strip()
         if s:
             self._sql_hist_add(s)
@@ -163,8 +163,8 @@ class EventsApi:
 
     @Slot(str, int, result="QVariant")
     def eventSqlSuggest(self, text, limit):
-        """Похожие запросы из ВСЕЙ истории (не только из топ-10): набрал
-        что-то похожее на запрос 200 шагов назад — он и подскажется."""
+        """Similar queries from the WHOLE history (not only from the top 10): type
+        something close to a query from 200 steps back and it will be suggested."""
         import difflib
         from agent import config
         t = (text or "").strip().lower()
@@ -183,14 +183,14 @@ class EventsApi:
 
     @Slot(str, str, result="QVariant")
     def eventGroups(self, field, where):
-        """Значения колонки (или НЕСКОЛЬКИХ колонок) с количествами — левая
-        колонка группировки.
+        """The values of a column (or of SEVERAL columns) with counts - the left
+        column of the grouping.
 
-        `field` — одно имя или несколько через запятую: группировка «по
-        нескольким параметрам» ничем не отличается от SQL `GROUP BY a, b`.
-        Каждое имя сверяется с таксономией, поэтому в SQL не попадает ничего
-        постороннего. В ответе `value` — читаемая склейка значений, `parts`
-        — сами значения по полям (из них строится условие фильтра).
+        `field` is one name or several separated by commas: grouping "by several
+        parameters" is no different from SQL `GROUP BY a, b`. Every name is checked
+        against the taxonomy, so nothing foreign gets into the SQL. In the answer
+        `value` is a readable join of the values and `parts` are the values
+        themselves per field (the filter condition is built from them).
         """
         from agent import taxonomy as tx
         names = set(tx.names(tx.load()))
@@ -198,9 +198,9 @@ class EventsApi:
         fields = [f for f in fields if f in names]
         if not fields:
             return {"rows": [], "fields": [], "error": "unknown field"}
-        # NULL и '' для пользователя — одна и та же «пустая» ячейка, но
-        # GROUP BY делает из них ДВЕ группы, и счётчик перестаёт сходиться с
-        # тем, что реально покажет таблица. Схлопываем их через COALESCE.
+        # NULL and '' are the same "empty" cell for a user, but GROUP BY makes
+        # TWO groups out of them, and the counter stops matching what the table
+        # actually shows. We collapse them with COALESCE.
         exprs = [f"""COALESCE("{f}", '')""" for f in fields]
         cols = ", ".join(f'{e} AS "v{i}"' for i, e in enumerate(exprs))
         where = _rql_cidr(where or "")
@@ -218,12 +218,13 @@ class EventsApi:
 
     @Slot(str, result="QVariant")
     def eventFieldStats(self, where):
-        """СТАТИСТИКА ПО ВСЕМ ПОЛЯМ для текущей выборки.
+        """STATISTICS OVER ALL FIELDS for the current selection.
 
-        Отвечает на вопрос «какие поля вообще заполнены и чем» — то, с чего
-        начинают разбор в зрелых SIEM. Считаем ОДНИМ проходом по выборке в
-        Python, а не 98 запросами `COUNT(DISTINCT)`: так и быстрее, и порог
-        выборки виден честно (поле `truncated`).
+        It answers the question "which fields are filled at all, and with what" -
+        the thing an investigation starts with in mature SIEMs. We count it in ONE
+        pass over the selection in Python instead of 98 `COUNT(DISTINCT)` queries:
+        that is faster and the selection limit is shown honestly (the `truncated`
+        field).
         """
         from agent import taxonomy as tx
         names = tx.names(tx.load())
@@ -235,8 +236,8 @@ class EventsApi:
         if res.get("error"):
             return {"fields": [], "total": 0, "error": res["error"]}
         rows = res.get("rows", [])
-        counts = {}          # поле -> {значение: сколько}
-        filled = {}          # поле -> в скольких строках заполнено
+        counts = {}          # field -> {value: how many}
+        filled = {}          # field -> in how many rows it is filled
         for r in rows:
             for k, v in r.items():
                 if k not in names or v is None or v == "":
@@ -260,17 +261,17 @@ class EventsApi:
                 "unique": len(counts.get(f, {})),
                 "values": [{"value": v, "n": c} for v, c in vals[:12]],
             })
-        # сверху — поля, у которых значений НЕМНОГО: по ним и фильтруют
+        # at the top - the fields with FEW values: those are what people filter by
         out.sort(key=lambda d: (d["unique"] > 1, d["unique"], -d["filled"]))
         return {"fields": out, "total": total,
                 "truncated": bool(res.get("truncated")),
                 "empty_fields": len([f for f in names if not filled.get(f)]),
                 "all_fields": len(names), "error": ""}
 
-    # -------- сохранённые запросы (expertise/queries/, вне fedora) --------
+    # -------- saved queries (expertise/queries/, outside fedora) --------
     @Slot(result="QVariant")
     def eventFields(self):
-        # таксономия по группам — для панели деталей события
+    # the taxonomy by groups - for the event details panel
         from agent import taxonomy as tx
         try:
             return tx.groups(tx.load())

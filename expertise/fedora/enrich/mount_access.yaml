@@ -3,18 +3,18 @@ id: LS-E-19
 type: enrichment
 version: 1.0.0
 title: Mount writability and exec policy
-# Позволяет правилу находки обойтись без списка путей: опасность выводится
-# из фактов (кто может писать + разрешено ли исполнение), а не из имени.
+# It lets a finding rule do without a list of paths: the danger is derived from
+# facts (who can write + whether execution is allowed), not from a name.
 code: |
   def enrich(rows):
-      """Кто может писать в точку монтирования и можно ли оттуда запускать.
+      """Who can write to a mount point and whether things can be run from it.
 
-      Нужно, чтобы правило «каталоги без noexec» не содержало списка путей
-      (/tmp, /home, ...). Список неверен на любой другой разметке: у кого-то
-      отдельный /srv, у кого-то нет /home. Признак должен быть структурным:
-      опасно там, куда НЕПРИВИЛЕГИРОВАННЫЙ пользователь может записать файл
-      и тут же его запустить. Это же требование формулирует CIS Benchmark
-      для разделов с пользовательскими данными.
+      It is needed so that the "directories without noexec" rule contains no list of
+      paths (/tmp, /home, ...). Such a list is wrong on any other partitioning:
+      someone has a separate /srv, someone has no /home. The property must be
+      structural: it is dangerous where an UNPRIVILEGED user can write a file and
+      immediately run it. The CIS Benchmark states the same requirement for
+      partitions holding user data.
       """
       import os
       import stat
@@ -34,7 +34,7 @@ code: |
           r["user_writable"] = w_me
           r["noexec"] = "yes" if "noexec" in opts else ""
           r["nosuid"] = "yes" if "nosuid" in opts else ""
-          # РИСК — из фактов, а не из имени каталога: писать может кто угодно
-          # и запускать оттуда разрешено
+          # THE RISK comes from facts, not from the directory name: anyone can
+          # write and execution from there is allowed
           r["exec_risk"] = "yes" if (w_all or w_me) and "noexec" not in opts else ""
       return rows

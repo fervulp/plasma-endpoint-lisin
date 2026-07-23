@@ -4,9 +4,9 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "Fmt.js" as Fmt
 
-// Файловая активность: что создавали, меняли, удаляли. Слева — срезы
-// (действие, каталог, пакет), справа — сами события. Клик по срезу
-// фильтрует список: это и есть интерактивность, ради которой панель нужна.
+// File activity: what was created, changed, deleted. On the left the facets
+// (action, directory, package), on the right the events themselves. Clicking a
+// facet filters the list: that is the interactivity the panel exists for.
 Item {
     id: view
     property var d: ({ events: [], by_action: [], by_dir: [], by_package: [], total: 0 })
@@ -62,7 +62,7 @@ Item {
     RowLayout {
         anchors.fill: parent
         spacing: 0
-        // ---- срезы ----
+        // ---- facets ----
         QQC2.ScrollView {
             Layout.preferredWidth: Kirigami.Units.gridUnit * 18
             Layout.fillHeight: true
@@ -88,7 +88,7 @@ Item {
             }
         }
         Kirigami.Separator { Layout.fillHeight: true }
-        // ---- события ----
+        // ---- events ----
         ListView {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -132,8 +132,8 @@ Item {
                         }
                     }
                     QQC2.Label {
-                        // КТО и ОТКУДА ЭТО ИЗВЕСТНО. rpm -Va фиксирует расхождение,
-                        // но не автора правки — тогда так и пишем, а не гадаем.
+                        // WHO, AND HOW WE KNOW. rpm -Va records the divergence but
+                        // not the author of the change - then we say so, we do not guess.
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                         opacity: 0.6

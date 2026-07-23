@@ -1,0 +1,22 @@
+name: exec_from_temp
+id: LS-C-1
+type: correlation_rule
+version: 1.0.0
+title: A program started from a temporary directory
+severity: high
+tactic: execution
+technique: T1059
+category: intrusion_detection
+enabled: true
+# Legitimate software lives in /usr, /opt or in the user's home directory.
+# A start from /tmp, /var/tmp or /dev/shm is typical dropper behaviour: the file
+# was downloaded, executed and deleted. Threshold 1: even a single start matters.
+where: >-
+  event_action = 'process_started'
+  AND (process_executable LIKE '/tmp/%'
+       OR process_executable LIKE '/var/tmp/%'
+       OR process_executable LIKE '/dev/shm/%')
+group_by: [subject_name, object_name]
+threshold: 1
+window: 600
+message: "Started from a temporary directory: {object_name} (user {subject_name})"

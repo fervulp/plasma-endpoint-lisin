@@ -3,8 +3,8 @@ id: LS-I-3
 type: input
 version: 3.0.0
 title: Network sockets
-# ВСЕ сокеты (listen + established) одним ss — ports и connections это одно
-# и то же. + секция firewall для exposure слушателей.
+# ALL sockets (listen + established) with a single ss - ports and connections are
+# the same thing. + a firewall section for the exposure of the listeners.
 command: |
   ss -H -tunapn
   echo ---FWPORTS---

@@ -3,10 +3,10 @@ id: LS-I-56
 type: input
 version: 1.0.0
 title: System startups
-# КОГДА СИСТЕМУ ВКЛЮЧАЛИ. journalctl --list-boots знает границы каждого
-# запуска (идентификатор загрузки + первая и последняя запись), а wtmp
-# (`last reboot`) помнит перезагрузки даже там, где журнал подрезан.
-# Работает без root.
+# WHEN THE SYSTEM WAS TURNED ON. journalctl --list-boots knows the boundaries of
+# every boot (the boot id + the first and the last record), and wtmp
+# (`last reboot`) remembers the reboots even where the journal was trimmed.
+# Works without root.
 command: |
   journalctl --list-boots --no-pager -o short-iso 2>/dev/null | sed 's/^/boot\t/'
   echo "===WTMP==="

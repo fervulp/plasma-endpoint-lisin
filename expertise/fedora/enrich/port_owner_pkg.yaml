@@ -3,8 +3,8 @@ id: LS-E-14
 type: enrichment
 version: 1.0.0
 title: Socket owner package
-# ИЗ КАКОГО ПАКЕТА СЛУЖБА, слушающая порт. «Порт 5353 открыт» — полдела;
-# «его слушает avahi из пакета avahi» — уже понятно, удалять или оставить.
+# WHICH PACKAGE the service listening on a port comes from. "Port 5353 is open" is
+# half the story; "avahi from the avahi package listens on it" already tells you
 code: |
   def enrich(rows):
       import sqlite3

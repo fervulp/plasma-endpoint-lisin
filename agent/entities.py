@@ -610,11 +610,11 @@ def _running_names(con, name_set):
     return R
 
 
-# КЭШ ИНВЕНТАРЯ. programs() перебирает зависимости всех 3.5 тыс. приложений
-# (~85 мс) и вызывался КАЖДЫЕ 2 с из дашборда — это и был основной вклад в
-# подлагивание. Инвентарь меняется только при установке/удалении пакета,
-# поэтому ключ кэша — дешёвая подпись таблицы applications (число строк +
-# максимальный rowid). Пересчёт происходит ровно тогда, когда состав изменился.
+# INVENTORY CACHE. programs() walks the dependencies of all 3.5 thousand
+# applications (~85 ms) and used to be called EVERY 2 seconds from the dashboard -
+# that was the main contributor to the stutter. The inventory changes only when a
+# package is installed or removed, so the cache key is a cheap signature of the
+# applications table (row count + the maximum rowid). It is recomputed exactly
 _PROG_CACHE = {"sig": None, "val": None}
 
 
@@ -634,17 +634,17 @@ def _apps_sig(db):
 
 
 def programs(db):
-    """Классифицирует ВЕСЬ инвентарь applications на ПРОГРАММЫ и ЗАВИСИМОСТИ.
+    """Classifies the WHOLE applications inventory into PROGRAMS and DEPENDENCIES.
 
-    Охватывает все виды: rpm, flatpak (+flatpak-runtime), bin, appimage,
-    process-bin и языковые экосистемы (pip/npm/cargo/gem/go). Связи строятся
-    ПО ВСЕМ видам сразу — колонка depends есть у каждого (rpm REQUIRENAME,
-    flatpak runtime+расширения, bin ldd, pip/npm зависимости).
+    It covers every kind: rpm, flatpak (+flatpak-runtime), bin, appimage,
+    process-bin and the language ecosystems (pip/npm/cargo/gem/go). The links are
+    built across ALL kinds at once - every one of them has a depends column (rpm
+    REQUIRENAME, flatpak runtime+extensions, bin ldd, pip/npm dependencies).
 
-    rpm  — аддитивный скоринг (userinstalled/desktop/path-bin/leaf/running).
-    Прочие виды — общее правило: пакет это ЗАВИСИМОСТЬ, если его требует
-    кто-то ещё, иначе ПРОГРАММА. flatpak-runtime всегда зависимость (это
-    платформа под приложение, а не приложение).
+    rpm uses additive scoring (userinstalled/desktop/path-bin/leaf/running).
+    The other kinds use a general rule: a package is a DEPENDENCY if something
+    else requires it, otherwise it is a PROGRAM. A flatpak-runtime is always a
+    dependency (it is the platform under an application, not an application).
     """
     sig = _apps_sig(db)
     if sig is not None and _PROG_CACHE["sig"] == sig and _PROG_CACHE["val"] is not None:
@@ -661,9 +661,9 @@ def programs(db):
     finally:
         con.close()
 
-    recs = {}           # (kind, name) -> запись
+    recs = {}           # (kind, name) -> the record
 
-    # --- rpm: аддитивный скоринг (как раньше) ---
+    # --- rpm: additive scoring (as before) ---
     for r in rpms:
         name = r["name"]
         if ("rpm", name) in recs:
@@ -702,7 +702,7 @@ def programs(db):
             "app_id": r.get("app_id", "") or "",
         }
 
-    # --- остальные виды ---
+    # --- the other kinds ---
     DEP_KINDS = {"flatpak-runtime"}
     GUI_KINDS = {"flatpak", "appimage"}
     for r in others:
@@ -726,10 +726,10 @@ def programs(db):
             "app_id": r.get("app_id", "") or "",
         }
 
-    # индекс по ИМЕНИ + АЛИАСЫ. Разные экосистемы ссылаются по-разному:
-    # rpm — по имени пакета, а flatpak в depends перечисляет APP_ID
-    # ('org.freedesktop.Platform.GL.default'), тогда как строка рантайма
-    # называется по-человечески ('Mesa'). Поэтому резолвим и имя, и app_id.
+    # an index by NAME + ALIASES. Different ecosystems refer to things
+    # differently: rpm by the package name, while a flatpak lists APP_IDs in
+    # depends ('org.freedesktop.Platform.GL.default'), whereas the runtime row is
+    # named for humans ('Mesa'). So we resolve both the name and the app_id.
     by_name = {}
     for rec in recs.values():
         by_name.setdefault(rec["name"], rec)
@@ -740,10 +740,10 @@ def programs(db):
             alias.setdefault(rec["app_id"], rec["name"])
 
     def dep_tokens(rec):
-        # flatpak отдаёт список через запятую и с суффиксом /arch/branch
+        # flatpak returns a comma separated list with a /arch/branch suffix
         raw = (rec.get("depends") or "").replace(",", " ")
         for tok in raw.split():
-            # capability-токены rtld(GNU_HASH)/perl(x) — пропускаем
+            # capability tokens rtld(GNU_HASH)/perl(x) - skipped
             if "(" in tok or ")" in tok:
                 continue
             tok = tok.strip()
@@ -757,7 +757,7 @@ def programs(db):
                 if t:
                     yield t
 
-    # кого-то требуют → это зависимость (для не-rpm видов)
+    # something requires it -> it is a dependency (for the non-rpm kinds)
     required_by = defaultdict(set)
     for rec in recs.values():
         for tok in dep_tokens(rec):
@@ -769,11 +769,11 @@ def programs(db):
         if required_by.get(rec["name"]):
             rec["role"] = "dependency"
 
-    # Языковые экосистемы: у pip/npm/... в инвентаре обычно НЕТ depends, из-за
-    # чего «никто их не требует» и всё выглядело бы программами (176 pip-строк
-    # → 159 «программ» — неправда: подавляющее большинство это библиотеки).
-    # Считаем программой только то, что реально исполняется: запущено или
-    # ставит одноимённый исполняемый файл (он попадает в инвентарь как bin).
+    # Language ecosystems: pip/npm/... usually have NO depends in the inventory,
+    # so "nobody requires them" and everything would look like a program (176 pip
+    # rows -> 159 "programs" - which is untrue: the vast majority are libraries).
+    # We count something as a program only if it really runs: it is running or it
+    # installs an executable of the same name (which lands in the inventory as bin).
     LANG_KINDS = {"pip", "pipx", "npm", "cargo", "gem", "go"}
     exe_names = {rec["name"] for rec in recs.values()
                  if rec["kind"] in ("bin", "appimage", "process-bin")}
@@ -783,7 +783,7 @@ def programs(db):
                 rec["role"] = "dependency"
                 rec["reasons"] = rec["kind"] + ",library"
 
-    # --- rollup: привязываем каждую зависимость к её программе ---
+    # --- rollup: attach every dependency to its program ---
     scored = by_name
     programs_set = {n for n, d in by_name.items() if d["role"] == "program"}
     requires = defaultdict(set)
@@ -826,9 +826,9 @@ def programs(db):
         if p in by_name:
             by_name[p]["components"] = c
 
-    # ВАЖНО: счётчики НЕ переносим на одноимённые записи другого вида —
-    # rpm вставлен первым и всегда занимает место головы в by_name, поэтому
-    # pip:fedpkg не унаследует 83 зависимости от rpm:fedpkg (разные пакеты).
+    # IMPORTANT: the counters are NOT carried over to same-named records of another
+    # kind - rpm is inserted first and always takes the head position in by_name,
+    # so pip:fedpkg does not inherit 83 dependencies from rpm:fedpkg (different packages).
 
     out = list(recs.values())
     out.sort(key=lambda x: (0 if x["role"] == "program" else 1,

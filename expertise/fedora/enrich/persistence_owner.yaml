@@ -3,14 +3,24 @@ id: LS-E-20
 type: enrichment
 version: 1.0.1
 title: Persistence file owner package
-code: "def enrich(rows):\n    \"\"\"Владелец файла-механизма автозапуска: пакет или никто.\n\n    Заменяет правило вида «vector LIKE '%preload%'». Имя механизма ничего не\n    говорит о том, легитимен он\
-  \ или нет: ld.so.conf.d полон файлов от\n    пакетов. Настоящий признак — НЕСООТВЕТСТВИЕ: файл лежит в системном\n    механизме автозапуска, но ни один пакет его не ставил. Такой файл\n    появился вручную,\
-  \ и вот его и надо смотреть.\n    \"\"\"\n    import json\n    import os\n    import subprocess\n    from pathlib import Path\n    CACHE = Path.home() / \".local/share/lisin/filepkg.json\"\n    try:\n\
-  \        stamp = str(os.path.getmtime(\"/var/lib/rpm/rpmdb.sqlite\"))\n    except OSError:\n        stamp = \"0\"\n    idx = None\n    try:\n        c = json.loads(CACHE.read_text())\n        if c.get(\"\
-  _stamp\") == stamp:\n            idx = c.get(\"idx\")\n    except Exception:\n        idx = None\n    if idx is None:\n        idx = {}\n        try:\n            out = subprocess.run([\"rpm\", \"-qa\"\
-  , \"--qf\",\n                                  \"[%{FILENAMES}\\t%{=NAME}\\n]\"],\n                                 capture_output=True, text=True,\n                                 timeout=180).stdout\n\
-  \        except Exception:\n            out = \"\"\n        for ln in out.splitlines():\n            f = ln.split(\"\\t\", 1)\n            if len(f) == 2:\n                idx[f[0]] = f[1]\n        if\
-  \ idx:\n            try:\n                CACHE.parent.mkdir(parents=True, exist_ok=True)\n                CACHE.write_text(json.dumps({\"_stamp\": stamp, \"idx\": idx}))\n            except OSError:\n\
-  \                pass\n    for r in rows:\n        path = str(r.get(\"path\") or \"\")\n        pkg = idx.get(path, \"\") if path else \"\"\n        r[\"package\"] = pkg\n        # системный путь без\
-  \ пакета = поставлено мимо пакетного менеджера\n        under_system = path.startswith((\"/etc/\", \"/usr/\", \"/lib\", \"/opt/\"))\n        r[\"unpackaged\"] = \"yes\" if (path and not pkg and under_system)\
+code: "def enrich(rows):\n    \"\"\"The owner of an autostart mechanism file: a package or nobody.\n\n\
+  \    It replaces a rule like `vector LIKE '%preload%'`. The name of a mechanism says\n    nothing about\
+  \ whether it is legitimate: ld.so.conf.d is full of files from\n    packages. The real property is a\
+  \ MISMATCH: the file lies in a system autostart\n    mechanism but no package installed it. Such a file\
+  \ appeared by hand, and that is\n    the one to look at.\n    \"\"\"\n    import json\n    import os\n\
+  \    import subprocess\n    from pathlib import Path\n    CACHE = Path.home() / \".local/share/lisin/filepkg.json\"\
+  \n    try:\n        stamp = str(os.path.getmtime(\"/var/lib/rpm/rpmdb.sqlite\"))\n    except OSError:\n\
+  \        stamp = \"0\"\n    idx = None\n    try:\n        c = json.loads(CACHE.read_text())\n      \
+  \  if c.get(\"_stamp\") == stamp:\n            idx = c.get(\"idx\")\n    except Exception:\n       \
+  \ idx = None\n    if idx is None:\n        idx = {}\n        try:\n            out = subprocess.run([\"\
+  rpm\", \"-qa\", \"--qf\",\n                                  \"[%{FILENAMES}\\t%{=NAME}\\n]\"],\n  \
+  \                               capture_output=True, text=True,\n                                 timeout=180).stdout\n\
+  \        except Exception:\n            out = \"\"\n        for ln in out.splitlines():\n          \
+  \  f = ln.split(\"\\t\", 1)\n            if len(f) == 2:\n                idx[f[0]] = f[1]\n       \
+  \ if idx:\n            try:\n                CACHE.parent.mkdir(parents=True, exist_ok=True)\n     \
+  \           CACHE.write_text(json.dumps({\"_stamp\": stamp, \"idx\": idx}))\n            except OSError:\n\
+  \                pass\n    for r in rows:\n        path = str(r.get(\"path\") or \"\")\n        pkg\
+  \ = idx.get(path, \"\") if path else \"\"\n        r[\"package\"] = pkg\n        # a system path with\
+  \ no package = installed bypassing the package manager\n        under_system = path.startswith((\"/etc/\"\
+  , \"/usr/\", \"/lib\", \"/opt/\"))\n        r[\"unpackaged\"] = \"yes\" if (path and not pkg and under_system)\
   \ else \"\"\n        r[\"scope\"] = \"system\" if under_system else \"user\"\n    return rows\n"

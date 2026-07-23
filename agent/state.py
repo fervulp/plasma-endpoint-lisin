@@ -1,7 +1,7 @@
-"""Сводка об ОС для карточки состояния. Только stdlib, без root.
+"""A summary of the OS for the state card. Stdlib only, no root.
 
-Табличные данные (порты, сервисы и т.д.) собирает конвейер:
-expertise/inputs/ + expertise/normalize/ (Python-плагины: normalize(text)).
+Tabular data (ports, services and so on) is collected by the pipeline:
+expertise/inputs/ + expertise/normalize/ (Python plugins: normalize(text)).
 """
 import os
 import platform

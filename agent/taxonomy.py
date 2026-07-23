@@ -1,10 +1,10 @@
-"""Таксономия событий — единый словарь полей (ECS-подобный).
+"""The event taxonomy - a single dictionary of fields (ECS-like).
 
-Источник истины — expertise/taxonomy/events.yaml. Под ЭТИ поля пишутся
-правила нормализации и корреляции (как sigma-правила пишутся под свою
-таксономию). Схема таблицы событий строится отсюда: добавил поле в YAML →
-колонка появится в БД при следующем запуске (колонки только добавляются,
-ничего не удаляется автоматически).
+The source of truth is expertise/taxonomy/events.yaml. Normalization and
+correlation rules are written against THESE fields (the way sigma rules are
+written against their own taxonomy). The schema of the event table is built
+from here: add a field to the YAML and the column appears in the database on
+the next start (columns are only added, nothing is removed automatically).
 """
 from pathlib import Path
 
@@ -13,19 +13,19 @@ import yaml
 TAXONOMY_FILE = (Path(__file__).resolve().parent.parent
                  / "expertise" / "taxonomy" / "events.yaml")
 
-# тип таксономии → тип колонки SQLite
+# taxonomy type -> SQLite column type
 SQL_TYPE = {"text": "TEXT", "int": "INTEGER", "float": "REAL", "json": "TEXT"}
 
 
 def load(path: Path = TAXONOMY_FILE) -> dict:
-    """Читает таксономию. Возвращает {table, key, title, version, fields[]}."""
+    """Reads the taxonomy. Returns {table, key, title, version, fields[]}."""
     d = yaml.safe_load(Path(path).read_text()) or {}
     fields = []
     seen = set()
     for f in d.get("fields") or []:
         name = str(f.get("name", "")).strip()
         if not name or name in seen:
-            continue          # дубликаты полей игнорируем
+            continue          # duplicate fields are ignored
         seen.add(name)
         fields.append({
             "name": name,
@@ -47,7 +47,7 @@ def names(spec: dict) -> list:
 
 
 def groups(spec: dict) -> list:
-    """Поля, сгруппированные для UI: [{group, fields:[...]}] в порядке файла."""
+    """Fields grouped for the UI: [{group, fields:[...]}] in file order."""
     order, by = [], {}
     for f in spec["fields"]:
         g = f["group"]

@@ -1,23 +1,23 @@
-"""Связи между компонентами системы.
+"""Links between the components of the system.
 
-Две задачи:
+Two jobs:
 
-1. `model(db)` — КАРТА СВЯЗЕЙ между таблицами. Не зашита в коде: связи
-   ОБНАРУЖИВАЮТСЯ измерением пересечения значений колонок. Если 90%
-   значений `processes.user` встречаются в `users.name` — это связь, и её
-   видно, даже если я о ней не думал. Так карта не устаревает при
-   добавлении нового источника: он свяжется сам.
+1. `model(db)` - the MAP OF LINKS between tables. It is not hard-coded: links
+   are DISCOVERED by measuring the overlap of column values. If 90% of the
+   values of `processes.user` occur in `users.name`, that is a link, and it is
+   visible even if I never thought about it. That way the map does not go stale
+   when a new source is added: it links itself.
 
-2. `around(db, eventsdb, pid)` — что окружает КОНКРЕТНЫЙ процесс:
-   пользователь, родитель и дети, пакет, сокеты и их удалённые адреса,
-   открытые файлы, юнит systemd. Раскладка (x/y) считается ЗДЕСЬ, а не в
-   интерфейсе: иначе узлы прыгают при каждой перерисовке.
+2. `around(db, eventsdb, pid)` - what surrounds a SPECIFIC process: the user,
+   the parent and the children, the package, the sockets and their remote
+   addresses, the open files, the systemd unit. The layout (x/y) is computed
+   HERE, not in the interface: otherwise the nodes jump on every repaint.
 """
 import math
 import re
 import sqlite3
 
-# служебные колонки и заведомо бессмысленные для связывания значения
+# service columns and values that are meaningless for linking
 SKIP_COLS = {"_id", "_src", "content", "description", "message", "detail",
              "key", "vrl", "code", "options", "raw"}
 NOISE_VALUES = {"", "-", "—", "0", "1", "yes", "no", "none", "(none)",
@@ -36,7 +36,7 @@ def _columns(con, table):
 
 
 def _values(con, table, col, limit=4000):
-    """Набор непустых значений колонки — для измерения пересечения."""
+    """The set of non-empty values of a column - for measuring the overlap."""
     try:
         rows = con.execute(
             f'SELECT DISTINCT "{col}" FROM "{table}" '
@@ -52,14 +52,14 @@ def _values(con, table, col, limit=4000):
 
 
 def _is_measure(values: set) -> bool:
-    """Похоже ли на ИЗМЕРЕНИЕ, а не на идентификатор.
+    """Does it look like a MEASUREMENT rather than an identifier?
 
-    Реальный случай: `processes.rss_mb` (память в МБ) и
-    `vulnerabilities.cvss_score` (балл) пересеклись на восьми значениях
-    (9.6, 7.4, 8.8…), и уязвимости начали цепляться к процессам ПО ОБЪЁМУ
-    ПАМЯТИ. Признак структурный: дробное число — это величина; идентификатор
-    дробным почти не бывает. Целые числа сюда не попадают: uid и номер порта
-    остаются связуемыми.
+    A real case: `processes.rss_mb` (memory in MB) and
+    `vulnerabilities.cvss_score` (a score) overlapped on eight values
+    (9.6, 7.4, 8.8...), and vulnerabilities started attaching to processes BY
+    THE AMOUNT OF MEMORY. The property is structural: a fractional number is a
+    quantity; an identifier is almost never fractional. Integers do not fall in
+    here: a uid and a port number remain linkable.
     """
     dec = 0
     for v in values:
@@ -73,13 +73,13 @@ def _is_measure(values: set) -> bool:
 
 
 def _is_counter(values: set) -> bool:
-    """Похоже ли на порядковый номер, а не на идентификатор.
+    """Does it look like a sequence number rather than an identifier?
 
-    Ложные связи брались именно отсюда: `pkg_history.id` и
-    `shell_history.n` — оба просто 1..200, пересечение 100%, а смысла ноль.
-    Признак структурный: все значения целые и образуют плотный диапазон
-    (число значений близко к длине интервала). Настоящие числовые ключи
-    (uid, номер порта) разрежены и этот тест проходят.
+    The false links came from exactly here: `pkg_history.id` and
+    `shell_history.n` are both simply 1..200, with a 100% overlap and no meaning
+    at all. The property is structural: all the values are integers and they form
+    a dense range (the number of values is close to the length of the interval).
+    Real numeric keys (a uid, a port number) are sparse and pass this test.
     """
     nums = []
     for v in values:
@@ -93,11 +93,11 @@ def _is_counter(values: set) -> bool:
 
 
 def model(db, min_overlap: float = 0.5, min_values: int = 3) -> dict:
-    """Карта связей: какие колонки каких таблиц ссылаются друг на друга.
+    """The map of links: which columns of which tables refer to each other.
 
-    Связь считается найденной, если не меньше min_overlap значений одной
-    колонки встречается в другой. Порог и требование min_values отсекают
-    случайные совпадения на двух-трёх строках.
+    A link counts as found if no fewer than min_overlap of the values of one
+    column occur in the other. The threshold and the min_values requirement cut
+    off accidental coincidences on two or three rows.
     """
     con = _ro(db.path)
     try:
@@ -118,14 +118,14 @@ def model(db, min_overlap: float = 0.5, min_values: int = 3) -> dict:
     for i, a in enumerate(keys):
         for b in keys[i + 1:]:
             if a[0] == b[0]:
-                continue                    # связи внутри таблицы не считаем
+                continue                    # links inside a table do not count
             va, vb = vals[a], vals[b]
             inter = va & vb
             if len(inter) < min_values:
                 continue
-            # доля считается от МЕНЬШЕГО набора: справочник (users) всегда
-            # меньше, чем таблица фактов (processes), и связь «многие к
-            # одному» иначе не обнаружилась бы
+            # the share is measured against the SMALLER set: a reference table
+            # (users) is always smaller than a fact table (processes), and a
+            # "many to one" link would not be discovered otherwise
             ratio = len(inter) / min(len(va), len(vb))
             if ratio < min_overlap:
                 continue
@@ -139,8 +139,8 @@ def model(db, min_overlap: float = 0.5, min_values: int = 3) -> dict:
                           "sample": sorted(inter)[:3]})
     links.sort(key=lambda x: (-x["ratio"], -x["shared"]))
 
-    # раскладка карты считается здесь: таблицы по кругу, чтобы связи были
-    # видны и узлы не прыгали между перерисовками
+    # the layout of the map is computed here: tables in a circle, so that the
+    # links are visible and the nodes do not jump between repaints
     involved = []
     for l in links:
         for t in (l["from_table"], l["to_table"]):
@@ -166,17 +166,17 @@ def _q(con, sql, args=()):
 
 
 def _open_targets(pid: str, cap: int = 14) -> list:
-    """К ЧЕМУ ПРОЦЕСС ОБРАЩАЕТСЯ ПРЯМО СЕЙЧАС — из /proc/<pid>/fd.
+    """WHAT THE PROCESS IS ACCESSING RIGHT NOW - from /proc/<pid>/fd.
 
-    Показываем ВСЁ, что открыто, с классификацией: обычный файл, устройство,
-    /proc и /sys (так процесс читает состояние системы), сокет, канал.
-    Раньше подобная выборка отбрасывала /proc и сокеты — и для монитора вроде
-    btop не оставалось ничего, хотя именно они и есть суть его работы.
-
-    ВАЖНОЕ ОГРАНИЧЕНИЕ, его надо говорить прямо: дескриптор виден, только
-    пока файл ОТКРЫТ. Программа, которая читает /proc в цикле и сразу
-    закрывает, в снимке не проявится. Чтобы видеть сами обращения, нужны
-    правила аудита ядра, а это root (packaging/lisin-grant-access).
+    We show EVERYTHING that is open, with a classification: an ordinary file, a
+    device, /proc and /sys (that is how a process reads the system state), a
+    socket, a pipe. A similar selection used to throw away /proc and sockets - and
+    for a monitor like btop nothing was left, although those are the essence of
+    its work.
+    AN IMPORTANT LIMITATION that has to be stated plainly: a descriptor is visible
+    only while the file is OPEN. A program that reads /proc in a loop and closes
+    it immediately will not show up in a snapshot. To see the accesses themselves
+    one needs kernel audit rules, and that means root (packaging/lisin-grant-access).
     """
     import os
     out, seen = [], set()
@@ -212,11 +212,11 @@ def _open_targets(pid: str, cap: int = 14) -> list:
 
 
 def _is_private(ip: str) -> bool:
-    """Локальный ли адрес — чтобы пометить внешние сессии.
+    """Is the address local - so that external sessions can be marked.
 
-    Признак структурный (RFC1918/loopback/link-local), а не список «плохих»
-    адресов: внешнее направление само по себе не угроза, но при разборе
-    смотрят на него первым.
+    The property is structural (RFC1918/loopback/link-local), not a list of
+    "bad" addresses: an outbound direction is not a threat by itself, but during
+    an investigation it is the first thing to look at.
     """
     ip = (ip or "").strip()
     if ip.startswith(("127.", "10.", "192.168.", "169.254.", "::1", "fe80")):
@@ -230,7 +230,7 @@ def _is_private(ip: str) -> bool:
 
 
 def _fd_count(pid: str) -> int:
-    """Сколько файловых дескрипторов держит процесс (best-effort, без root)."""
+    """How many file descriptors the process holds (best effort, no root)."""
     import os
     try:
         return len(os.listdir("/proc/%s/fd" % pid))
@@ -238,11 +238,11 @@ def _fd_count(pid: str) -> int:
         return 0
 
 
-# ---- КАТЕГОРИИ ГРАФА (оформление + сворачивание) ----
-# Категория, в которую попадает связанная таблица. Тип узла (kind) и колонка
-# подписи — тоже оформление. САМА связь берётся из обнаруженной карты
-# (links.model), а не отсюда: этот словарь только раскладывает найденное по
-# смысловым группам (положение 2 — данные приходят из экспертизы).
+# ---- GRAPH CATEGORIES (presentation + collapsing) ----
+# The category a linked table falls into. The node type (kind) and the label
+# column are presentation as well. THE LINK ITSELF comes from the discovered map
+# (links.model), not from here: this dictionary only arranges what was found into
+# meaningful groups (principle 2 - the data comes from the expertise).
 CATMAP = {
     "users":           ("identity",    "user",      "name",     "reanchor"),
     "applications":    ("package",     "package",   "name",     "reanchor"),
@@ -260,16 +260,16 @@ CATMAP = {
     "kernel_modules":  ("kmod",        "kmod",      "name",     "state"),
     "processes":       ("tree",        "process",   "command",  "reanchor"),
 }
-# категория -> (подпись блока, цвет, порядок СВЕРХУ ВНИЗ в лесенке)
-# ПОРЯДОК ПО СМЫСЛУ РАЗБОРА: процесс -> чем является (пакет) -> чем запущен
-# (служба) -> куда ходит (сеть) -> что держит (файлы) -> чем настроен.
-# У «процессов» и «событий» подписи НЕТ: тип и так виден по иконке и
-# содержимому узлов, слово только шумит.
+# category -> (block label, colour, order TOP TO BOTTOM in the ladder)
+# THE ORDER FOLLOWS THE INVESTIGATION: the process -> what it is (the package) ->
+# what started it (the service) -> where it goes (network) -> what it holds
+# (files) -> how it is configured. "Processes" and "events" have NO label: the
+# type is visible from the icon and the contents, the word is only noise.
 CAT_META = {
     "tree":        ("",             "#4c7ef3", 0),
     "package":     ("Application",   "#27ae60", 1),
-    # services + scheduled + persistence — один вопрос «что и когда
-    # запускается»; тремя блоками это заставляло искать в трёх местах
+    # services + scheduled + persistence - one question, "what starts and when";
+    # as three blocks it forced you to look in three places
     "startup":     ("Startup",       "#2471a3", 2),
     "network":     ("Network",       "#e67e22", 3),
     "files":       ("Files",         "#5d6d7e", 4),
@@ -281,9 +281,9 @@ CAT_META = {
     "events":      ("",             "#7f8c8d", 12),
     "kmod":        ("Kernel Modules","#7d3c98", 13),
 }
-# ЧТО ПИСАТЬ ВТОРОЙ СТРОКОЙ у узла-сателлита. Раньше туда шло ИМЯ ТАБЛИЦЫ
-# («app_config», «services») — это про устройство хранилища, а не про суть.
-# Берём поле, которое реально объясняет объект.
+# WHAT TO WRITE ON THE SECOND LINE of a satellite node. It used to be the TABLE
+# NAME ("app_config", "services") - that is about the storage layout, not about
+# the substance. We take the field that actually explains the object.
 SUBCOL = {
     "services": "desc", "app_config": "scope", "config_files": "scope",
     "persistence": "vector", "vulnerabilities": "cvss_rating",
@@ -291,20 +291,20 @@ SUBCOL = {
     "kernel_modules": "description", "unix_sockets": "type",
     "open_files": "kind", "ports": "exposure", "applications": "version",
 }
-COLLAPSE_MIN = 4      # категория крупнее — сворачивается в мета-узел
-# свободный коридор между деревом процессов и колонкой блоков:
-# рёбрам нужно место, чтобы не идти поверх карточек
+COLLAPSE_MIN = 4      # a bigger category collapses into a meta node
+# a free corridor between the process tree and the column of blocks:
+# the edges need room so as not to run over the cards
 COLUMN_GAP = 280
-ROW_GAP = 160         # блоки начинаются НИЖЕ дерева процессов
-GRID = 40             # та же сетка, что рисует полотно
+ROW_GAP = 160         # the blocks start BELOW the process tree
+GRID = 40             # the same grid the canvas draws
 
 
 def _snap(v):
-    """Округлить до сетки полотна: узлы должны стоять по линиям."""
+    """Round to the canvas grid: nodes must stand on the lines."""
     return int(round(v / GRID) * GRID)
-# что КАЖДЫЙ якорь собирает ВРУЧНУЮ — обнаружение эти таблицы для него
-# пропускает, чтобы не задвоить. Для application ручного нет: его процессы
-# приходят обнаружением (applications.name <-> processes.package), и это верно.
+# what EVERY anchor collects MANUALLY - discovery skips these tables for it so as
+# not to duplicate them. For application there is no manual set: its processes
+# come from discovery (applications.name <-> processes.package), and that is right.
 MANUAL_TABLES = {
     "address":   {"processes", "ports"},
     "user":      {"processes", "sessions", "shell_history"},
@@ -316,38 +316,38 @@ MANUAL_TABLES = {
 
 def _emit_categories(add, link, anchor_id, ax, ay, cats, expanded,
                      tree_right=None, tree_bottom=None):
-    """КАТЕГОРИИ СПРАВА ОТ ДЕРЕВА: блоки идут сверху вниз в своей колонке.
+    """THE CATEGORIES TO THE RIGHT OF THE TREE: blocks go top to bottom in their column.
 
-    Читается как ступеньки разбора: сам процесс, под ним ПРИЛОЖЕНИЕ (пакет),
-    ниже служба, сетевые соединения, файлы, конфигурация. Члены блока лежат
-    слева направо с переносом. Крупный блок свёрнут в мета-узел со счётчиком.
-
-    Геометрия ЦЕЛИКОМ здесь (положение: раскладка в Python, QML только рисует).
-    Возвращает сводку категорий.
+    It reads like the steps of an investigation: the process itself, the
+    APPLICATION (package) below it, then the service, the network connections,
+    the files, the configuration. The members of a block lie left to right with
+    wrapping. A large block is collapsed into a meta node with a counter.
+    The geometry is ENTIRELY here (the principle: layout in Python, QML only
+    draws). Returns a summary of the categories.
     """
     present = [c for c in cats if cats[c]]
     present.sort(key=lambda c: CAT_META.get(c, ("", "", 99))[2])
     summary = []
-    # ЛЕСЕНКА: каждая категория — свой горизонтальный БЛОК, блоки идут
-    # СВЕРХУ ВНИЗ (процесс -> приложение -> сеть -> файлы...), члены блока —
-    # слева направо с переносом. Читается как ступеньки разбора.
-    # БЛОКИ СПРАВА ОТ ДЕРЕВА ПРОЦЕССОВ, а не под ним. Когда они лежали ниже,
-    # рёбра от якоря шли вниз и пересекали само дерево. Теперь между деревом и
-    # блоками — широкий свободный коридор, и линии идут вбок, ни через что не
-    # проходя.
-    # Блоки лежат СПРАВА и НИЖЕ уровня процессов: дерево занимает верхнюю
-    # левую часть полотна, параметры — правую нижнюю, и между ними остаётся
-    # свободный коридор для рёбер. Всё кратно сетке GRID, которую рисует
-    # полотно, — иначе узлы «висят» между линиями.
+    # THE LADDER: every category is its own horizontal BLOCK, the blocks go TOP TO
+    # BOTTOM (process -> application -> network -> files...), the members of a
+    # block go left to right with wrapping. It reads like investigation steps.
+    # THE BLOCKS ARE TO THE RIGHT OF THE PROCESS TREE, not below it. When they lay
+    # below, the edges from the anchor went down and crossed the tree itself. Now
+    # there is a wide free corridor between the tree and the blocks, and the lines
+    # go sideways, crossing nothing.
+    # The blocks lie TO THE RIGHT and BELOW the level of the processes: the tree
+    # occupies the upper left part of the canvas, the parameters the lower right,
+    # and a free corridor for the edges stays between them. Everything is a
+    # multiple of the GRID the canvas draws - otherwise nodes "hang" between lines.
     base = ax if tree_right is None else tree_right
     LEFT = _snap(base + COLUMN_GAP)
-    # шаг больше ширины узла (184 px в QML) — иначе блоки слипаются
+    # the step is bigger than the node width (184 px in QML) - otherwise blocks stick together
     CW, ROW_H, PER_ROW, BAND_GAP = 240, 120, 4, 40
     y = _snap((ay if tree_bottom is None else tree_bottom) + ROW_GAP)
     for cat in present:
-        # ДЕДУПЛИКАЦИЯ ДО ПОДСЧЁТА: один путь, открытый несколькими
-        # дескрипторами, — это один узел. Иначе блок обещал «292», а рисовал
-        # 286 (add() схлопывает по id), и счётчик врал.
+        # DEDUPLICATION BEFORE COUNTING: one path opened through several
+        # descriptors is one node. Otherwise a block promised "292" and drew 286
+        # (add() collapses by id), and the counter lied.
         members, seen_m = [], set()
         for m in cats[cat]:
             if m["id"] in seen_m:
@@ -355,17 +355,17 @@ def _emit_categories(add, link, anchor_id, ax, ay, cats, expanded,
             seen_m.add(m["id"])
             members.append(m)
         label, color, _o = CAT_META.get(cat, (cat, "#888888", 99))
-        # ВСЕ категории свёрнуты по умолчанию: от якоря идёт стрелка к БЛОКУ
-        # («Приложение», «Файлы», «Сеть»), а его содержимое раскрывается по
-        # клику. Обзор сначала — детали по требованию.
+        # ALL categories are collapsed by default: an arrow goes from the anchor
+        # to the BLOCK ("Application", "Files", "Network"), and its contents are
+        # expanded by a click. Overview first, details on demand.
         collapsed = cat not in expanded
         summary.append({"id": cat, "label": label, "color": color,
                         "count": len(members), "collapsed": collapsed})
         cx, cy = LEFT, y
-        # ЗАГОЛОВОК КАТЕГОРИИ есть ВСЕГДА (мета-узел). Свёрнут — «+N раскрыть»;
-        # раскрыт — «−N свернуть». Клик по нему всегда шлёт toggleCategory, так
-        # что путь СВОРАЧИВАНИЯ достижим (раньше заголовок исчезал при раскрытии
-        # и свернуть было нечем).
+        # THE CATEGORY HEADER IS ALWAYS THERE (a meta node). Collapsed: "+N
+        # expand"; expanded: "-N collapse". Clicking it always sends
+        # toggleCategory, so the COLLAPSE path is reachable (the header used to
+        # disappear on expansion and there was nothing left to collapse with).
         gid = "group:" + cat
         rep = members[0]
         add(gid, "group", label,
@@ -373,10 +373,10 @@ def _emit_categories(add, link, anchor_id, ax, ay, cats, expanded,
             else ("%d — collapse" % len(members)),
             rep.get("table", ""), "", "", category=cat, color=color,
             count=len(members), collapsed=collapsed,
-            # ИКОНКА БЛОКА = иконка его содержимого. Подписи «Процессы» и
-            # «События» убраны как лишние слова, но тип обязан читаться —
-            # иначе у якоря-пользователя два безымянных блока (процессы и
-            # события) не отличить друг от друга.
+            # THE BLOCK ICON = the icon of its contents. The labels "Processes"
+            # and "Events" were removed as extra words, but the type must still be
+            # readable - otherwise with a user anchor two unnamed blocks
+            # (processes and events) cannot be told apart.
             icon_kind=rep.get("kind", ""),
             badge=("+%d" % len(members)) if collapsed else "−",
             drill="toggle", x=_snap(cx), y=_snap(cy))
@@ -385,14 +385,15 @@ def _emit_categories(add, link, anchor_id, ax, ay, cats, expanded,
         if collapsed:
             y += ROW_H + BAND_GAP
         else:
-            # ВСЕ элементы блока, без среза: пользователь раскрыл категорию
-            # именно чтобы увидеть всё. Компактность обеспечивает сворачивание,
-            # а не молчаливое обрезание списка.
+            # ALL the members of the block, without a slice: the user expanded the
+            # category precisely in order to see everything. Compactness comes
+            # from collapsing, not from silently truncating the list.
             mem = sorted(members, key=lambda m: (not m.get("risk"), m["label"]))
             for i, m in enumerate(mem):
-                # ОСТАЛЬНЫЕ ПОЛЯ ЧЛЕНА ПЕРЕДАЮТСЯ КАК ЕСТЬ. Раньше здесь был
-                # закрытый список полей, и всё, что сборщик добавлял сверху
-                # (время события, пометки), молча пропадало по дороге в узел.
+                # THE REMAINING FIELDS OF A MEMBER ARE PASSED THROUGH AS THEY ARE.
+                # There used to be a closed list of fields here, and everything the
+                # collector added on top (the event time, marks) silently vanished
+                # on the way into the node.
                 extra = {k: v for k, v in m.items()
                          if k not in ("id", "kind", "label", "sub", "table",
                                       "col", "val", "rel", "drill", "risk")}
@@ -405,11 +406,11 @@ def _emit_categories(add, link, anchor_id, ax, ay, cats, expanded,
                 nid = add(m["id"], m["kind"], m["label"], m.get("sub", ""),
                           m.get("table", ""), m.get("col", ""), m.get("val", ""),
                           **extra)
-                # РЕБРО ИДЁТ ОТ БЛОКА К КАЖДОМУ ЭЛЕМЕНТУ. Раньше эта строка
-                # стояла ВНЕ цикла, и связь получал только последний узел —
-                # при раскрытии блока стрелка вела к одному элементу.
-                # via_x — коридор между заголовком блока и сеткой членов,
-                # иначе ребро ко второму ряду идёт поверх первого.
+                # THE EDGE GOES FROM THE BLOCK TO EVERY MEMBER. This line used to
+                # stand OUTSIDE the loop, so only the last node got a link - when a
+                # block was expanded the arrow led to a single element.
+                # via_x is the corridor between the block header and the grid of
+                # members, otherwise the edge to the second row runs over the first.
                 link(gid, nid, cat, rel=m.get("rel", "owns"),
                      via_x=round(LEFT + 150))
             rows = (len(mem) + PER_ROW - 1) // PER_ROW
@@ -418,11 +419,11 @@ def _emit_categories(add, link, anchor_id, ax, ay, cats, expanded,
 
 
 def _normalize_xy(nodes, pad=120):
-    """Сдвинуть все узлы так, чтобы минимум x/y был положительным отступом.
+    """Shift all nodes so that the minimum x/y is a positive margin.
 
-    Категории раскладываются полукругом, и верхние кластеры получают
-    ОТРИЦАТЕЛЬНЫЙ y — Flickable его не проскроллит (contentY >= 0), и они
-    уходили за верх канвы. Один сдвиг чинит это для любого якоря.
+    The categories used to be laid out in a semicircle, and the upper clusters got
+    a NEGATIVE y - Flickable will not scroll to it (contentY >= 0), so they went
+    off the top of the canvas. One shift fixes that for any anchor.
     """
     if not nodes:
         return
@@ -430,7 +431,7 @@ def _normalize_xy(nodes, pad=120):
     miny = min(n["y"] for n in nodes)
     dx = pad - minx if minx < pad else 0
     dy = pad - miny if miny < pad else 0
-    # сдвиг тоже кратен сетке, иначе выравнивание теряется
+    # the shift is a multiple of the grid as well, otherwise the alignment is lost
     dx = int(round(dx / GRID) * GRID)
     dy = int(round(dy / GRID) * GRID)
     if dx or dy:
@@ -440,10 +441,10 @@ def _normalize_xy(nodes, pad=120):
 
 
 def _owner_pid(db, kind: str, val: str) -> str:
-    """Какому процессу принадлежит сущность — чтобы войти в его граф.
+    """Which process an entity belongs to - so that we can enter its graph.
 
-    Возвращает pid или "" если владельца нет (тогда строится обобщённый
-    граф). Ничего не выдумываем: pid берётся из тех же таблиц конвейера.
+    Returns the pid, or "" if there is no owner (then a generic graph is built).
+    We invent nothing: the pid comes from the same pipeline tables.
     """
     con = _ro(db.path)
     try:
@@ -458,7 +459,7 @@ def _owner_pid(db, kind: str, val: str) -> str:
                              "AND COALESCE(pid,'')<>'' LIMIT 1", (val,)):
                 return str(r["pid"])
             if kind == "config":
-                # файл никем не открыт — берём процесс пакета-владельца
+                # nobody has the file open - take the process of the owning package
                 for r in _q(con, "SELECT p.pid FROM app_config c "
                                  "JOIN processes p ON p.package = c.app "
                                  "WHERE c.path=? AND p.command NOT LIKE '[%' "
@@ -474,23 +475,24 @@ def _owner_pid(db, kind: str, val: str) -> str:
 
 
 def anchor_graph(db, eventsdb, kind: str, val: str, expanded=()) -> dict:
-    """ЕДИНЫЙ ПИВОТ: граф вокруг сущности ЛЮБОГО типа.
+    """THE SINGLE PIVOT: a graph around an entity of ANY type.
 
     kind = process | application | port | user | config | open_file.
-    Процесс строит дерево запуска (спину) + категории; остальные — центр +
-    категории из обнаруженных связей. Контракт возврата один и тот же
-    ({nodes, edges, width, height, categories, anchor}), поэтому QML и боковая
-    панель работают одинаково для всех якорей.
+    A process builds the launch tree (the spine) + the categories; the others get
+    the centre + the categories from the discovered links. The return contract is
+    one and the same ({nodes, edges, width, height, categories, anchor}), so QML
+    and the side panel work identically for every anchor.
     """
     if kind == "process":
         return around(db, eventsdb, str(val), expanded=expanded)
 
-    # ВХОД ЧЕРЕЗ ДРУГОЙ ЭЛЕМЕНТ ВЕДЁТ В ТОТ ЖЕ ГРАФ. Порт, конфиг, открытый
-    # файл, приложение — это всё принадлежит процессу, и разбирают в итоге
-    # процесс. Поэтому резолвим сущность до её процесса и строим ОБЫЧНЫЙ
-    # граф процесса со всеми блоками, помечая, через что вошли.
-    # Пользователь — исключение: это не один объект, а множество процессов,
-    # и обобщённый граф с блоком «процессы» тут честнее.
+    # ENTERING THROUGH ANOTHER ELEMENT LEADS TO THE SAME GRAPH. A port, a config,
+    # an open file, an application - all of them belong to a process, and in the
+    # end it is the process that gets investigated. So we resolve the entity down
+    # to its process and build the ORDINARY process graph with all the blocks,
+    # marking what we entered through.
+    # A user is the exception: that is not one object but a set of processes, and a
+    # generic graph with a "processes" block is more honest here.
     pid = _owner_pid(db, kind, str(val))
     if pid:
         g = around(db, eventsdb, pid, expanded=expanded)
@@ -541,8 +543,9 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
         return nid
 
     def link(a, b, label="", rel="", direction="fwd", count=0, via_x=0):
-        # via_x — координата свободного коридора для ребра; общая раскладка
-        # категорий передаёт её всем графам, и без неё якорь-НЕ-процесс падал
+        # via_x is the coordinate of the free corridor for an edge; the common
+        # category layout passes it to every graph, and without it a non-process
+        # anchor used to fail
         edges.append({"a": a, "b": b, "label": label, "rel": rel,
                       "dir": direction, "count": count, "via_x": via_x})
 
@@ -552,7 +555,7 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
     root = add(table + ":" + val, nkind, label, table, table, col, val,
                focus=True, x=ax, y=ay)
 
-    # опорные значения центра: собственный ключ + package/user, если есть
+    # the reference values of the centre: its own key + package/user, if present
     keyvals = {(table, col): val}
     if center.get("package"):
         keyvals[("processes", "package")] = center["package"]
@@ -570,10 +573,10 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
 
     cats = {}
 
-    # РУЧНЫЕ КАТЕГОРИИ по реальным колонкам — там, где авто-обнаружение слабое
-    # (users всего 2 строки, config/open_file — путь). Это не выдумка: колонки
-    # существуют (processes.user, open_files.path), просто порог model() их не
-    # ловит. Тянем напрямую.
+    # MANUAL CATEGORIES over real columns - where automatic discovery is weak
+    # (users has only 2 rows, config/open_file is a path). This is not an
+    # invention: the columns exist (processes.user, open_files.path), it is just
+    # that the model() threshold does not catch them. We pull them directly.
     mc = _ro(db.path)
     try:
         if kind == "user":
@@ -601,10 +604,11 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
                     table="shell_history", col="user", val=val,
                     rel="did", drill="state"))
         elif kind == "address":
-            # КТО ХОДИЛ НА ЭТОТ АДРЕС. Тот же разбор, что у процесса, только
-            # опора — удалённый адрес: сначала живые сокеты из снимка, затем
-            # события сети (соединение могло закрыться, в снимке его уже нет,
-            # а в событиях оно осталось — иначе «кто отправлял» терялось).
+            # WHO WENT TO THIS ADDRESS. The same breakdown as for a process, only
+            # the support is the remote address: first the live sockets from the
+            # snapshot, then the network events (a connection may have closed and
+            # be gone from the snapshot while it remains in the events - otherwise
+            # "who sent it" was lost).
             seen_pids = set()
             for r in _q(mc, "SELECT proto, local, remote, process, state "
                             "FROM ports WHERE remote LIKE ? LIMIT 200",
@@ -653,7 +657,7 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
                 except Exception:
                     pass
         elif kind == "port":
-            # владелец порта + удалённые пиры на этом порту
+            # the owner of the port + the remote peers on that port
             for r in _q(mc, "SELECT proto, remote, process, exposure FROM ports "
                             "WHERE port=? LIMIT 400", (val,)):
                 proc = str(r.get("process") or "")
@@ -672,14 +676,14 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
                         sub=str(r.get("exposure") or ""), table="ports",
                         col="remote", val=host, rel="connected", drill="whois"))
         if kind in ("config", "open_file"):
-            # пакет-владелец файла (из строки app_config.app)
+            # the package that owns the file (from the app_config.app row)
             pk = str(center.get("app") or center.get("package") or "").strip()
             if pk:
                 cats.setdefault("package", []).append(dict(
                     id="pkg:" + pk, kind="package", label=pk, sub="owner",
                     table="applications", col="name", val=pk,
                     rel="from_package", drill="reanchor"))
-            # кто ДЕРЖИТ файл открытым (директории тоже)
+            # who HOLDS the file open (directories too)
             for r in _q(mc, "SELECT DISTINCT pid, process FROM open_files "
                             "WHERE path=? LIMIT 400", (val,)):
                 pr = str(r.get("process") or r.get("pid"))
@@ -688,7 +692,7 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
                     label=pr.split()[0][:22] if pr else str(r["pid"]),
                     sub="has it open", table="processes", col="pid",
                     val=str(r["pid"]), rel="opened", drill="reanchor"))
-            # события по этому пути
+            # events for this path
             if eventsdb is not None:
                 try:
                     for e in eventsdb.query(
@@ -716,8 +720,8 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
             if not hook:
                 continue
             bt, bc, ot, oc = hook
-            # не дублируем таблицы, собранные вручную для ЭТОГО якоря, и
-            # само себя
+            # we do not duplicate the tables collected manually for THIS anchor,
+            # nor the anchor itself
             if ot == table or ot in skip_manual or ot not in CATMAP:
                 continue
             v = keyvals.get((bt, bc), "")
@@ -755,19 +759,19 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
 
 def around(db, eventsdb, pid: str, depth_up: int = 6,
            depth_down: int = 2, expanded=()) -> dict:
-    """ДЕРЕВО ПРОЦЕССОВ СТУПЕНЬКАМИ вокруг выбранного.
+    """THE PROCESS TREE AS STEPS around the selected one.
 
-    Ступенька = поколение: слева предки (вплоть до init), в центре сам
-    процесс, справа потомки. Так сразу видно, КАК он запустился и кого
-    породил — это первый вопрос при разборе.
+    A step is a generation: the ancestors on the left (up to init), the process
+    itself in the centre, the descendants on the right. That immediately shows HOW
+    it started and what it spawned - the first question in an investigation.
 
-    На каждой ступеньке у узла показаны счётчики: сетевые сокеты, unix-
-    сокеты, открытые дескрипторы, события. Они отвечают «чем этот процесс
-    вообще занят», не заставляя открывать каждый узел.
+    On every step the node shows counters: network sockets, unix sockets, open
+    descriptors, events. They answer "what is this process busy with at all"
+    without forcing you to open every node.
 
-    Контекст самого процесса (пользователь, пакет, удалённые адреса)
-    добавляется отдельными узлами — по ним можно провалиться дальше.
-    Раскладка считается здесь: x = ступенька, y = строка внутри ступеньки.
+    The context of the process itself (the user, the package, the remote
+    addresses) is added as separate nodes - one can drill through them further.
+    The layout is computed here: x = the step, y = the row within the step.
     """
     pid = str(pid)
     con = _ro(db.path)
@@ -793,7 +797,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
                       "required_by FROM applications WHERE name=? LIMIT 1",
                  (pkg,)) if pkg else []
 
-        # счётчики сокетов сразу для всех процессов ветки — один проход
+        # socket counters for all the processes of the branch at once - one pass
         net_n, unix_n = {}, {}
         for r in _q(con, "SELECT process FROM ports WHERE COALESCE(process,'')<>''"):
             m = re.search(r"\((\d+)\)", str(r["process"]))
@@ -807,7 +811,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
     finally:
         con.close()
 
-    # ---- ветка: предки вверх, потомки вниз ----
+    # ---- the branch: ancestors up, descendants down ----
     chain = []
     cur, guard = me, 0
     while cur is not None and guard < depth_up:
@@ -816,9 +820,9 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
         if nxt is None or str(nxt["pid"]) == str(cur["pid"]):
             break
         cur, guard = nxt, guard + 1
-    chain.reverse()                      # от init к нашему процессу
+    chain.reverse()                      # from init to our process
 
-    levels = {}                          # ступенька -> список процессов
+    levels = {}                          # step -> the list of processes
     for i, r in enumerate(chain):
         levels.setdefault(i, []).append(r)
     base = len(chain) - 1
@@ -831,7 +835,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
             descend(k, lvl + 1)
     descend(me, base)
 
-    # ---- события по процессам ветки ----
+    # ---- events for the processes of the branch ----
     ev_n = {}
     if eventsdb is not None:
         pids = [str(r["pid"]) for lst in levels.values() for r in lst]
@@ -863,7 +867,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
         edges.append({"a": a, "b": b, "label": label, "rel": rel,
                       "dir": direction, "count": count, "via_x": via_x})
 
-    # шаги кратны сетке полотна (GRID=40), иначе узлы стоят между линиями
+    # the steps are multiples of the canvas grid (GRID=40), otherwise the nodes stand between lines
     STEP_X, STEP_Y = 240, 120
     for lvl in sorted(levels):
         group = levels[lvl]
@@ -872,7 +876,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
             name = (r.get("command") or "").split()[0].rsplit("/", 1)[-1] or rpid
             nid = "proc:" + rpid
             fd = _fd_count(rpid)
-            # ЧЕМ ЗАНЯТ процесс — счётчики прямо на узле
+            # WHAT the process is busy with - counters right on the node
             counts = []
             if net_n.get(rpid):
                 counts.append("net %d" % net_n[rpid])
@@ -897,11 +901,11 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
             if "proc:" + ppid in seen and ppid != rpid:
                 link("proc:" + ppid, nid, "spawned")
 
-    # ---- КОНТЕКСТ ПРОЦЕССА: КАТЕГОРИИ-КЛАСТЕРЫ вокруг узла ----
-    # Вместо длинной колонки — смысловые категории (пользователь, пакет,
-    # служба, сеть, IPC, файлы, конфиги, события, уязвимости...). Крупная
-    # категория сворачивается в мета-узел со счётчиком; expanded управляет,
-    # какие раскрыты. Раскладку кластеров считает _emit_categories.
+    # ---- THE CONTEXT OF THE PROCESS: CATEGORY CLUSTERS around the node ----
+    # Instead of a long column - meaningful categories (user, package, service,
+    # network, IPC, files, configs, events, vulnerabilities...). A large category
+    # collapses into a meta node with a counter; expanded controls which ones are
+    # open. The layout of the clusters is computed by _emit_categories.
     root = "proc:" + pid
     focus_node = [x for x in nodes if x["id"] == root][0]
     ax, ay = focus_node["x"], focus_node["y"]
@@ -912,7 +916,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
             id=mid, kind=kind, label=label, sub=sub, table=table,
             col=col, val=val, **ex))
 
-    # служба (systemd-юнит из cgroup) — «что реально запустило»
+    # the service (the systemd unit from cgroup) - "what really started it"
     unit = ""
     try:
         cg = open("/proc/%s/cgroup" % pid).read()
@@ -935,7 +939,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
              udesc or "systemd unit", "services", "unit", unit,
              rel="runs_unit", drill="state")
 
-    # пользователь
+    # the user
     if user:
         u = urow[0] if urow else {}
         push("identity", "user:" + user, "user", user,
@@ -943,16 +947,16 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
              (" · " + u.get("admin_groups") if u.get("admin_groups") else ""),
              "users", "name", user, rel="owns", drill="reanchor")
 
-    # пакет
+    # the package
     if pkg:
         a = app[0] if app else {}
         push("package", "pkg:" + pkg, "package", pkg,
              (a.get("kind") or "") + " " + (a.get("version") or ""),
              "applications", "name", pkg, rel="from_package", drill="reanchor")
 
-    # СЕТЬ: открытые сессии процесса. Читается как фраза «с <адресом> по
-    # <порту> <протокол>» — именно так о соединении и думают. Берём per-pid,
-    # это авторитетнее связи по пакету.
+    # NETWORK: the open sessions of the process. It reads as a phrase "with
+    # <address> over <port> <protocol>" - that is exactly how one thinks about a
+    # connection. Taken per pid, which is more authoritative than a link by package.
     for s_ in socks:
         remote = (s_.get("remote") or "").strip()
         openx = s_.get("exposure") == "OPEN (exposed)"
@@ -961,7 +965,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
         if remote and "*" not in remote:
             host = remote.rsplit(":", 1)[0]
             rport = remote.rsplit(":", 1)[-1]
-            # локальный порт показываем как «откуда» — видно направление
+            # the local port is shown as "from" - the direction becomes visible
             lport = (s_.get("local") or "").rsplit(":", 1)[-1]
             sub = proto.upper() + " · " + (state or "session")
             if lport:
@@ -977,7 +981,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
                  "ports", "port", s_.get("port") or "", rel="listens",
                  drill="state", risk=openx, badge=("OPEN" if openx else ""))
 
-    # открытые файлы И ДИРЕКТОРИИ
+    # open files AND DIRECTORIES
     opened = []
     try:
         con2 = _ro(db.path)
@@ -991,11 +995,11 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
         opened = []
     if not opened:
         opened = _open_targets(pid)
-    # ФАЙЛЫ ГРУППИРУЮТСЯ ПО КАТАЛОГАМ. Полсотни отдельных узлов с именами
-    # вроде «places.sqlite» ничего не говорят: важно, ГДЕ процесс работает —
-    # в своём каталоге, в /etc, в /tmp или в чужом профиле. Поэтому в
-    # подписи стоит каталог, а имя файла идёт второй строкой; каталог виден
-    # и в подсказке целиком.
+    # FILES ARE GROUPED BY DIRECTORY. Fifty separate nodes with names like
+    # "places.sqlite" say nothing: what matters is WHERE the process works - in
+    # its own directory, in /etc, in /tmp or in someone else's profile. So the
+    # label holds the directory and the file name goes on the second line; the
+    # full directory is also visible in the tooltip.
     by_dir = {}
     for f in opened:
         tgt = f["target"]
@@ -1018,18 +1022,18 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
              badge=("%d DELETED" % len(gone)) if gone else "",
              count=len(items))
 
-    # ФАЙЛЫ ИЗ КОМАНДНОЙ СТРОКИ (конфиги, сертификаты, ключи). У демона под
-    # другим пользователем /proc/<pid>/fd не читается, и «с каким конфигом он
-    # работает» оставалось без ответа; аргументы-пути видны всегда.
+    # FILES FROM THE COMMAND LINE (configs, certificates, keys). For a daemon
+    # running as another user /proc/<pid>/fd cannot be read, and "which config
+    # does it work with" had no answer; path arguments are always visible.
     for f_ in [x for x in str(me.get("arg_files") or "").split(", ") if x]:
         push("configs", "argfile:" + f_, "config",
              f_.rsplit("/", 1)[-1][:26], "given on the command line",
              "app_config", "path", f_, rel="declares", drill="state")
 
-    # КОГДА ВКЛЮЧИЛИ СИСТЕМУ и БЫЛ ЛИ КТО-ТО В СЕАНСЕ. Процесс живёт внутри
-    # запуска системы и, как правило, внутри чьего-то сеанса: без этого
-    # «когда он появился» повисает в воздухе.
-    # своё соединение: прежнее (uc) живёт в другом блоке и уже закрыто
+    # WHEN THE SYSTEM WAS TURNED ON and WHETHER ANYONE WAS IN A SESSION. A process
+    # lives inside a system boot and, as a rule, inside somebody's session:
+    # without that "when did it appear" hangs in the air.
+    # its own connection: the previous one (uc) lives in another block and is already closed
     bc = _ro(db.path)
     try:
         for b_ in _q(bc, "SELECT boot_id, started FROM boot_sessions "
@@ -1058,7 +1062,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
     except Exception:
         pass
 
-    # события — что процесс делал (drill: события по pid)
+    # events - what the process did (drill: events by pid)
     if eventsdb is not None:
         try:
             acts = eventsdb.query(
@@ -1073,14 +1077,14 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
                  "events", "event_action", str(e_["a"]),
                  rel="did", drill="events", pid=pid, when=str(e_["last"] or ""))
 
-    # ---- ОСТАЛЬНЫЕ САТЕЛЛИТЫ ИЗ ОБНАРУЖЕННОЙ КАРТЫ (config/vuln/persist/...) ----
+    # ---- THE REMAINING SATELLITES FROM THE DISCOVERED MAP (config/vuln/persist/...) ----
     try:
         model_links = model(db).get("links", [])
     except Exception:
         model_links = []
     keyvals = {("processes", "pid"): pid, ("processes", "package"): pkg,
                ("processes", "user"): user, ("applications", "name"): pkg}
-    # вручную собранное выше не дублируем
+    # what was collected manually above is not duplicated
     SKIP = {"processes", "applications", "users", "services", "ports", "open_files"}
     con3 = _ro(db.path)
     try:
@@ -1101,9 +1105,9 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
                 continue
             seen_sat.add((ot, oc))
             cat, k2, lcol, drill = CATMAP[ot]
-            # Закрытый бюллетень — это ИСТОРИЯ, а в блоке «Уязвимости» он
-            # читается как «у процесса есть дыра». В графе показываем только
-            # непропатченное; полный список остаётся во вкладке уязвимостей.
+            # A closed advisory is HISTORY, and in the "Vulnerabilities" block it
+            # reads as "the process has a hole". In the graph we show only what is
+            # unpatched; the full list stays in the vulnerabilities tab.
             where = ' AND status = \'open\'' if ot == "vulnerabilities" else ""
             try:
                 found = _q(con3, 'SELECT * FROM "%s" WHERE "%s"=?%s LIMIT 400'
@@ -1121,7 +1125,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
     finally:
         con3.close()
 
-    # блоки идут СПРАВА от дерева процессов
+    # the blocks go TO THE RIGHT of the process tree
     tree_right = max((n["x"] for n in nodes if n["id"].startswith("proc:")),
                      default=ax)
     tree_bottom = max((n["y"] for n in nodes if n["id"].startswith("proc:")),
@@ -1142,14 +1146,14 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
 
 
 def node_detail(db, eventsdb, table: str, col: str, val: str) -> dict:
-    """ВСЁ, что известно об объекте узла — для боковой панели графа.
+    """EVERYTHING known about the object of a node - for the graph side panel.
 
-    Работает для любого типа узла, потому что опирается не на зашитую схему,
-    а на КАРТУ СВЯЗЕЙ (model): берём строку из её таблицы, а затем по всем
-    обнаруженным связям подтягиваем связанные строки из других таблиц. Новый
-    источник свяжется сам и появится здесь без правки кода.
+    It works for a node of any type because it relies not on a hard-coded schema
+    but on the MAP OF LINKS (model): we take the row from its table and then pull
+    the related rows from other tables through every discovered link. A new source
+    links itself and shows up here without a code change.
 
-    Возвращает секции [{title, rows:[{k,v}]}] — интерфейс только рисует.
+    Returns sections [{title, rows:[{k,v}]}] - the interface only draws them.
     """
     table, col, val = str(table), str(col), str(val)
     if not table:
@@ -1180,7 +1184,7 @@ def node_detail(db, eventsdb, table: str, col: str, val: str) -> dict:
         else:
             main = {}
 
-        # связанные таблицы — из обнаруженной карты связей
+        # the linked tables - from the discovered map of links
         rel = []
         try:
             m = model(db)
@@ -1216,7 +1220,7 @@ def node_detail(db, eventsdb, table: str, col: str, val: str) -> dict:
     finally:
         con.close()
 
-    # что этот объект делал — из событий, если он там упоминается
+    # what this object did - from the events, if it is mentioned there
     if eventsdb is not None and val:
         try:
             ev = eventsdb.query(

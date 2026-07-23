@@ -3,9 +3,9 @@ id: LS-E-11
 type: enrichment
 version: 1.0.0
 title: File owner package
-# ЧЕЙ ЭТО ФАЙЛ: к событию целостности добавляем пакет, которому файл
-# принадлежит. Без этого «изменён /etc/x» не говорит, что чинить —
-# с пакетом сразу понятно: rpm -V <пакет> и откат.
+# WHOSE FILE THIS IS: we add the package that owns the file to an integrity
+# event. Without it "/etc/x was changed" does not say what to fix - with the
+# package it is obvious: rpm -V <package> and a rollback.
 code: |
   def enrich(rows):
       import os, subprocess

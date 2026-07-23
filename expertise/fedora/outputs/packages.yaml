@@ -4,23 +4,23 @@ type: statedb
 version: 2.0.0
 title: Applications
 table: applications
-# КЛЮЧ ВКЛЮЧАЕТ ВЕРСИЮ И АРХИТЕКТУРУ. По [kind, name] пакеты с одинаковым
-# именем схлопывались в одну строку: все GPG-ключи rpm называются
-# gpg-pubkey, а libgcc стоит и в i686, и в x86_64. Каждый прогон
-# «побеждал» другой пакет — таблица показывала сотни ложных изменений
-# и топила настоящую установку.
-# path тоже в ключе: у kind=bin ИМЕННО ПУТЬ отличает файлы с
-# одинаковым именем (winapps лежал и в ~/.local/bin, и в
-# /usr/local/bin — строки схлопывались и «менялись» каждый прогон).
-# У rpm путь пуст, поэтому на них это не влияет.
+# THE KEY INCLUDES THE VERSION AND THE ARCHITECTURE. With [kind, name] packages
+# with the same name collapsed into one row: every rpm GPG key is called
+# gpg-pubkey, and libgcc is installed both for i686 and for x86_64. Every run
+# a different package "won" - the table showed hundreds of false changes and
+# drowned the real installation.
+# the path is in the key too: for kind=bin it is THE PATH that tells apart files
+# with the same name (the same tool may live both in ~/.local/bin and in
+# /usr/local/bin - the rows collapsed and "changed" on every run).
+# For rpm the path is empty, so this does not affect them.
 key: [kind, name, version, arch, path]
 icon: applications-all
-# В таблицу applications пишут ТРИ правила (applications, packages,
-# dev_packages), у каждого своя доля строк и свой staleness. Отслеживание
-# нужно включать у КАЖДОГО: иначе удаление rpm-пакета проходит мимо
-# «Изменений», потому что его строку удаляет другой писатель.
+# THREE rules write into the applications table (applications, packages,
+# dev_packages), each owns its share of the rows and its own staleness. Tracking
+# has to be enabled on EVERY one of them: otherwise the removal of an rpm package
+# goes unnoticed, because its row is deleted by a different writer.
 track_changes: true
-# ВЫЧИСЛЯЕМЫЕ колонки: их считает обогащение из соседних строк, поэтому их
-# изменение — не событие системы. Появился один пакет — пересчитались
-# счётчики у десятков чужих строк, и настоящая установка тонула в шуме.
+# DERIVED columns: they are computed by enrichment from neighbouring rows, so a
+# change in them is not an event of the system. One package appears and the
+# counters of dozens of other rows are recomputed, drowning the real installation.
 derived_columns: [deps_count, required_by, required_by_names, category, purpose, url]

@@ -1,16 +1,16 @@
-"""Конвейеры LiSin: графы из объектов экспертизы.
+"""LiSin pipelines: graphs made of expertise objects.
 
-Экспертиза (expertise/):
-  inputs/<os>/*.yaml   — точки входа (command, interval, enabled)
-  normalize/*.yaml     — нормализация (Python-плагин: code → normalize(text))
-  filters/*.yaml       — фильтры (conditions: field/op/value)
-  correlation/*.yaml   — детекты (заготовка, пока не исполняются)
-  outputs/*.yaml       — точки выхода (type: statedb; позже postgres/syslog)
-  pipelines/*.yaml     — конвейеры: nodes (id, kind, ref, x, y) + edges
+The expertise (expertise/):
+  inputs/<os>/*.yaml   - inputs (command, interval, enabled)
+  normalize/*.yaml     - normalization (a Python plugin: code -> normalize(text))
+  filters/*.yaml       - filters (conditions: field/op/value)
+  correlation/*.yaml   - detections
+  outputs/*.yaml       - outputs (type: statedb; postgres/syslog later)
+  pipelines/*.yaml     - pipelines: nodes (id, kind, ref, x, y) + edges
 
-Исполнение: по интервалу точки входа запускается команда, результат идёт
-по рёбрам графа: normalize → rows, filter → отсев, output(statedb) →
-upsert в таблицу из правила нормализации.
+Execution: on the input's interval the command is run and the result travels
+along the edges of the graph: normalize -> rows, filter -> selection,
+output(statedb) -> upsert into the table of the normalization rule.
 """
 import json
 import re
@@ -26,24 +26,24 @@ import yaml
 EXPERTISE = Path(__file__).resolve().parent.parent / "expertise"
 
 
-_PY_CACHE = {}   # sha1(code) -> скомпилированная normalize(text)
+_PY_CACHE = {}   # sha1(code) -> the compiled normalize(text)
 
 
 def _plugin(code: str, fname: str):
-    """Компилирует Python-плагин из YAML-правила и достаёт из него функцию.
+    """Compiles a Python plugin from a YAML rule and pulls the function out of it.
 
-    Кэш по (хэш кода, имя функции); в namespace даём re/json, чтобы плагины
-    были короткими. Плагин самодостаточен — правило можно передать другому
-    пользователю как вклад. ДОВЕРИЕ: как и точки входа (bash -c), код правила
-    исполняется — импортируй/включай только проверенную экспертизу.
+    Cached by (hash of the code, function name); re/json are put into the
+    namespace so that plugins stay short. A plugin is self-contained - a rule can
+    be handed to another user as a contribution. TRUST: like the inputs (bash -c),
+    the rule's code is executed - import and enable only expertise you trust.
     """
     import hashlib
     h = (hashlib.sha1(code.encode("utf-8")).hexdigest(), fname)
     fn = _PY_CACHE.get(h)
     if fn is None:
-        # EXPERTISE — чтобы плагин мог читать СПРАВОЧНИКИ из
-        # expertise/reference/*.yaml (человеческие названия портов,
-        # процессов и т.п.), не зашивая пути в код.
+        # EXPERTISE - so that a plugin can read REFERENCE DATA from
+        # expertise/reference/*.yaml (human names of ports, processes and so on)
+        # without hard-coding the paths.
         ns = {"re": re, "json": json, "EXPERTISE": EXPERTISE}
         try:
             exec(compile(code, "<plugin>", "exec"), ns)
@@ -57,7 +57,7 @@ def _plugin(code: str, fname: str):
 
 
 def run_python(code: str, text: str) -> list[dict]:
-    """Плагин НОРМАЛИЗАЦИИ: normalize(text) -> list[dict]."""
+    """A NORMALIZATION plugin: normalize(text) -> list[dict]."""
     rows = _plugin(code, "normalize")(text)
     if not isinstance(rows, list):
         raise RuntimeError("normalize(text) must return list[dict]")
@@ -65,15 +65,16 @@ def run_python(code: str, text: str) -> list[dict]:
 
 
 def run_enrich(code: str, rows: list) -> list[dict]:
-    """Плагин ОБОГАЩЕНИЯ: enrich(rows) -> list[dict] (те же строки + поля)."""
+    """An ENRICHMENT plugin: enrich(rows) -> list[dict] (the same rows + fields)."""
     out = _plugin(code, "enrich")(rows)
     if not isinstance(out, list):
         raise RuntimeError("enrich(rows) must return list[dict]")
     return out
 
 
-# Категория элемента определяется полем type в YAML, а не директорией.
-# Директории (fedora, ...) — просто пакеты элементов; можно создавать свои.
+# The category of an object is decided by the type field in the YAML, not by the
+# directory. Directories (fedora, ...) are just packages of objects; you can
+# create your own.
 CATEGORIES = {
     "inputs": "Inputs",
     "normalize": "Normalization",
@@ -89,21 +90,22 @@ CATEGORIES = {
 TYPE2CAT = {"input": "inputs", "normalization_rule": "normalize",
             "enrichment": "enrich",
             "filter": "filters", "detection": "correlation",
+            "correlation_rule": "correlation",
             "output": "outputs", "statedb": "outputs", "syslog": "outputs",
-            # события: точка выхода в events.db (схема из таксономии)
+            # events: an output into events.db (schema from the taxonomy)
             "events": "outputs", "taxonomy": "taxonomy",
-            # сохранённые запросы поиска (expertise/queries/<каталог>/*.yaml)
+            # saved search queries (expertise/queries/<directory>/*.yaml)
             "query": "queries",
-            # справочники для обогащения (reference/*.yaml)
+            # reference data for enrichment (reference/*.yaml)
             "reference": "reference",
-            # правила находок (expertise/findings/*.yaml)
+            # finding rules (expertise/findings/*.yaml)
             "finding": "findings"}
 KIND2CAT = {"input": "inputs", "normalize": "normalize", "enrich": "enrich",
             "filter": "filters", "correlation": "correlation",
             "correlation": "correlation", "output": "outputs"}
 
 TYPE_BY_CAT = {"inputs": "input", "normalize": "normalization_rule",
-               "filters": "filter", "correlation": "detection",
+               "filters": "filter", "correlation": "correlation_rule",
                "outputs": "output"}
 ID_LETTER = {"inputs": "I", "normalize": "N", "filters": "F",
              "correlation": "C", "outputs": "O"}
@@ -148,7 +150,7 @@ TEMPLATES = {
                "# op: eq | ne | contains | not_contains | regex | in | not_in\n"
                "conditions:\n"
                "  - field: name\n    op: contains\n    value: \"\"\n",
-    "correlation": "name: {n}\nid: {id}\ntype: detection\nversion: 1.0.0\n"
+    "correlation": "name: {n}\nid: {id}\ntype: correlation_rule\nversion: 1.0.0\n"
                    "title: {n}\ntactic: 09_discovery\nseverity: low\n"
                    "description: \"\"\n"
                    "# detections are evaluated by the correlation engine\n",
@@ -179,13 +181,13 @@ def _match(row: dict, cond: dict) -> bool:
 
 
 def _apply_templates(rows: list, templates: list) -> list:
-    """Таблица ШАБЛОНОВ ШУМА: строка, совпавшая с ЛЮБЫМ шаблоном, либо
-    выбрасывается (action: drop, по умолчанию), либо только помечается
-    (action: tag) — тогда она остаётся, но с меткой в tags.
+    """A table of NOISE TEMPLATES: a row matching ANY template is either dropped
+    (action: drop, the default) or only tagged (action: tag) - then it stays but
+    with a mark in tags.
 
-    Шаблон: произвольные поля события (кроме служебных) сравниваются как
-    подстрока, а `match` — как регулярное выражение по message. Пустые поля
-    шаблона игнорируются, поэтому «provider: kwin_wayland» ловит всё от него.
+    A template: arbitrary event fields (except the service ones) are compared as a
+    substring, while `match` is a regular expression over message. Empty fields of
+    a template are ignored, so "provider: kwin_wayland" catches everything from it.
     """
     out = []
     for r in rows:
@@ -219,22 +221,22 @@ def _apply_templates(rows: list, templates: list) -> list:
             mark = "noise:" + str(hit.get("reason") or hit.get("name") or "match")
             r["tags"] = (tags + "," + mark).strip(",")
             out.append(r)
-        # action: drop → строка просто не попадает в out
+        # action: drop -> the row simply does not get into out
     return out
 
 
 class StatePipeline:
     def __init__(self, db):
         self.db = db
-        self._events = None          # база событий создаётся при первом выходе
+        self._events = None          # the event database is created on first output
         self.lock = threading.Lock()
         self.last: dict[tuple, float] = {}      # (pipe, node_id) -> ts
         self.status: dict[tuple, dict] = {}     # (pipe, node_id) -> {...}
-        self.peek: dict[tuple, dict] = {}       # последнее выполнение узла
+        self.peek: dict[tuple, dict] = {}       # the last execution of a node
         self.errors: list[str] = []
         self.reload()
 
-    # -------- загрузка экспертизы --------
+    # -------- loading the expertise --------
     def reload(self):
         self.objects: dict[str, dict] = {c: {} for c in CATEGORIES}
         self.errors = []
@@ -251,13 +253,13 @@ class StatePipeline:
                     self.objects[cat][ref] = cfg
                 else:
                     self.errors.append(
-                        f"{ref}: unknown type «{cfg.get('type', '')}»")
+                        f"{ref}: unknown type {cfg.get('type', '')!r}")
             except Exception as e:
                 self.errors.append(f"{ref}: {e}")
         self.pipelines: dict[str, dict] = {}
         for f in sorted((EXPERTISE / "pipelines").glob("*.yaml")):
             if f.name.endswith(".draft.yaml"):
-                continue    # черновики не исполняются
+                continue    # drafts are not executed
             try:
                 p = yaml.safe_load(f.read_text()) or {}
                 p.setdefault("nodes", [])
@@ -266,8 +268,8 @@ class StatePipeline:
                 self.pipelines[p["name"]] = p
             except Exception as e:
                 self.errors.append(f"pipelines/{f.stem}: {e}")
-        # осиротевшие служебные таблицы (источник удалён, напр. connections
-        # после слияния в ports) — вычищаем; пользовательские не трогаем
+        # orphaned service tables (the source was removed, e.g. connections after
+        # the merge into ports) are cleaned up; user tables are left alone
         keep = {o.get("table") for o in self.objects.get("outputs", {}).values()
                 if o.get("table")}
         try:
@@ -275,7 +277,7 @@ class StatePipeline:
         except Exception as e:
             self.errors.append(f"prune: {e}")
 
-    # -------- расписание --------
+    # -------- schedule --------
     def due(self) -> list[tuple]:
         now = time.time()
         out = []
@@ -290,7 +292,7 @@ class StatePipeline:
                     out.append((pn, n["id"]))
         return out
 
-    # -------- исполнение графа --------
+    # -------- executing the graph --------
     def run_node(self, pipe: str, node_id: str):
         pl = self.pipelines.get(pipe)
         if not pl:
@@ -305,15 +307,15 @@ class StatePipeline:
             self.last[(pipe, node_id)] = time.time()
             try:
                 if not cfg:
-                    raise RuntimeError(f"no input «{node['ref']}»")
+                    raise RuntimeError(f"no input {node['ref']!r}")
                 cmd = cfg["command"]
-                # команда — просто строка shell (пользователю не нужно
-                # перечислять argv-массив); список тоже поддержан
+                # the command is simply a shell string (a user does not have to
+                # spell out an argv array); a list is supported as well
                 if isinstance(cmd, str):
                     cmd = ["bash", "-c", cmd]
                 text = subprocess.run(cmd, capture_output=True,
                                       text=True, timeout=60).stdout
-                # последнее выполнение точки входа: её stdout
+                # the last execution of the input: its stdout
                 self.peek[(pipe, node_id)] = {"out_text": text[:20000]}
                 st["rows"] = self._walk(pl, nodes, node_id, pipe,
                                         {"text": text, "rows": None, "rule": None})
@@ -322,35 +324,35 @@ class StatePipeline:
         self.status[(pipe, node_id)] = st
 
     def events(self):
-        """База событий (ленивая): создаётся, только если есть выход type:events.
-        Схема строится из таксономии expertise/taxonomy/events.yaml."""
+        """The event database (lazy): created only if there is a type:events output.
+        The schema is built from the expertise/taxonomy/events.yaml taxonomy."""
         if self._events is None:
             from .eventsdb import EventsDB
             self._events = EventsDB()
         return self._events
 
-    # предел событий-изменений за один прогон одной таблицы: массовое
-    # обновление (dnf upgrade на 200 пакетов) не должно топить ленту.
-    # Превышение НЕ замалчивается — вместо строк пишется сводное событие.
+    # the limit of change events per one run of one table: a mass update
+    # (dnf upgrade over 200 packages) must not drown the feed.
+    # Going over it is NOT hushed up - instead of rows a summary event is written.
     CHANGE_CAP = 150
 
     def _emit_changes(self, out: dict, table: str, keys: list, diff: dict) -> int:
-        """Разницу состояния — в события общей таксономии.
+        """State differences turned into events of the common taxonomy.
 
-        Одно событие = один переход: появилось / исчезло / изменилось.
-        object_type = таблица, object_name = ключ строки, поэтому из события
-        всегда можно вернуться к строке состояния, а из строки — поднять её
-        историю. Это и есть связь «состояние <-> события».
+        One event = one transition: appeared / disappeared / changed.
+        object_type = the table, object_name = the key of the row, so from an
+        event one can always return to the state row, and from a row one can pull
+        up its history. That is the "state <-> events" link.
         """
         import datetime
         if diff.get("was_empty"):
-            return 0            # первичная инвентаризация — не изменение
-        # ВЫЧИСЛЯЕМЫЕ КОЛОНКИ НЕ СЧИТАЮТСЯ ИЗМЕНЕНИЕМ СИСТЕМЫ.
-        # deps_count/required_by и подобные считает обогащение из соседних
-        # строк: стоит появиться одному пакету — пересчитываются десятки
-        # чужих строк. На живых данных это давало «массовое изменение,
-        # изменено 22» каждый прогон и топило настоящую установку.
-        # Список объявляется в ТОЧКЕ ВЫХОДА (derived_columns), а не в коде.
+            return 0            # the first inventory is not a change
+        # DERIVED COLUMNS ARE NOT A CHANGE OF THE SYSTEM.
+        # deps_count/required_by and the like are computed by enrichment from
+        # neighbouring rows: as soon as one package appears, dozens of other rows
+        # are recomputed. On live data that produced "mass change, 22 changed" on
+        # every run and drowned the real installation.
+        # The list is declared in the OUTPUT (derived_columns), not in the code.
         derived = set(out.get("derived_columns") or [])
         items = []
         for kind, act, sev in (("added", "state_added", 30),
@@ -361,7 +363,7 @@ class StatePipeline:
                     real = {k: v for k, v in (it.get("fields") or {}).items()
                             if k not in derived}
                     if not real:
-                        continue          # поменялось только вычисленное
+                        continue          # only a computed value changed
                     it = {"key": it.get("key", []), "fields": real}
                 items.append((kind, act, sev, it))
         if not items:
@@ -381,8 +383,8 @@ class StatePipeline:
                 "event_provider": "pipeline", "message": msg,
                 "subject_type": "system", "subject_name": "system",
                 "object_type": table, "object_name": name,
-                # ключ дедупликации: одно и то же изменение при повторном
-                # прогоне не должно порождать вторую запись
+                # the deduplication key: the same change on a repeated run must
+                # not produce a second record
                 "event_id": "state:%s:%s:%s:%s" % (table, act, name,
                                                    detail or ts[:16]),
             }
@@ -393,13 +395,13 @@ class StatePipeline:
             n_chg = sum(1 for i in items if i[0] == "changed")
             bulk = base(
                 "state_bulk_change", 35, title,
-                "bulk change «%s»: %d added, %d removed, %d changed. "
+                "bulk change %r: %d added, %d removed, %d changed. "
                 "Examples: %s (summarised — more than %d records)"
                 % (title, n_add, n_del, n_chg,
                    "; ".join(" / ".join(str(x) for x in it.get("key", []))
                              for _, _, _, it in items[:8]),
                    self.CHANGE_CAP))
-            # даже у сводки должно быть видно, КАКОЙ таблицы она касается
+            # even a summary must show WHICH table it is about
             bulk.update({"change_table": table, "change_row": "",
                          "change_field": "", "change_old": "",
                          "change_new": ""})
@@ -409,13 +411,13 @@ class StatePipeline:
                 name = " / ".join(str(x) for x in it.get("key", []))
                 if kind == "changed":
                     fields = it.get("fields", {})
-                    # ОТДЕЛЬНОЕ СОБЫТИЕ НА КАЖДОЕ ПОЛЕ: так переход читается
-                    # структурно («таблица X, поле Y: было A, стало B») и по
-                    # нему можно фильтровать и группировать. Одной строкой в
-                    # message это было невозможно.
+                    # A SEPARATE EVENT PER FIELD: that way a transition reads
+                    # structurally ("table X, field Y: was A, became B") and can
+                    # be filtered and grouped by. As one line in message that was
+                    # impossible.
                     for fld, val in list(fields.items())[:6]:
                         r = base(act, sev, name,
-                                 "«%s» / %s — %s: %s -> %s"
+                                 "%s / %s - %s: %s -> %s"
                                  % (title, name, fld,
                                     (val[0] or "empty")[:60],
                                     (val[1] or "empty")[:60]), fld)
@@ -433,15 +435,15 @@ class StatePipeline:
         return self.events().append(rows)
 
     def _enrich(self, rows: list, enr: dict) -> list:
-        """Обогащение строк колонками из другой таблицы состояния (связь)."""
+        """Enriching rows with columns from another state table (a link)."""
         table = enr.get("lookup_table", "")
         if not table or not rows:
             return rows
         lk_key = enr.get("lookup_key", "name")
         from_field = enr.get("from_field", "")
-        pat = enr.get("extract", "")           # regex → группа 1 = ключ
-        add = enr.get("add", {})               # {новая_колонка: колонка_в_lookup}
-        # индекс lookup-таблицы по её ключу
+        pat = enr.get("extract", "")           # regex -> group 1 = the key
+        add = enr.get("add", {})               # {new_column: column_in_lookup}
+        # an index of the lookup table by its key
         idx = {}
         for r in self.db.query(f'SELECT * FROM "{table}"').get("rows", []):
             idx[str(r.get(lk_key, ""))] = r
@@ -462,45 +464,46 @@ class StatePipeline:
                 continue
             n = nodes[b]
             c = dict(ctx)
-            # последнее выполнение узла: что пришло на вход
+            # the last execution of the node: what arrived at its input
             peek = {"in_text": (ctx.get("text") or "")[:20000]
                     if ctx.get("rows") is None else None,
                     "in_rows": ctx.get("rows")[:200] if ctx.get("rows") else None}
             try:
                 if n["kind"] == "normalize":
-                    # нормализация ТОЛЬКО парсит вход в строки нужной формы;
-                    # какие колонки — определяют сами строки (ключи dict).
+                    # normalization ONLY parses the input into rows of the right
+                    # shape; which columns there are is decided by the rows
+                    # themselves (the dict keys).
                     rule = self.objects["normalize"].get(n["ref"])
                     if not rule:
-                        raise RuntimeError(f"no rule «{n['ref']}»")
-                    # Логика нормализации — Python-плагин прямо в YAML (поле
-                    # code с функцией normalize(text)->list[dict]). Правило
-                    # самодостаточно: метаданные + код в одном файле, можно
-                    # делиться как вкладом сообщества. VRL/Vector больше не
-                    # используется — вся нормализация на Python.
+                        raise RuntimeError(f"no rule {n['ref']!r}")
+                    # The normalization logic is a Python plugin right inside the
+                    # YAML (the code field with a normalize(text)->list[dict]
+                    # function). A rule is self-contained: metadata + code in one
+                    # file, it can be shared as a community contribution.
+                    # VRL/Vector is no longer used - all normalization is Python.
                     code = rule.get("code", "")
                     if not code.strip():
                         raise RuntimeError(
-                            f"rule «{rule['name']}»: no Python plugin "
+                            f"rule {rule['name']!r}: no Python plugin "
                             f"(code field with normalize(text))")
                     c["rows"] = run_python(code, c["text"])
                 elif n["kind"] == "enrich":
-                    # ОБОГАЩЕНИЕ: добавляет колонки из другой таблицы БД по
-                    # ключу связи. YAML: lookup_table, from_field, extract
-                    # (regex для ключа), lookup_key, add {новое: колонка_lookup}
+                    # ENRICHMENT: adds columns from another table of the database
+                    # by a link key. YAML: lookup_table, from_field, extract
+                    # (regex for the key), lookup_key, add {new: lookup_column}
                     enr = self.objects["enrich"].get(n["ref"], {})
                     if c["rows"] is not None:
-                        # два вида обогащения: Python-плагин (code: enrich(rows))
-                        # или декларативная связь с таблицей состояния
+                        # two kinds of enrichment: a Python plugin (code:
+                        # enrich(rows)) or a declarative link to a state table
                         ecode = enr.get("code", "")
                         if ecode.strip():
                             c["rows"] = run_enrich(ecode, c["rows"])
                         else:
                             c["rows"] = self._enrich(c["rows"], enr)
                 elif n["kind"] == "filter":
-                    # ФИЛЬТР: conditions (ВСЕ должны быть истинны) и/или
-                    # templates — таблица шаблонов шума: строка, совпавшая с
-                    # ЛЮБЫМ шаблоном, отбрасывается (или помечается tags).
+                    # FILTER: conditions (ALL must be true) and/or templates - a
+                    # table of noise templates: a row that matched ANY template is
+                    # dropped (or marked in tags).
                     flt = self.objects["filters"].get(n["ref"], {})
                     conds = flt.get("conditions", [])
                     tmpls = flt.get("templates", [])
@@ -510,36 +513,43 @@ class StatePipeline:
                     if c["rows"] is not None and tmpls:
                         c["rows"] = _apply_templates(c["rows"], tmpls)
                 elif n["kind"] == "correlation":
-                    # ДЕТЕКТЫ: правила смотрят на окно событий в events.db,
-                    # а не на строки этого прогона — иначе порог «5 за 5 минут»
-                    # не собрать. Узел один: движок прогоняет ВСЕ правила.
+                    # CORRELATION: a rule looks at a window of events in events.db,
+                    # not at the rows of this run - otherwise a "5 in 5 minutes"
+                    # threshold cannot be assembled.
+                    # ONE NODE = ONE RULE (by its ref). It used to run EVERY rule
+                    # whatever the node pointed at, so four rules out of five hung
+                    # in the catalogue as orphans while silently being executed -
+                    # the graph did not show what was really running.
                     from . import correlate
-                    rep = correlate.run(self.events(), self.objects["correlation"])
+                    all_rules = self.objects["correlation"]
+                    rules = ({n["ref"]: all_rules[n["ref"]]}
+                             if n.get("ref") in all_rules else all_rules)
+                    rep = correlate.run(self.events(), rules)
                     peek["out_rows"] = rep["alerts"][:200]
                     peek["out_count"] = len(rep["alerts"])
                     if rep["errors"]:
                         peek["error"] = "; ".join(rep["errors"][:3])
                     written += rep["added"]
                 elif n["kind"] == "output":
-                    # точка выхода определяет таблицу/базу/ключ; колонки —
-                    # объединение ключей всех строк (порядок из первой)
+                    # the output decides the table/database/key; the columns are
+                    # the union of the keys of all rows (order from the first)
                     out = self.objects["outputs"].get(n["ref"], {})
                     if out.get("type") == "events" and c["rows"]:
-                        # СОБЫТИЯ: append-only в events.db, схема из таксономии,
-                        # дедуп по ключу таксономии (INSERT OR IGNORE)
+                        # EVENTS: append-only into events.db, schema from the
+                        # taxonomy, dedup by the taxonomy key (INSERT OR IGNORE)
                         ev = self.events()
                         written += ev.append(c["rows"])
-                        ev.prune()      # retention: держим последние N событий
+                        ev.prune()      # retention: keep the last N events
                     elif out.get("type") == "statedb" and c["rows"] is not None:
-                        # ВАЖНО: пустой набор строк — это НЕ «нечего делать».
-                        # Источник законно опустел (уязвимости закрыты патчем,
-                        # контейнер остановлен, сокет закрыт) — и тогда выход
-                        # обязан дойти до upsert, чтобы staleness удалил старые
-                        # строки. Раньше здесь стояло `and c["rows"]`, и данные
-                        # висели в таблице вечно: пользователь обновил систему,
-                        # а уязвимости продолжали показываться.
-                        # Сбой команды сюда не доходит — он поднимает исключение
-                        # выше и таблицу не трогает.
+                        # IMPORTANT: an empty set of rows is NOT "nothing to do".
+                        # The source may legitimately be empty (vulnerabilities
+                        # closed by a patch, a stopped container, a closed socket)
+                        # - and then the output must still reach upsert so that
+                        # staleness deletes the old rows. This used to say
+                        # `and c["rows"]`, and the data hung in the table forever:
+                        # the user updated the system and the vulnerabilities kept
+                        # being shown. A failing command does not reach here - it
+                        # raises an exception above and does not touch the table.
                         table = out.get("table") or n["ref"].rsplit("/", 1)[-1]
                         cols = []
                         for r in c["rows"]:
@@ -547,8 +557,8 @@ class StatePipeline:
                                 if k not in cols:
                                     cols.append(k)
                         if not cols:
-                            # колонок нет только у пустого набора: схему не
-                            # трогаем, но мёртвые строки этого выхода убираем
+                            # only an empty set has no columns: we do not touch
+                            # the schema but remove the dead rows of this output
                             self.db.clear_src(table, n["id"])
                             peek["out_rows"] = None
                             peek["out_count"] = 0
@@ -556,10 +566,10 @@ class StatePipeline:
                             written += self._walk(pl, nodes, n["id"], pipe, c)
                             continue
                         key = out.get("key") or cols[:1]
-                        # Колонка из КЛЮЧА обязана существовать, даже если
-                        # правило её не отдаёт: в одну таблицу пишут разные
-                        # нормализации (у rpm есть arch, у pip нет), и без
-                        # этого выход падал с KeyError на чужом ключе.
+                        # A column from the KEY must exist even if the rule does
+                        # not return it: different normalizations write into one
+                        # table (rpm has arch, pip does not), and without this the
+                        # output failed with a KeyError on someone else's key.
                         for k in key:
                             if k not in cols:
                                 cols.append(k)
@@ -568,30 +578,30 @@ class StatePipeline:
                         self.db.ensure_table(
                             table, out.get("title", table),
                             out.get("icon", "view-list-details"), cols)
-                        # src = id узла выхода: каждый выход владеет своей
-                        # долей строк таблицы (несколько выходов → одна таблица)
+                        # src = the id of the output node: every output owns its
+                        # share of the table's rows (several outputs -> one table)
                         diff = self.db.upsert(table, key, cols, c["rows"],
                                               src=n["id"])
-                        # ОТМЕТКА ВРЕМЕНИ СБОРА: по ней видно, что источник
-                        # реально отработал, а пустая таблица — это «пусто»,
-                        # а не «давно не собиралось»
+                        # THE COLLECTION TIMESTAMP: it shows that the source
+                        # really ran, and that an empty table means "empty" rather
+                        # than "not collected for a long time"
                         self.db.mark_collected(table)
-                        # ПЕРЕХОД СОСТОЯНИЯ -> СОБЫТИЕ. Включается флагом
-                        # track_changes в точке выхода: у текучих таблиц
-                        # (процессы, сокеты) свои источники событий, и
-                        # дублировать их изменениями бессмысленно.
+                        # STATE TRANSITION -> EVENT. Switched on by the
+                        # track_changes flag in the output: fluid tables
+                        # (processes, sockets) have their own event sources, and
+                        # duplicating them with changes makes no sense.
                         if out.get("track_changes"):
                             written += self._emit_changes(out, table, key, diff)
                         written += len(c["rows"])
-                    # выход: что пришло в него
+                    # the output: what arrived at it
                     peek["out_rows"] = c["rows"][:200] if c.get("rows") else None
                     peek["out_count"] = len(c["rows"]) if c.get("rows") else 0
                     self.peek[(pipe, n["id"])] = peek
-                    # ПОСЛЕ выхода может стоять корреляция: события уже
-                    # записаны, значит детект видит их в этом же прогоне
+                    # AFTER an output there may be a correlation node: the events
+                    # are already written, so a detection sees them in the same run
                     written += self._walk(pl, nodes, n["id"], pipe, c)
                     continue
-                # нормализация/фильтр: что получилось на выходе узла
+                    # normalization/filter: what came out of the node
                 peek["out_rows"] = c["rows"][:200] if c.get("rows") else None
                 peek["out_count"] = len(c["rows"]) if c.get("rows") else 0
                 self.peek[(pipe, n["id"])] = peek
@@ -618,7 +628,7 @@ class StatePipeline:
         for pn in self.pipelines:
             self.run_pipeline(pn)
 
-    # -------- данные для UI --------
+    # -------- data for the UI --------
     def _obj_title(self, kind: str, ref: str) -> dict:
         if not ref:
             return {"title": "(unbound)", "icon": "emblem-warning"}
@@ -658,10 +668,10 @@ class StatePipeline:
                 "edges": [list(e) for e in pl["edges"]]}
 
     def flows(self, pipe: str) -> list[dict]:
-        """Конвейер как СПИСОК потоков данных — по одному на точку входа:
-        input → normalize → [enrich/filter] → output. Читать удобнее графа:
-        одна строка = один источник состояния со стадиями и статусом.
-        Граф-редактор остаётся для правки топологии; это — витрина."""
+        """The pipeline as a LIST of data flows - one per input:
+        input -> normalize -> [enrich/filter] -> output. Easier to read than the
+        graph: one line = one state source with its stages and status.
+        The graph editor stays for editing the topology; this is the showcase."""
         pl = self.pipelines.get(pipe)
         if not pl:
             return []
@@ -686,7 +696,7 @@ class StatePipeline:
         for n in pl["nodes"]:
             if n["kind"] != "input":
                 continue
-            # множество достижимых вперёд узлов (обычно линейная цепочка)
+            # the set of forward-reachable nodes (usually a linear chain)
             seen, stack = set(), [n["id"]]
             while stack:
                 cur = stack.pop()
@@ -726,12 +736,12 @@ class StatePipeline:
         out.sort(key=lambda f: f["title"].lower())
         return out
 
-    # -------- черновики конвейера --------
+    # -------- pipeline drafts --------
     def _draft_path(self, pipe: str) -> Path:
         return EXPERTISE / "pipelines" / f"{pipe}.draft.yaml"
 
     def graph_draft(self, pipe: str) -> dict:
-        """Граф для редактора: черновик, если есть, иначе текущий."""
+        """The graph for the editor: the draft if there is one, otherwise the current."""
         dp = self._draft_path(pipe)
         if not dp.exists():
             g = self.graph(pipe)
@@ -755,11 +765,12 @@ class StatePipeline:
                 "edges": [list(e) for e in pl.get("edges", [])], "draft": True}
 
     def save_layout(self, pipe: str, pos: dict):
-        """Обновить x/y узлов в рабочем файле конвейера, не трогая топологию.
+        """Update the x/y of the nodes in the working pipeline file without
+        touching the topology.
 
-        Правится ИМЕННО файл на диске (а не только память), иначе раскладка
-        терялась бы при следующей загрузке. Узлы, которых нет в pos,
-        остаются как были.
+        It is EXACTLY the file on disk that is edited (not only memory), otherwise
+        the layout would be lost on the next load. Nodes absent from pos are left
+        as they were.
         """
         pl = self.pipelines.get(pipe)
         if not pl:
@@ -829,7 +840,7 @@ class StatePipeline:
             self.reload()
         return name
 
-    # -------- экспертиза для UI --------
+    # -------- expertise for the UI --------
     def expertise_dirs(self) -> list[dict]:
         out = []
         for d in sorted(p for p in EXPERTISE.rglob("*")
@@ -858,7 +869,7 @@ class StatePipeline:
         return out
 
     def expertise_catalog(self, category: str) -> list[dict]:
-        """Элементы категории (по полю type), ref — путь от корня экспертизы."""
+        """Objects of a category (by the type field); ref is the path from the expertise root."""
         out = []
         for ref, cfg in sorted(self.objects.get(category, {}).items()):
             out.append({"ref": ref,

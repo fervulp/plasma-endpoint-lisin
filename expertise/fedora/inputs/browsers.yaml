@@ -3,19 +3,19 @@ id: LS-I-57
 type: input
 version: 1.0.0
 title: Browser profiles, extensions and history
-# БРАУЗЕРЫ ИЩУТСЯ ПО СИСТЕМЕ, А НЕ ПО СПИСКУ ИМЁН.
-#  * что вообще является браузером — решает сама система: desktop-запись,
-#    объявившая себя обработчиком x-scheme-handler/http;
-#  * где профили — по СЛЕДАМ НА ДИСКЕ: каталог с places.sqlite (семейство
-#    Mozilla) либо с History/Secure Preferences (семейство Chromium).
-# Проверено на живой машине: так нашлись профили, которых в любом списке
-# имён не было бы — ~/.zen, ~/.bxd/chromium и Chromium внутри BurpSuite.
-# Профиль без desktop-записи помечается: браузер поставлен мимо системы, и
-# это само по себе повод посмотреть.
+# BROWSERS ARE FOUND THROUGH THE SYSTEM, NOT FROM A LIST OF NAMES.
+#  * what counts as a browser is decided by the system itself: a desktop entry
+#    that declares itself a handler of x-scheme-handler/http;
+#  * where the profiles are is found from TRACES ON DISK: a directory with
+#    places.sqlite (the Mozilla family) or with History/Secure Preferences (the Chromium family).
+# Verified on a live machine: this found profiles that no list of names would
+# have contained, including a Chromium inside another application's directory.
+# A profile without a desktop entry is marked: the browser was installed
+# outside the system, and that alone is a reason to look.
 #
-# Базы копируются перед чтением: запущенный браузер держит их заблокированными.
-# Расширения: Mozilla — extensions.json, Chromium — Secure Preferences
-# (там же состояние, признак магазина и дата установки).
+# The databases are copied before reading: a running browser keeps them locked.
+# Extensions: Mozilla uses extensions.json, Chromium uses Secure Preferences
+# (which also holds the state, the store flag and the installation date).
 command: |
   python3 - <<'PYBROWSERS'
   import json, os, shutil, sqlite3, subprocess, tempfile, time
@@ -25,10 +25,10 @@ command: |
   SKIP = {"node_modules", ".git", ".cache", "Trash", ".local/share/Trash"}
 
   def desktop_browsers():
-      """Браузеры = desktop-записи, объявившие себя обработчиком http.
+      """Browsers = desktop entries that declared themselves http handlers.
 
-      Именно так система сама определяет, что программа — браузер. Список имён
-      («firefox, chrome, ...») устарел бы на первой же незнакомой сборке.
+      That is exactly how the system itself decides a program is a browser. A list
+      of names ("firefox, chrome, ...") would go stale on the first unfamiliar build.
       """
       out = {}
       dirs = ["/usr/share/applications", str(HOME / ".local/share/applications"),
@@ -55,7 +55,7 @@ command: |
       return out
 
   def profiles():
-      """Профили ищем по СЛЕДАМ НА ДИСКЕ, а не по именам каталогов."""
+      """Profiles are found from TRACES ON DISK, not from directory names."""
       found = []
       try:
           r = subprocess.run(
@@ -82,10 +82,10 @@ command: |
       return found
 
   def owner(prof: Path, browsers: dict) -> str:
-      """Чей это профиль. Каталог-владелец — РОДИТЕЛЬ профиля: у всех семейств
-      структура <каталог браузера>/<профиль>. Затем пробуем сопоставить его с
-      desktop-записью, чтобы показать человеческое имя. Профиль без записи —
-      сам по себе сигнал: браузер поставлен мимо системы.
+      """Whose profile this is. The owning directory is the PARENT of the profile:
+      every family uses <browser directory>/<profile>. Then we try to match it with
+      a desktop entry to show a human name. A profile without an entry is a signal
+      in itself: the browser was installed outside the system.
       """
       tok = prof.parent.name.lstrip(".") or prof.name.lstrip(".")
       low = tok.lower()
@@ -94,11 +94,11 @@ command: |
           for cand in (ex, key.lower()):
               if cand and (low in cand or cand in low):
                   return b["name"]
-      return tok + " (нет desktop-записи)"
+      return tok + " (no desktop entry)"
 
 
   def read_db(path: Path, sql: str, limit_note=""):
-      """Копируем базу перед чтением: живой браузер держит её заблокированной."""
+      """Copy the database before reading: a live browser keeps it locked."""
       if not path.exists():
           return []
       tmp = Path(tempfile.mkdtemp()) / path.name
@@ -132,7 +132,7 @@ command: |
           src = a.get("sourceURI") or ""
           st = "store" if "addons.mozilla.org" in src else (
               "system" if str(a.get("location", "")).startswith("app-") else
-              ("sideloaded" if src else "неизвестно"))
+              ("sideloaded" if src else "unknown"))
           inst = a.get("installDate") or 0
           when = time.strftime("%Y-%m-%d", time.localtime(inst / 1000)) if inst else ""
           tsv("EXT", bname, prof.name, "mozilla", a.get("id", ""),
@@ -168,7 +168,7 @@ command: |
           it = v.get("install_time") or v.get("first_install_time") or 0
           when = ""
           try:
-              # Chromium хранит время в микросекундах от 1601 года
+              # Chromium stores time in microseconds since 1601
               when = time.strftime("%Y-%m-%d", time.localtime(int(it) / 1e6 - 11644473600))
           except Exception:
               pass

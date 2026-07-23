@@ -1,10 +1,10 @@
-"""Состояние: снимок БД, правки таблиц, детали процесса, SQL."""
+"""State: the database snapshot, table edits, process details, SQL."""
 from PySide6.QtCore import Slot
 
 
 class StateApi:
-    # Миксин Backend: слоты регистрируются в metaObject при
-    # наследовании Backend(QObject, ...) — проверено.
+    # A Backend mixin: the slots are registered in metaObject on
+    # inheritance Backend(QObject, ...) - verified.
 
     @Slot()
     def reload(self):
@@ -16,11 +16,12 @@ class StateApi:
 
     @Slot()
     def collectNow(self):
-        """СОБРАТЬ СЕЙЧАС — не дожидаясь расписания.
+        """COLLECT NOW - without waiting for the schedule.
 
-        У источников свои интервалы (у уязвимостей, например, 6 часов), и
-        после установки патчей ждать полдня незачем. Прогон идёт в отдельном
-        потоке: интерфейс не замирает, а по окончании приходит свежий снимок.
+        The sources have their own intervals (six hours for vulnerabilities, for
+        instance), and after installing patches there is no point waiting half a
+        day. The run happens in a separate thread: the interface does not freeze,
+        and a fresh snapshot arrives when it finishes.
         """
         import threading
 
@@ -38,11 +39,11 @@ class StateApi:
 
     @Slot(result="QVariant")
     def livePids(self):
-        """PID процессов, которые ЕЩЁ ЖИВЫ (снимок состояния).
+        """The PIDs of processes that are STILL ALIVE (from the state snapshot).
 
-        Нужен, чтобы у события можно было предложить переход в граф процесса:
-        предлагать его для давно умершего процесса бессмысленно. Считается
-        один раз на страницу событий, а не на каждое событие.
+        It is needed so that an event can offer a jump into the process graph:
+        offering it for a long-dead process makes no sense. Computed once per page
+        of events, not once per event.
         """
         snap = self.db.snapshot()
         tab = next((t for t in snap.get("tabs", []) if t["name"] == "processes"), None)
@@ -55,15 +56,15 @@ class StateApi:
 
     @Slot(str, str, result="QVariant")
     def stateRows(self, table, where):
-        """СТРОКИ ТАБЛИЦЫ СОСТОЯНИЯ ПО SQL-УСЛОВИЮ.
+        """ROWS OF A STATE TABLE BY AN SQL CONDITION.
 
-        Раньше условие разбирал QML: он делил строку по « AND » и не понимал
-        ни OR, ни NOT, ни MATCH (тот превращается в LIKE '%…%'), поэтому часть
-        условий молча не работала. Теперь фильтрует сама база — один механизм
-        и в событиях, и в состоянии.
+        The condition used to be parsed by QML: it split the string on " AND " and
+        understood neither OR nor NOT nor MATCH (which turns into LIKE '%...%'), so
+        part of the condition silently did not work. Now the database itself
+        filters - one mechanism for both events and state.
 
-        Имя таблицы сверяется со списком таблиц, база открыта только на
-        чтение (StateDB.query), поэтому в SQL не попадает ничего чужого.
+        The table name is checked against the list of tables and the database is
+        opened read only (StateDB.query), so nothing foreign gets into the SQL.
         """
         table = (table or "").strip()
         names = {t["name"] for t in self.db.snapshot().get("tabs", [])}
@@ -79,11 +80,11 @@ class StateApi:
 
     @Slot(str, str, str, result="QVariant")
     def stateGroups(self, table, fields, where):
-        """Значения полей с количествами — левая колонка группировки.
+        """Field values with counts - the left column of the grouping.
 
-        Тот же механизм, что у событий (`eventGroups`), только по таблице
-        состояния: имя таблицы и каждое поле сверяются со снимком, поэтому в
-        SQL не попадает ничего постороннего.
+        The same mechanism as for events (`eventGroups`), only over a state table:
+        the table name and every field are checked against the snapshot, so
+        nothing foreign gets into the SQL.
         """
         table = (table or "").strip()
         snap = self.db.snapshot()
@@ -112,20 +113,20 @@ class StateApi:
 
     @Slot(str, result="QVariant")
     def stateSearch(self, q):
-        """ПОИСК ПО ВСЕМУ СОСТОЯНИЮ: в какой таблице встречается значение.
+        """SEARCH ACROSS THE WHOLE STATE: which table contains a value.
 
-        Аналитик обычно ищет не «в таблице процессов», а просто адрес, имя
-        файла или пользователя — и хочет знать, где это вообще есть. Идём по
-        всем таблицам состояния, ищем подстроку в любой колонке, возвращаем
-        таблицу, число совпадений и несколько примеров.
+        An analyst usually does not search "in the process table" but simply for an
+        address, a file name or a user - and wants to know where it exists at all.
+        We walk every state table, look for the substring in any column and return
+        the table, the number of matches and a few examples.
         """
         q = (q or "").strip()
         if len(q) < 2:
             return {"query": q, "tables": [], "total": 0, "error": ""}
         ql = q.lower()
         out, total = [], 0
-        # СНИМОК СОСТОЯНИЯ — тот же, что видит интерфейс: ищем ровно в том,
-        # что показано, без отдельного пути к базе.
+        # THE STATE SNAPSHOT - the same one the interface sees: we search in
+        # exactly what is shown, without a separate path to the database.
         snap = self.db.snapshot()
         for tab in snap.get("tabs", []):
             name = tab.get("name") or ""
@@ -149,7 +150,7 @@ class StateApi:
         out.sort(key=lambda d: -d["n"])
         return {"query": q, "tables": out, "total": total, "error": ""}
 
-    # -------- конвейеры --------
+    # -------- pipelines --------
     @Slot(str, result="QVariant")
     def processDetails(self, pid):
         from agent import procinfo
@@ -157,12 +158,12 @@ class StateApi:
                      if t["name"] == "processes"), [])
         return procinfo.details(pid, rows)
 
-    # -------- дашборд «Состояние» --------
+    # -------- the "State" dashboard --------
     @Slot(str, result="QVariant")
     def sqlQuery(self, sql):
         return self.db.query(sql)
 
-    # -------- экспертиза --------
+    # -------- expertise --------
     @Slot(str, str)
     def addColumn(self, tab, col):
         self.db.add_column(tab, col)
@@ -198,6 +199,6 @@ class StateApi:
         self.reload()
 
 
-_instance_lock = None   # держим fd открытым всю жизнь процесса
+_instance_lock = None   # we keep the fd open for the whole life of the process
 
 

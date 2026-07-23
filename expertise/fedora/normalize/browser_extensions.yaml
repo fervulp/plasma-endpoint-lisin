@@ -3,52 +3,29 @@ id: LS-N-57
 type: normalization_rule
 version: 1.1.0
 title: Browser extensions
-# Расширение браузера — код, который выполняется на КАЖДОЙ открытой странице
-# и видит то же, что и пользователь. Поэтому здесь важны не имена, а факты:
-# какие права запрошены, ко всем ли сайтам есть доступ, из чего установлено.
-code: |
-  def normalize(text):
-      # ОДИН ext_id в профиле может встретиться НЕСКОЛЬКО раз (копия в профиле и
-      # копия в системном каталоге, разные версии). Раньше побеждала последняя
-      # запись и затирала предыдущую — вместе с уликами: у одной копии
-      # sourceURI был file:///tmp/..., у другой пустой, и признак терялся.
-      # Поэтому копии СЛИВАЮТСЯ: непустое значение не затирается пустым.
-      acc = {}
-      order = []
-      for ln in text.splitlines():
-          f = ln.split("\t")
-          if not f or f[0] != "EXT" or len(f) < 15:
-              continue
-          (_, browser, profile, family, ext_id, name, version, enabled,
-           kind, origin, installed, perms, origins, source_url, path) = f[:15]
-          # ФАКТЫ, а не приговор: расширение видит все страницы, если у него
-          # есть доступ ко всем доменам; «откуда» — из чего оно поставлено.
-          all_sites = "yes" if ("<all_urls>" in origins or "*://*/*" in origins
-                                or "http://*/*" in origins) else ""
-          # тревожный признак — не список «плохих имён», а НЕСООТВЕТСТВИЕ:
-          # расширение объявлено системным, но приехало из временного каталога
-          temp_src = "yes" if source_url.startswith(("file:///tmp",
-                                                     "file:///var/tmp",
-                                                     "file:///dev/shm")) else ""
-          row = {"browser": browser, "profile": profile, "name": name,
-                 "enabled": enabled, "origin": origin, "all_sites": all_sites,
-                 "from_temp": temp_src, "permissions": perms,
-                 "host_permissions": origins, "version": version,
-                 "installed": installed, "copies": "1", "ext_id": ext_id,
-                 "family": family, "kind": kind, "source_url": source_url,
-                 "path": path}
-          k = (browser, profile, ext_id)
-          old = acc.get(k)
-          if old is None:
-              acc[k] = row
-              order.append(k)
-              continue
-          old["copies"] = str(int(old["copies"]) + 1)
-          for col, val in row.items():
-              if col == "copies":
-                  continue
-              if not str(old.get(col) or "").strip() and str(val).strip():
-                  old[col] = val
-              elif col == "version" and val and val not in old["version"]:
-                  old["version"] = old["version"] + ", " + val
-      return [acc[k] for k in order]
+code: "def normalize(text):\n    # ONE ext_id may occur SEVERAL times in a profile (a copy in the profile\
+  \ and a\n    # copy in the system directory, different versions). The last record used to win\n    #\
+  \ and overwrote the previous one - together with the evidence: one copy had\n    # sourceURI file:///tmp/...,\
+  \ the other had none, and the sign was lost.\n    # So the copies are MERGED: a non-empty value is not\
+  \ overwritten by an empty one.\n    acc = {}\n    order = []\n    for ln in text.splitlines():\n   \
+  \     f = ln.split(\"\\t\")\n        if not f or f[0] != \"EXT\" or len(f) < 15:\n            continue\n\
+  \        (_, browser, profile, family, ext_id, name, version, enabled,\n         kind, origin, installed,\
+  \ perms, origins, source_url, path) = f[:15]\n        # FACTS, not a verdict: an extension sees every\
+  \ page if it has access to all\n        # domains; \"from where\" is what it was installed from.\n \
+  \       all_sites = \"yes\" if (\"<all_urls>\" in origins or \"*://*/*\" in origins\n              \
+  \                or \"http://*/*\" in origins) else \"\"\n        # the alarming sign is not a list\
+  \ of \"bad names\" but a MISMATCH: the extension\n        # is declared as a system one but came from\
+  \ a temporary directory\n        temp_src = \"yes\" if source_url.startswith((\"file:///tmp\",\n   \
+  \                                                \"file:///var/tmp\",\n                            \
+  \                       \"file:///dev/shm\")) else \"\"\n        row = {\"browser\": browser, \"profile\"\
+  : profile, \"name\": name,\n               \"enabled\": enabled, \"origin\": origin, \"all_sites\":\
+  \ all_sites,\n               \"from_temp\": temp_src, \"permissions\": perms,\n               \"host_permissions\"\
+  : origins, \"version\": version,\n               \"installed\": installed, \"copies\": \"1\", \"ext_id\"\
+  : ext_id,\n               \"family\": family, \"kind\": kind, \"source_url\": source_url,\n        \
+  \       \"path\": path}\n        k = (browser, profile, ext_id)\n        old = acc.get(k)\n        if\
+  \ old is None:\n            acc[k] = row\n            order.append(k)\n            continue\n      \
+  \  old[\"copies\"] = str(int(old[\"copies\"]) + 1)\n        for col, val in row.items():\n         \
+  \   if col == \"copies\":\n                continue\n            if not str(old.get(col) or \"\").strip()\
+  \ and str(val).strip():\n                old[col] = val\n            elif col == \"version\" and val\
+  \ and val not in old[\"version\"]:\n                old[\"version\"] = old[\"version\"] + \", \" + val\n\
+  \    return [acc[k] for k in order]\n"

@@ -21,21 +21,21 @@ code: |
               "description": f[6].strip() if n > 6 else "",
           })
       return rows
-# Тесты лежат РЯДОМ с правилом (приём из R-Vision SIEM): вход + ожидание.
-# Кнопка «Tests» в разделе «Экспертиза» прогоняет их и показывает pass/fail —
-# правило можно написать и проверить, не заглядывая в код приложения.
+# The tests live NEXT TO the rule (a technique from R-Vision SIEM): input +
+# expectation. The "Tests" button in the "Expertise" section runs them and shows
+# pass/fail - a rule can be written and verified without looking into the code.
 tests:
-  - name: строка rpm со всеми полями
+  - name: an rpm line with all the fields
     input: "rpm\tbash\t\t5.2.15\t/usr/bin/bash\tglibc\tGNU Bourne-Again Shell"
     expect:
       rows: 1
       contains: {kind: rpm, name: bash, version: 5.2.15}
       row0: {path: /usr/bin/bash, depends: glibc}
-  - name: короткая строка отбрасывается
+  - name: a short line is dropped
     input: "rpm"
     expect:
       rows: 0
-  - name: две строки разных видов
+  - name: two lines of different kinds
     input: "rpm\tbash\t\t5.2\nflatpak\tAlpaca\tcom.jeffser.Alpaca\t9.2.4"
     expect:
       rows: 2

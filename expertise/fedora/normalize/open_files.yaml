@@ -3,11 +3,19 @@ id: LS-N-58
 type: normalization_rule
 version: 2.0.0
 title: Files open right now
-code: "def normalize(text):\n    \"\"\"pid, процесс, дескриптор, цель + КЛАССИФИКАЦИЯ цели.\n\n    Классификация нужна, чтобы список читался: 858 «ядро» и 853 «сокет» из\n    3500 строк — это не файлы,\
-  \ и мешать их с настоящими файлами нельзя.\n    Помечается и УДАЛЁННЫЙ файл, который процесс всё ещё держит открытым:\n    классический признак того, что программу обновили, а старый образ живёт,\n  \
-  \  либо что файл прятали.\n    \"\"\"\n    rows = []\n    for ln in text.split(\"\\n\"):\n        f = ln.split(\"\\t\", 3)\n        if len(f) < 4 or not f[0].isdigit():\n            continue\n       \
-  \ pid, comm, fd, target = f[0], f[1], f[2], f[3]\n        deleted = \"\"\n        t = target\n        if t.endswith(\" (deleted)\"):\n            deleted = \"yes\"\n            t = t[:-len(\" (deleted)\"\
-  )]\n        if t.startswith(\"socket:\"):\n            kind = \"socket\"\n        elif t.startswith(\"pipe:\"):\n            kind = \"pipe\"\n        elif t.startswith(\"anon_inode:\"):\n            kind\
-  \ = \"kernel\"\n        elif t.startswith((\"/proc\", \"/sys\")):\n            kind = \"system state\"\n        elif t.startswith(\"/dev\"):\n            kind = \"device\"\n        elif t.startswith(\"\
-  /\"):\n            kind = \"file\"\n        else:\n            kind = \"other\"\n        rows.append({\"kind\": kind, \"process\": comm, \"pid\": pid,\n                     \"path\": t, \"deleted\": deleted,\
-  \ \"fd\": fd,\n                     \"dir\": t.rsplit(\"/\", 1)[0] if t.startswith(\"/\") else \"\"})\n    return rows\n"
+code: "def normalize(text):\n    \"\"\"pid, process, descriptor, target + a CLASSIFICATION of the target.\n\
+  \n    The classification is needed for the list to be readable: hundreds of \"kernel\"\n    and \"socket\"\
+  \ rows out of thousands are not files, and mixing them with real\n    files is wrong. A DELETED file\
+  \ that a process still holds open is marked too:\n    the classic sign that a program was updated while\
+  \ the old image is still alive,\n    or that a file was being hidden.\n    \"\"\"\n    rows = []\n \
+  \   for ln in text.split(\"\\n\"):\n        f = ln.split(\"\\t\", 3)\n        if len(f) < 4 or not f[0].isdigit():\n\
+  \            continue\n        pid, comm, fd, target = f[0], f[1], f[2], f[3]\n        deleted = \"\"\
+  \n        t = target\n        if t.endswith(\" (deleted)\"):\n            deleted = \"yes\"\n      \
+  \      t = t[:-len(\" (deleted)\")]\n        if t.startswith(\"socket:\"):\n            kind = \"socket\"\
+  \n        elif t.startswith(\"pipe:\"):\n            kind = \"pipe\"\n        elif t.startswith(\"anon_inode:\"\
+  ):\n            kind = \"kernel\"\n        elif t.startswith((\"/proc\", \"/sys\")):\n            kind\
+  \ = \"system state\"\n        elif t.startswith(\"/dev\"):\n            kind = \"device\"\n        elif\
+  \ t.startswith(\"/\"):\n            kind = \"file\"\n        else:\n            kind = \"other\"\n \
+  \       rows.append({\"kind\": kind, \"process\": comm, \"pid\": pid,\n                     \"path\"\
+  : t, \"deleted\": deleted, \"fd\": fd,\n                     \"dir\": t.rsplit(\"/\", 1)[0] if t.startswith(\"\
+  /\") else \"\"})\n    return rows\n"

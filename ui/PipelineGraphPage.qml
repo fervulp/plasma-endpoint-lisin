@@ -3,9 +3,9 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 
-// Полноэкранный редактор графа конвейера: пространство с зумом
-// (Ctrl+колесо), панорамированием, живыми рёбрами при перетаскивании
-// и панелью предпросмотра элемента экспертизы.
+// The full-screen pipeline graph editor: a space with zoom (Ctrl+wheel),
+// panning, live edges while dragging and a preview panel for the expertise
+// object.
 Kirigami.Page {
     id: page
     property string pipeName: ""
@@ -13,7 +13,7 @@ Kirigami.Page {
     property string selected: ""
     property string connectFrom: ""
     property real zoom: 1.0
-    // размер полотна по крайним узлам (+ запас), чтобы скроллилось до конца
+    // the canvas size follows the outermost nodes (+ a margin) so that it scrolls to the end
     property real worldW: {
         let m = 900
         for (const n of graph.nodes) m = Math.max(m, n.x + 400)
@@ -44,21 +44,21 @@ Kirigami.Page {
     function reloadGraph() {
         graph = backend.pipelineGraphDraft(pipeName)
         isDraft = graph.draft === true
-        // раскладка обязана быть корректной ВСЕГДА, а не только после
-        // нажатия «Arrange»
+        // the layout must be correct ALWAYS, not only after pressing
+        // "Arrange"
         if (enforceLayout() > 0) savePos()
         canvas.requestPaint()
     }
-    function save() {   // правки только в режиме редактирования → в черновик
+    function save() {   // edits only in edit mode -> into the draft
         if (!editMode) return
         backend.savePipelineDraft(pipeName, JSON.stringify(
             { nodes: graph.nodes, edges: graph.edges }))
         isDraft = true
     }
-    // Положение узла — ОФОРМЛЕНИЕ, а не конфигурация: топология (связи,
-    // привязки) от перетаскивания не меняется. Поэтому раскладку сохраняем
-    // сразу в рабочий файл и не заставляем ради неё входить в режим правки
-    // и потом «применять конфигурацию».
+    // A node position is PRESENTATION, not configuration: the topology (edges,
+    // bindings) does not change when dragging. So the layout is saved straight
+    // into the working file and does not force you to enter edit mode and then
+    // "apply the configuration" just for it.
     // ---- GRID ----
     // Cards are grid-sized (6 x 2 cells) and every gap is exactly two cells,
     // so blocks can never touch or overlap. The grid itself is drawn very
@@ -70,11 +70,11 @@ Kirigami.Page {
     readonly property int stepY: cardH + grid * 2
     function snap(v) { return Math.max(grid, Math.round(v / grid) * grid) }
 
-    // ЕДИНСТВЕННОЕ МЕСТО, где меняется позиция узла.
-    // Раньше карточка писала `modelData.x = x`, но modelData в Repeater над
-    // JS-массивом — КОПИЯ, и модель не менялась: рёбра рисовались по старым
-    // координатам, поэтому стрелки «не следовали». Теперь позиция пишется в
-    // сам массив по id, и это же используют раскладка и притягивание.
+    // THE ONLY PLACE where a node position changes.
+    // The card used to write `modelData.x = x`, but modelData in a Repeater over
+    // a JS array is a COPY, and the model did not change: the edges were drawn at
+    // the old coordinates, so the arrows "did not follow". Now the position is
+    // written into the array itself by id, and the layout and snapping use it too.
     function setNodePos(id, nx, ny) {
         for (var i = 0; i < graph.nodes.length; i++) {
             if (graph.nodes[i].id === id) {
@@ -86,14 +86,14 @@ Kirigami.Page {
         }
     }
 
-    // ИНВАРИАНТ: между карточками всегда не меньше двух клеток.
-    // Проверяется не только при перетаскивании, но и при КАЖДОЙ загрузке:
-    // сохранённая раскладка могла быть сделана раньше (другой размер
-    // карточки, ручные координаты) и приходила с наложениями.
+    // THE INVARIANT: there are always at least two grid cells between cards.
+    // It is enforced not only while dragging but on EVERY load: a saved layout
+    // could have been made earlier (a different card size, manual coordinates)
+    // and arrived with overlaps.
     function enforceLayout() {
-        // Итеративно: сдвинув один узел, можно задеть уже размещённый,
-        // поэтому повторяем, пока раскладка не перестанет меняться.
-        // Проход по одному разу оставлял наложения.
+        // Iteratively: moving one node may touch an already placed one, so we
+        // repeat until the layout stops changing. A single pass left overlaps.
+
         var total = 0
         for (var pass = 0; pass < 8; pass++) {
             var moved = 0
@@ -147,25 +147,25 @@ Kirigami.Page {
         return { x: x, y: y }
     }
 
-    // Свободный «коридор» для ребра: если прямой путь пересекает карточки,
-    // ищем ближайшую горизонталь ВЫШЕ или НИЖЕ них, по которой можно пройти.
-    // Возвращает смещение по Y для управляющих точек кривой (0 — путь чист).
+    // A free "corridor" for an edge: if the straight path crosses cards, we look
+    // for the nearest horizontal ABOVE or BELOW them that can be passed through.
+    // Returns the Y offset for the control points of the curve (0 - the path is clear).
     function channelFor(a, b) {
         var y1 = a.y + cardH / 2, y2 = b.y + cardH / 2
         var xa = a.x + cardW, xb = b.x
-        if (xb <= xa) return 0                     // назад — не роутим
+        if (xb <= xa) return 0                     // backwards - we do not route
         var hit = []
         for (var i = 0; i < graph.nodes.length; i++) {
             var n = graph.nodes[i]
             if (n.id === a.id || n.id === b.id) continue
-            if (n.x + cardW < xa || n.x > xb) continue      // не между ними
-            // пересекает ли прямая вертикальный диапазон карточки
+            if (n.x + cardW < xa || n.x > xb) continue      // not between them
+            // does the straight line cross the vertical range of the card
             var t = (n.x + cardW / 2 - xa) / Math.max(1, xb - xa)
             var yAt = y1 + (y2 - y1) * t
             if (yAt > n.y - 6 && yAt < n.y + cardH + 6) hit.push(n)
         }
         if (!hit.length) return 0
-        // уводим в сторону ближайшего края мешающих карточек
+        // we go around towards the nearest edge of the obstructing cards
         var top = hit[0].y, bot = hit[0].y + cardH
         for (var j = 1; j < hit.length; j++) {
             top = Math.min(top, hit[j].y)
@@ -315,7 +315,7 @@ Kirigami.Page {
     }
     function setZoom(z, cx, cy) {
         const nz = Math.max(0.3, Math.min(2.5, z))
-        // сохранить точку под курсором на месте
+        // keep the point under the cursor in place
         const rx = (flick.contentX + cx) / zoom
         const ry = (flick.contentY + cy) / zoom
         zoom = nz
@@ -354,9 +354,9 @@ Kirigami.Page {
         },
         Kirigami.Action {
             icon.name: "distribute-horizontal-x"; text: "Arrange"
-            // АВТО-РАСКЛАДКА: колонка по типу (вход->нормализация->обогащение
-            // ->фильтр->выход), строки внутри колонки со сдвигом. Узлы всегда
-            // стоят ровно, линии не пересекаются.
+            // AUTO LAYOUT: a column per type (input -> normalization ->
+            // enrichment -> filter -> output), rows inside a column with an
+            // offset. The nodes always stand straight, the lines do not cross.
             onTriggered: page.tidyLayout()
         },
         Kirigami.Action {
@@ -401,7 +401,7 @@ Kirigami.Page {
         anchors.fill: parent
         spacing: 0
 
-        // -------- пространство графа --------
+        // -------- the graph space --------
         Flickable {
             id: flick
             Layout.fillWidth: true
@@ -413,8 +413,8 @@ Kirigami.Page {
             QQC2.ScrollBar.horizontal: QQC2.ScrollBar { policy: QQC2.ScrollBar.AlwaysOn }
             QQC2.ScrollBar.vertical: QQC2.ScrollBar { policy: QQC2.ScrollBar.AlwaysOn }
 
-            // единый обработчик колеса: Ctrl → зум к курсору,
-            // без Ctrl → прокрутка (verticаль; +Shift → горизонталь)
+            // one wheel handler: Ctrl -> zoom to the cursor,
+            // without Ctrl -> scrolling (vertical; +Shift -> horizontal)
             WheelHandler {
                 acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                 onWheel: event => {
@@ -481,7 +481,7 @@ Kirigami.Page {
                     Component.onCompleted: requestPaint()
                 }
 
-                MouseArea {   // клик по пустому месту снимает выбор
+                MouseArea {   // a click on empty space clears the selection
                     anchors.fill: parent
                     z: -1
                     onClicked: { page.selected = ""; page.connectFrom = "" }
@@ -516,9 +516,9 @@ Kirigami.Page {
                             // cross and bend the curve into the free channel
                             // above or below them.
                             const detour = page.channelFor(a, b)
-                            // плавный S-изгиб: управляющие точки на полпути,
-                            // линия входит и выходит горизонтально — красиво
-                            // при любом взаимном положении узлов
+                            // a smooth S bend: the control points are halfway, the
+                            // line enters and leaves horizontally - it looks good
+                            // whatever the mutual position of the nodes
                             const dx = Math.max(60, Math.abs(x2 - x1) * 0.5)
                             ctx.beginPath()
                             ctx.moveTo(x1, y1)
@@ -557,19 +557,19 @@ Kirigami.Page {
                                           : modelData.error ? Kirigami.Theme.negativeTextColor
                                           : Kirigami.Theme.disabledTextColor
 
-                        // рёбра следуют за карточкой в реальном времени
-                        // позиция пишется в МОДЕЛЬ, иначе рёбра рисуются по
-                        // старым координатам и не следуют за карточкой
+                        // the edges follow the card in real time
+                        // the position is written into the MODEL, otherwise the
+                        // edges are drawn at the old coordinates and do not follow
                         onXChanged: page.setNodePos(modelData.id, x, y)
                         onYChanged: page.setNodePos(modelData.id, x, y)
 
                         MouseArea {
                             anchors.fill: parent
-                            // Перемещать узлы можно ВСЕГДА, не только в режиме
-                            // правки: раскладка — это оформление, а не логика
-                            // конвейера. Рёбра пересчитываются на каждом шаге
-                            // (onXChanged/onYChanged выше), поэтому линии
-                            // следуют за карточкой, а не отрываются.
+                            // Nodes can be moved ALWAYS, not only in edit mode:
+                            // the layout is presentation, not the logic of the
+                            // pipeline. The edges are recomputed on every step
+                            // (onXChanged/onYChanged above), so the lines follow
+                            // the card instead of tearing away.
                             drag.target: card
                             drag.threshold: 4
                             onPressed: {
@@ -597,9 +597,9 @@ Kirigami.Page {
                             }
                         }
 
-                        // Действия ПРЯМО НА УЗЛЕ (появляются при наведении):
-                        // раньше «последний прогон» и «YAML» жили только в
-                        // боковой панели, и их не находили.
+                        // The actions are RIGHT ON THE NODE (they appear on hover):
+                        // "last run" and "YAML" used to live only in the side panel,
+                        // and people did not find them.
                         Row {
                             z: 5
                             anchors.right: parent.right
@@ -710,7 +710,7 @@ Kirigami.Page {
             }
         }
 
-        // -------- панель предпросмотра --------
+        // -------- the preview panel --------
         SidePanel {
             id: previewPanel
             title: page.selCfg ? (page.selCfg.title || page.selCfg.name || "") : "(unbound)"
@@ -735,7 +735,7 @@ Kirigami.Page {
                           : ""
                 }
 
-                // компактные иконки-действия (вмещаются в узкую панель)
+                // compact action icons (they fit into a narrow panel)
                 RowLayout {
                     Layout.margins: Kirigami.Units.smallSpacing
                     spacing: Kirigami.Units.smallSpacing
@@ -879,7 +879,7 @@ Kirigami.Page {
 
     Keys.onEscapePressed: page.connectFrom = ""
 
-    // -------- добавить элемент --------
+    // -------- add an object --------
     Kirigami.Dialog {
         id: addDialog
         title: "New pipeline element"
@@ -922,7 +922,7 @@ Kirigami.Page {
         }
     }
 
-    // -------- привязка: окно экспертизы с фильтром по типу --------
+    // -------- binding: the expertise window filtered by type --------
     Kirigami.Dialog {
         id: bindDialog
         title: "Expertise — " + (page.selNode ? page.kindNames[page.selNode.kind] : "")
@@ -1074,7 +1074,7 @@ Kirigami.Page {
         }
     }
 
-    // -------- последнее выполнение узла (глазик) --------
+    // -------- the last run of a node (the eye) --------
     Kirigami.Dialog {
         id: peekDialog
         title: "Last run — " + kindLabel
@@ -1115,7 +1115,7 @@ Kirigami.Page {
                 Layout.fillHeight: true
                 spacing: 0
 
-                // что ПРИШЛО на вход узла
+                // what CAME IN to the node
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -1144,7 +1144,7 @@ Kirigami.Page {
                     visible: !!(peekDialog.data.in_text || peekDialog.data.in_rows)
                 }
 
-                // что УШЛО с узла
+                // what WENT OUT of the node
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true

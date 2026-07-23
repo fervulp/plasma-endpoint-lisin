@@ -9,7 +9,7 @@ command: |
     [ -f "$f" ] && sed "s|^|$f\||" "$f"
   done 2>/dev/null
   crontab -l 2>/dev/null | sed 's|^|user_crontab\||'
-  # пользовательские systemd .timer в ~/.config
+  # user systemd .timer units in ~/.config
   for f in "$HOME"/.config/systemd/user/*.timer; do
     [ -f "$f" ] && sed "s|^|$f\||" "$f"
   done 2>/dev/null

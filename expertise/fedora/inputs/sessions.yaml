@@ -3,8 +3,8 @@ id: LS-I-27
 type: input
 version: 1.0.0
 title: Active sessions
-# Активные сессии всех пользователей: кто, где (tty/seat), откуда, чем занят.
-# w = активность; loginctl = класс/seat systemd-сессии. Формат:
+# The active sessions of all users: who, where (tty/seat), from where, doing what.
+# w = activity; loginctl = the class/seat of the systemd session. Format:
 #   w<TAB>user<TAB>tty<TAB>from<TAB>login<TAB>idle<TAB>what
 #   lc<TAB>sid<TAB>uid<TAB>user<TAB>seat<TAB>tty<TAB>class
 command: |

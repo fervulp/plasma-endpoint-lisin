@@ -1,0 +1,17 @@
+name: auth_bruteforce
+id: LS-C-2
+type: correlation_rule
+version: 1.0.0
+title: A series of failed authentications
+severity: high
+tactic: credential_access
+technique: T1110
+category: authentication
+enabled: true
+# One failed attempt is a typo. Five in five minutes from one subject is either
+# password guessing or a broken automated client. Both need to be seen.
+where: "event_category = 'authentication' AND event_outcome = 'failure'"
+group_by: [subject_name]
+threshold: 5
+window: 300
+message: "{count} failed authentications in a row for {subject_name}"

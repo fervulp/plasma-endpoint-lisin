@@ -3,14 +3,25 @@ id: LS-E-8
 type: enrichment
 version: 2.0.1
 title: Suspicious command line (with context)
-code: "def enrich(rows):\n    # Версия 2: маркер сам по себе почти ничего не значит — «/tmp/» встречается\n    # в легитимных сессионных путях, а base64 в обычных скриптах. Поэтому\n    # признак ПОВЫШАЕТСЯ\
-  \ ТОЛЬКО В КОНТЕКСТЕ: бинарник не из пакета, родитель —\n    # шелл/веб-служба, пользователь root. Иначе это заметка, а не тревога.\n    MARK = [\n        (r\"curl[^|]*\\|\\s*(ba)?sh|wget[^|]*\\|\\s*(ba)?sh\"\
-  , \"скачивание в интерпретатор\", 3),\n        (r\"\\bnc\\b[^|]*\\s-e\\s|\\bncat\\b.*--exec\", \"reverse shell\", 3),\n        (r\"\\bbase64\\s+(-d|--decode)\", \"base64 decoding\", 2),\n        (r\"\
-  (^|\\s)/(tmp|dev/shm|var/tmp)/\\S+\", \"run from a temporary directory\", 2),\n        (r\"\\bchmod\\s+777\\b\", \"mode 777\", 1),\n        (r\"--no-sandbox|--disable-web-security\", \"отключена песочница\"\
-  , 1),\n    ]\n    SHELL_PARENTS = (\"bash\", \"sh\", \"zsh\", \"dash\", \"python3\", \"perl\", \"php\", \"node\")\n    by = {}\n    for r in rows:\n        if r.get(\"pid\"):\n            by[str(r[\"\
-  pid\"])] = r\n    for r in rows:\n        cmd = str(r.get(\"command\") or \"\")\n        hits, score = [], 0\n        for pat, why, w in MARK:\n            if re.search(pat, cmd):\n                hits.append(why)\n\
-  \                score += w\n        if not hits:\n            r[\"cmd_flags\"] = \"\"\n            r[\"cmd_risk\"] = \"\"\n            continue\n        # --- контекст, который решает, тревога это или\
-  \ заметка ---\n        ctx = []\n        if not str(r.get(\"purpose\") or \"\"):\n            score += 2\n            ctx.append(\"not from a package\")\n        if r.get(\"user\") == \"root\":\n    \
-  \        score += 1\n            ctx.append(\"root\")\n        par = by.get(str(r.get(\"ppid\") or \"\"))\n        if par:\n            pname = (par.get(\"command\") or \"\").strip().split(None, 1)[0].rsplit(\"\
-  /\", 1)[-1]\n            if pname in SHELL_PARENTS:\n                score += 1\n                ctx.append(\"started from \" + pname)\n        r[\"cmd_flags\"] = \", \".join(sorted(set(hits)) + ctx)\n\
-  \        r[\"cmd_risk\"] = \"high\" if score >= 5 else (\"medium\" if score >= 3 else \"low\")\n    return rows\n"
+code: "def enrich(rows):\n    # Version 2: a marker by itself means almost nothing - \"/tmp/\" occurs\
+  \ in\n    # legitimate session paths and base64 in ordinary scripts. So the sign is\n    # RAISED ONLY\
+  \ IN CONTEXT: the binary is not from a package, the parent is a\n    # shell/web service, the user is\
+  \ root. Otherwise it is a note, not an alarm.\n    MARK = [\n        (r\"curl[^|]*\\|\\s*(ba)?sh|wget[^|]*\\\
+  |\\s*(ba)?sh\", \"a download piped into an interpreter\", 3),\n        (r\"\\bnc\\b[^|]*\\s-e\\s|\\\
+  bncat\\b.*--exec\", \"reverse shell\", 3),\n        (r\"\\bbase64\\s+(-d|--decode)\", \"base64 decoding\"\
+  , 2),\n        (r\"(^|\\s)/(tmp|dev/shm|var/tmp)/\\S+\", \"run from a temporary directory\", 2),\n \
+  \       (r\"\\bchmod\\s+777\\b\", \"mode 777\", 1),\n        (r\"--no-sandbox|--disable-web-security\"\
+  , \"the sandbox is disabled\", 1),\n    ]\n    SHELL_PARENTS = (\"bash\", \"sh\", \"zsh\", \"dash\"\
+  , \"python3\", \"perl\", \"php\", \"node\")\n    by = {}\n    for r in rows:\n        if r.get(\"pid\"\
+  ):\n            by[str(r[\"pid\"])] = r\n    for r in rows:\n        cmd = str(r.get(\"command\") or\
+  \ \"\")\n        hits, score = [], 0\n        for pat, why, w in MARK:\n            if re.search(pat,\
+  \ cmd):\n                hits.append(why)\n                score += w\n        if not hits:\n      \
+  \      r[\"cmd_flags\"] = \"\"\n            r[\"cmd_risk\"] = \"\"\n            continue\n        #\
+  \ --- the context that decides whether this is an alarm or a note ---\n        ctx = []\n        if\
+  \ not str(r.get(\"purpose\") or \"\"):\n            score += 2\n            ctx.append(\"not from a\
+  \ package\")\n        if r.get(\"user\") == \"root\":\n            score += 1\n            ctx.append(\"\
+  root\")\n        par = by.get(str(r.get(\"ppid\") or \"\"))\n        if par:\n            pname = (par.get(\"\
+  command\") or \"\").strip().split(None, 1)[0].rsplit(\"/\", 1)[-1]\n            if pname in SHELL_PARENTS:\n\
+  \                score += 1\n                ctx.append(\"started from \" + pname)\n        r[\"cmd_flags\"\
+  ] = \", \".join(sorted(set(hits)) + ctx)\n        r[\"cmd_risk\"] = \"high\" if score >= 5 else (\"\
+  medium\" if score >= 3 else \"low\")\n    return rows\n"

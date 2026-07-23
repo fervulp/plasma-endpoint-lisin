@@ -2,20 +2,20 @@ name: config_user_owned_root_service
 id: LS-FN-12
 type: finding
 version: 1.0.0
-title: Конфигурация root-службы принадлежит обычному пользователю
+title: The configuration of a root service is owned by an ordinary user
 severity: high
 source: state
 basis: mismatch
-reference: 'MITRE ATT&CK T1543 Create or Modify System Process; CIS: конфигурация служб принадлежит root'
+reference: 'MITRE ATT&CK T1543 Create or Modify System Process; CIS: service configuration is owned by root'
 sql: SELECT c.path, c.owner, c.mode, c.changed, p.command, p.user FROM unpackaged_config c JOIN processes
   p ON p.user='root' AND c.path LIKE '/etc/' ||    replace(replace(p.command,'/usr/bin/',''),'/usr/sbin/','')
   || '/%' WHERE c.user_owned='yes'
-evidence: '{path} — владелец {owner}, права {mode}, изменён {changed}; читает {command} (от root)'
-why: Файл лежит в /etc, но НЕ принадлежит ни одному пакету и владеет им обычный пользователь, а читает
-  его служба, работающая от root. Значит непривилегированный пользователь задаёт поведение привилегированного
-  процесса. Для демона переназначения клавиш это ещё и полный контроль над тем, что вводится с клавиатуры.
-action: 'Верните владельца root (chown root:root) и права 644, либо уберите файл, если он не нужен. Проверьте
-  его содержимое: оно определяет, что именно делает служба.'
+evidence: '{path} - owner {owner}, mode {mode}, changed {changed}; read by {command} (as root)'
+why: The file lies in /etc but belongs to NO package and is owned by an ordinary user, while it is read
+  by a service running as root. So an unprivileged user defines the behaviour of a privileged process. For
+  a key remapping daemon that also means full control over what is typed on the keyboard.
+action: 'Give the file back to root (chown root:root) with mode 644, or remove it if it is not needed. Check
+  its contents: they define what the service actually does.'
 time_col: changed
 explore_table: unpackaged_config
 explore_col: user_owned

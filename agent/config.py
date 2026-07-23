@@ -1,4 +1,4 @@
-"""Настройки LiSin: JSON в ~/.config/lisin/settings.json."""
+"""LiSin settings: JSON in ~/.config/lisin/settings.json."""
 import json
 from pathlib import Path
 

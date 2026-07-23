@@ -1,23 +1,24 @@
-"""ЦЕПОЧКИ СОБЫТИЙ: от отдельных записей к связной истории.
+"""EVENT CHAINS: from separate records to a coherent story.
 
-Одиночное событие почти ничего не значит: «открыто соединение», «запущен
-процесс», «изменён файл». Значение появляется, когда видно ПОСЛЕДОВАТЕЛЬНОСТЬ:
-пользователь вошёл → запустил оболочку → та скачала файл → файл запустился →
-пошло соединение наружу. Расследуют именно цепочку, а не строку.
+A single event means almost nothing: "a connection was opened", "a process was
+started", "a file was changed". The meaning appears when the SEQUENCE is
+visible: a user logged in -> started a shell -> it downloaded a file -> the file
+was executed -> a connection went out. It is the chain that gets investigated,
+not a single row.
 
-Чем связываем — тем, что реально есть в таксономии, без догадок:
+What we link by is what actually exists in the taxonomy, without guessing:
 
-  1. РОДОСЛОВНАЯ ПРОЦЕССОВ — основа. У событий запуска есть process_pid и
-     parent_pid; по ним строится карта «потомок → предок», и каждое событие
-     поднимается до КОРНЯ своей ветки. Корень и есть идентификатор цепочки.
-  2. Событие без процесса (часть журнала, аудит без pid) привязывается по
-     пользователю и окну времени — но помечается как связанное слабее.
+  1. PROCESS ANCESTRY is the basis. Start events have process_pid and
+     parent_pid; from them a map "child -> ancestor" is built, and every event
+     is lifted to the ROOT of its branch. The root is the chain identifier.
+  2. An event without a process (part of the journal, audit without a pid) is
+     attached by user and time window - but marked as linked more weakly.
 
-Цепочка отвечает на четыре вопроса сразу: кто (субъект и пользователь),
-когда (начало и конец), что делал (категории и действия по шагам), куда
-ходил (адреса). К ней уже можно привязывать всё остальное.
+A chain answers four questions at once: who (the subject and the user), when
+(the start and the end), what they did (the categories and actions of the
+steps), where they went (the addresses). Everything else can be hung on it.
 """
-# порядок важности категорий: по ним считается «на что похожа» цепочка
+# the order of category importance: it decides what a chain "looks like"
 CAT_ORDER = ["process", "authentication", "file", "network", "package",
              "iam", "intrusion_detection"]
 
@@ -39,30 +40,30 @@ def _short(cmd: str) -> str:
 
 def build(eventsdb, limit: int = 4000, min_len: int = 2,
           statedb=None, want_steps=None, want_index=False) -> dict:
-    """Собрать цепочки из последних событий.
+    """Build chains from the latest events.
 
-    limit — сколько последних событий рассматриваем (цепочки строятся по
-    окну, а не по всей базе: иначе на сотнях тысяч записей это бессмысленно
-    долго и цепочки склеиваются между собой).
+    limit is how many of the latest events we consider (chains are built over a
+    window, not over the whole database: otherwise, on hundreds of thousands of
+    records, it is pointlessly slow and the chains glue together).
     """
     if eventsdb is None:
         return {"chains": [], "total": 0, "linked": 0, "events": 0}
 
-    # ВСЕ поля: шаги цепочки показываются той же таблицей и той же боковой
-    # панелью, что и обычная лента, поэтому им нужна вся таксономия
+    # ALL fields: the steps of a chain are shown by the same table and the same
+    # side panel as the ordinary feed, so they need the whole taxonomy
     ev = _rows(eventsdb, "SELECT * FROM events ORDER BY _id DESC LIMIT ?",
                (int(limit),), max_rows=int(limit))
-    ev.reverse()                       # хронологический порядок
+    ev.reverse()                       # chronological order
     if not ev:
         return {"chains": [], "total": 0, "linked": 0, "events": 0}
 
-    # ---- карта родословной: pid -> ppid ----
-    # Строится ШИРЕ, чем окно: у событий journal/audit/netmon есть pid, но
-    # НЕТ parent_pid, поэтому по одному окну они не поднимались до корня и
-    # связывались лишь слабо, по пользователю. Берём родословную из двух
-    # полных источников: все события procmon (у них ppid есть всегда) и
-    # ЖИВОЙ снимок процессов состояния. После этого событие с одним только
-    # pid находит свою ветку.
+    # ---- the ancestry map: pid -> ppid ----
+    # It is built WIDER than the window: journal/audit/netmon events have a pid
+    # but NO parent_pid, so within one window they did not rise to a root and were
+    # only linked weakly, by user. We take the ancestry from two complete sources:
+    # all procmon events (they always have a ppid) and the LIVE snapshot of the
+    # state processes. After that an event with only a pid finds its branch.
+
     parent = {}
     name_of = {}
     for r in _rows(eventsdb,
@@ -96,13 +97,13 @@ def build(eventsdb, limit: int = 4000, min_len: int = 2,
         if p and e.get("process_name"):
             name_of.setdefault(p, e["process_name"])
 
-    # ГРАНИЦА ИСТОРИИ — команда, которую запустил пользователь.
-    # Родословная сама по себе границы не даёт: всё в сессии сходится к
-    # systemd, и получалась ОДНА цепочка на 15000 событий, из которой
-    # ничего не вычитать. Поэтому поднимаемся только до процесса, чей
-    # РОДИТЕЛЬ — интерактивная оболочка. Список оболочек берём из
-    # /etc/shells: system сама объявляет, что считает оболочкой входа,
-    # никаких имён от нас.
+    # THE BOUNDARY OF THE STORY is the command the user started.
+    # Ancestry by itself gives no boundary: everything in a session converges on
+    # systemd, and we ended up with ONE chain of 15000 events, from which nothing
+    # can be read. So we rise only to the process whose PARENT is an interactive
+    # shell. The list of shells comes from /etc/shells: the system itself declares
+    # what it considers a login shell, no names from us.
+
     shells = set()
     try:
         with open("/etc/shells") as f:
@@ -114,19 +115,19 @@ def build(eventsdb, limit: int = 4000, min_len: int = 2,
         pass
 
     def root_of(pid: str) -> str:
-        """Корень ветки — но НЕ init.
+        """The root of a branch - but NOT init.
 
-        Если подниматься до самого верха, всё, что запущено в графической
-        сессии, оказывается в ОДНОЙ цепочке имени какого-нибудь
-        dbus-broker-launch: 900 событий, из которых историю не вычитать.
-        Поэтому останавливаемся на ПОСЛЕДНЕМ предке, у которого ещё есть
-        свой предок в карте, — то есть на приложении, запущенном
-        менеджером сессии (терминал, браузер, служба), а не на менеджере.
-        Признак структурный: «родитель родителя уже неизвестен» — никаких
-        списков имён.
+        If we rise all the way to the top, everything started in a graphical
+        session ends up in ONE chain named after some dbus-broker-launch: 900
+        events from which no story can be read. So we stop at the LAST ancestor
+        that still has an ancestor of its own in the map - that is, at the
+        application started by the session manager (a terminal, a browser, a
+        service), not at the manager. The property is structural: "the parent of
+        the parent is already unknown" - no lists of names.
 
-        Защита от петель обязательна: pid переиспользуются, и цикл в карте
-        предков подвесил бы сборку.
+
+        Loop protection is mandatory: pids are reused, and a cycle in the ancestor
+        map would hang the build.
         """
         seen, cur = set(), str(pid)
         while cur not in seen:
@@ -134,27 +135,27 @@ def build(eventsdb, limit: int = 4000, min_len: int = 2,
             up = parent.get(cur)
             if up is None or up in seen:
                 return cur
-            # родитель — интерактивная оболочка: значит ТЕКУЩИЙ процесс и
-            # есть введённая команда, дальше подниматься незачем
+            # the parent is an interactive shell: so the CURRENT process is the
+            # command that was typed, there is no point rising further
             if name_of.get(up, "").rsplit("/", 1)[-1] in shells:
                 return cur
-            # выше родителя ничего не знаем — он менеджер сессии
+            # we know nothing above the parent - it is the session manager
             if parent.get(up) is None:
                 return cur
             cur = up
         return cur
 
-    # ---- КАСКАД СВЯЗЫВАНИЯ ----
-    # Одна родословная покрывает только события, у которых есть pid: у
-    # netmon без владельца, rpmdb, fim, statediff его нет по природе. Но это
-    # не значит, что они «ничьи» — их можно привязать по ДРУГИМ фактам, и
-    # каждый способ честно помечается, чтобы было видно, насколько связь
-    # надёжна:
-    #   1) ancestry — тот же процесс или его предок (самая надёжная);
-    #   2) socket   — тот же сокет (адрес и порт с обеих сторон), что уже
-    #                 встречался у события с известным владельцем;
-    #   3) object   — тот же файл/пакет, которого касалась цепочка;
-    #   4) time     — тот же пользователь и то же окно времени (слабая).
+    # ---- THE LINKING CASCADE ----
+    # Ancestry alone covers only events that have a pid: netmon without an owner,
+    # rpmdb, fim and statediff have none by nature. That does not make them
+    # "nobody's" - they can be attached by OTHER facts, and every method is
+    # marked honestly so that it is visible how reliable the link is:
+    #   1) ancestry - the same process or its ancestor (the most reliable);
+    #   2) socket   - the same socket (address and port on both sides) that was
+    #                 already seen on an event with a known owner;
+    #   3) object   - the same file/package the chain touched;
+    #   4) time     - the same user and the same time window (weak).
+
     LINK_STRENGTH = {"ancestry": "strong", "socket": "strong",
                      "object": "medium", "time": "weak"}
 
@@ -205,21 +206,21 @@ def build(eventsdb, limit: int = 4000, min_len: int = 2,
             c["severity"] = max(c["severity"], int(e.get("event_severity") or 0))
         except (TypeError, ValueError):
             pass
-        # запоминаем «отпечатки» цепочки, чтобы к ней могли привязаться
-        # последующие события без процесса
+        # remember the "fingerprints" of a chain so that later events without a
+        # process can attach themselves to it
         sk = sock_key(e)
         if sk:
             sock_owner[sk] = key
         ok = obj_key(e)
         if ok:
             obj_owner[ok] = key
-        # ОТПЕЧАТОК ПО КОМАНДНОЙ СТРОКЕ. События rpmdb («установлен btop») и
-        # переходы состояния не имеют pid и по родословной не привязываются.
-        # Но имя пакета стоит АРГУМЕНТОМ у команды, которая его ставила:
-        # «sudo dnf install btop». Регистрируем значимые аргументы как
-        # отпечаток цепочки — тогда «установлен btop» находит именно ту
-        # команду, а не общую кучу. Это связь средней надёжности, и она
-        # помечена как object.
+        # FINGERPRINT BY COMMAND LINE. rpmdb events ("btop was installed") and
+        # state transitions have no pid and are not attached by ancestry. But the
+        # package name stands as an ARGUMENT of the command that installed it:
+        # "sudo dnf install btop". We register the meaningful arguments as a
+        # fingerprint of the chain - then "btop was installed" finds exactly that
+        # command instead of a common heap. This is a link of medium reliability,
+        # and it is marked as object.
         cmd = str(e.get("process_command_line") or "")
         if cmd:
             for tok in cmd.split():
@@ -251,8 +252,8 @@ def build(eventsdb, limit: int = 4000, min_len: int = 2,
         if u:
             touch("user:" + u, e, "time")
             continue
-        # совсем без опознавательных знаков — отдельная цепочка источника,
-        # чтобы событие всё равно было видно, а не потерялось
+        # with no identifying marks at all - a separate chain for the source, so
+        # that the event is still visible instead of getting lost
         touch("mod:" + str(e.get("event_module") or "?"), e, "time")
 
     linked = by_link.get("ancestry", 0) + by_link.get("socket", 0)
@@ -265,8 +266,8 @@ def build(eventsdb, limit: int = 4000, min_len: int = 2,
         first = c["steps"][0]
         title = name_of.get(root_pid) or _short(first.get("process_command_line")) \
             or first.get("process_name") or root_pid
-        # разнообразие категорий — признак «содержательной» цепочки:
-        # запуск + сеть + файл интереснее, чем сто одинаковых записей
+        # a variety of categories is a sign of a "meaningful" chain:
+        # start + network + file is more interesting than a hundred identical records
         span = len(c["cats"])
         out.append({
             "id": key, "title": title, "how": c["how"],
@@ -284,14 +285,14 @@ def build(eventsdb, limit: int = 4000, min_len: int = 2,
             "severity": c["severity"], "span": span,
             "links": c["links"],
         })
-    # сортировка: сначала разнообразные и критичные — в них есть история
+    # sorting: the varied and critical ones first - they contain a story
     out.sort(key=lambda c: (-c["span"], -c["severity"], -c["count"]))
     strong = by_link.get("ancestry", 0) + by_link.get("socket", 0)
     steps_of = []
     if want_steps and want_steps in chains:
         steps_of = chains[want_steps]["steps"]
-    # индекс «событие -> цепочка»: по нему переход состояния показывает,
-    # частью какой истории он был, и туда можно перейти
+    # the index "event -> chain": through it a state transition shows which story
+    # it was part of, and one can jump there
     index_of = {}
     if want_index:
         titles = {c["id"]: c["title"] for c in out}
@@ -310,11 +311,11 @@ def build(eventsdb, limit: int = 4000, min_len: int = 2,
 
 
 def detail(eventsdb, chain_id: str, limit: int = 4000, statedb=None) -> dict:
-    """Шаги одной цепочки — ПОЛНЫМИ строками событий.
+    """The steps of one chain - as FULL event rows.
 
-    Собирается тем же build(), что и список: разная логика связывания в
-    списке и в разборе уже приводила к тому, что по клику показывалось
-    пусто. Одна функция — один результат.
+    It is assembled by the same build() as the list: different linking logic in
+    the list and in the breakdown has already led to a click showing nothing.
+    One function - one result.
     """
     if eventsdb is None:
         return {"id": chain_id, "steps": [], "count": 0,

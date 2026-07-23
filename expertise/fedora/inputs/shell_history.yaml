@@ -3,9 +3,9 @@ id: LS-I-26
 type: input
 version: 1.0.0
 title: Shell history
-# История команд ВСЕХ пользователей (root + /home/*). bash и zsh.
-# Читаем что доступно (root/чужие — только с правами); недоступное молча
-# пропускаем. Формат строки: user<TAB>shell<TAB>lineno<TAB>raw.
+# The command history of ALL users (root + /home/*). bash and zsh.
+# We read what is accessible (root/other users only with rights); what is not
+# accessible is silently skipped. The line format: user<TAB>shell<TAB>lineno<TAB>raw.
 command: |
   emit() {
     [ -r "$3" ] || return

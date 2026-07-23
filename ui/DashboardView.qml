@@ -4,8 +4,9 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "Fmt.js" as Fmt
 
-// Дашборд «Состояние»: в одном окне то, что иначе разбросано по таблицам —
-// граф запуска процессов (как в SIEM/EDR), потребление, зависимости, сеть.
+// The "State" dashboard: in one window what is otherwise scattered across the
+// tables - the process launch graph (as in a SIEM/EDR), consumption,
+// dependencies, network.
 Item {
     id: view
 
@@ -13,13 +14,13 @@ Item {
                        top_rss: [], top_cpu: [], top_deps: [], top_dest: [],
                        exposure: [] })
     property var selNode: null
-    property var deep: null          // EDR-разбор выбранного процесса
-    property var plinks: null        // связи вокруг выбранного процесса
-    // ---- ПИВОТ: якорь графа (любая сущность) + раскрытые категории ----
+    property var deep: null          // the EDR breakdown of the selected process
+    property var plinks: null        // the links around the selected process
+    // ---- THE PIVOT: the graph anchor (any entity) + the expanded categories ----
     property string anchorKind: "process"
     property string anchorVal: ""
-    property var expandedCats: []    // какие категории раскрыты
-    property var pivotStack: []      // хлебные крошки пивота
+    property var expandedCats: []    // which categories are expanded
+    property var pivotStack: []      // the pivot breadcrumbs
 
     function rebuildGraph() {
         if (view.anchorVal === "") return
@@ -27,7 +28,7 @@ Item {
             ? backend.processLinks(view.anchorVal, view.expandedCats)
             : backend.anchorGraph(view.anchorKind, view.anchorVal, view.expandedCats)
     }
-    // приход из «Событий»: показать этот процесс в графе
+    // arrival from "Events": show this process in the graph
     Connections {
         target: root
         function onProcessFocusChanged() {
@@ -44,8 +45,8 @@ Item {
         view.anchorVal = String(val)
         view.expandedCats = []
         view.sideNode = null; view.sideInfo = null
-        // ПАНЕЛЬ ПРОЦЕССА только для процесса; иначе чистим, чтобы не показывать
-        // прежний процесс под новым якорем (порт/приложение/пользователь)
+        // THE PROCESS PANEL is only for a process; otherwise we clear it so as not
+        // to show the previous process under a new anchor (port/application/user)
         view.deep = kind === "process" ? backend.processDeep(String(val)) : null
         view.rebuildGraph()
     }
@@ -69,11 +70,11 @@ Item {
              : (t === "app_config" || t === "config_files") ? "config"
              : t === "open_files" ? "open_file" : ""
     }
-    // ---- обработчики графа: общие для встроенного и полноэкранного полотна ----
+    // ---- graph handlers: shared by the embedded and the full-screen canvas ----
     function graphNodeActivated(n) {
         view.sideNode = n
-        // ВСЁ об объекте узла: для события — все его поля по таксономии,
-        // для конфига/службы/пакета — своя строка + связанные
+        // EVERYTHING about the object of a node: for an event all of its fields by
+        // taxonomy, for a config/service/package its own row + the related ones
         view.sideInfo = backend.nodeInfo(n)
     }
     function graphToggle(cat) {
@@ -104,7 +105,7 @@ Item {
     }
     function openFullGraph() { fullGraph.open() }
     function eventsWhere(n) {
-        // у узла события val — ДЕЙСТВИЕ, а pid лежит отдельным полем
+        // on an event node val is the ACTION, while the pid is a separate field
         if (n.category === "events") {
             var parts = []
             if (n.pid) parts.push("process_pid='" + n.pid + "'")
@@ -117,10 +118,10 @@ Item {
         if (n.table === "users") return "user_name='" + n.val + "'"
         return ""
     }
-    property var sideNode: null      // узел, выбранный на полотне
-    property var sideInfo: null      // всё, что о нём известно из состояния
+    property var sideNode: null      // the node selected on the canvas
+    property var sideInfo: null      // everything known about it from the state
     property bool busy: false
-    // идёт сбор по требованию
+    // an on-demand collection is running
     property bool collecting: false
     Connections {
         target: backend
@@ -129,7 +130,7 @@ Item {
             if (!view.collecting) view.refresh()
         }
     }
-    property var collapsed: ({})     // pid → ветка свёрнута
+    property var collapsed: ({})     // pid -> the branch is collapsed
     function toggleCollapse(pid) {
         var c = Object.assign({}, collapsed)
         if (c[pid]) delete c[pid]; else c[pid] = true
@@ -179,8 +180,8 @@ Item {
         return Math.min(1, v / max)
     }
 
-    // насколько строка «интересна»: сокеты, порты, экспозиция, риск.
-    // Возвращаем цвет фона — глазом сразу видно, где смотреть.
+    // how "interesting" a row is: sockets, ports, exposure, risk.
+    // We return a background colour - the eye immediately sees where to look.
     function rowTint(p) {
         if (p.exposure === "OPEN (exposed)") return Qt.rgba(0.90, 0.30, 0.24, 0.20)
         if (p.risk >= 5) return Qt.rgba(0.90, 0.30, 0.24, 0.13)
@@ -191,11 +192,11 @@ Item {
         return "transparent"
     }
 
-    // ---- ЧТО ПОКАЗЫВАЕТ ЛЕВЫЙ СПИСОК ----
-    // Дашборд не обязан быть только про процессы: тем же списком выбираются
-    // приложения, порты, пользователи, конфиги, открытые файлы. Клик по строке
-    // строит ПОЛНЫЙ граф вокруг этой сущности (процессы там тоже будут — они
-    // приходят связями).
+    // ---- WHAT THE LEFT LIST SHOWS ----
+    // A dashboard does not have to be only about processes: the same list picks
+    // applications, ports, users, configs, open files. A click on a row builds
+    // the FULL graph around that entity (processes will be there too - they
+    // arrive through the links).
     property string listKind: "process"
     property var listItems: []
     function setListKind(k) {
@@ -204,7 +205,7 @@ Item {
         var r = backend.anchorList(k)
         view.listItems = (r && r.items) ? r.items : []
     }
-    // тот же фильтр, что и для процессов
+    // the same filter as for processes
     property var listShown: {
         var q = procFilter.text.trim().toLowerCase()
         var src = view.listItems || []
@@ -218,31 +219,31 @@ Item {
         return out
     }
 
-    // Полный список процессов с фасетами. Без фасета — порядок ДЕРЕВА
-    // (родитель → дети, отступом видно происхождение); с фасетом — по РИСКУ,
-    // чтобы маленькое-но-опасное было сверху.
+    // The full list of processes with facets. Without a facet it is TREE order
+    // (parent -> children, the indent shows the origin); with a facet it is by
+    // RISK, so that something small but dangerous is at the top.
     property var procShown: {
         var t = (d && d.tree) ? d.tree : []
         var q = procFilter.text.trim().toLowerCase()
         var out = []
         for (var i = 0; i < t.length; i++) {
             var p = t[i]
-            // ПОИСК ИДЁТ И ПО АДРЕСАМ: «198.51.100.7» или «993» находит процесс,
-            // у которого такая сессия или такой слушающий порт
+            // THE SEARCH ALSO COVERS ADDRESSES: "198.51.100.7" or "993" finds the
+            // process that has such a session or such a listening port
             if (q !== "" && (p.name + " " + p.command + " " + p.user + " "
                              + p.pid + " " + (p.addrs || ""))
                               .toLowerCase().indexOf(q) < 0) continue
             out.push(p)
         }
-        // ПРИ ПОИСКЕ свёртку НЕ применяем: найденный процесс лежит глубоко
-        // (btop был на 4-м уровне), и если выше по списку оказался свёрнутый
-        // узел, совпадение просто исчезало — поиск «ничего не находил», хотя
-        // процесс есть.
+        // WHILE SEARCHING we do NOT apply collapsing: the found process lies deep
+        // (btop was at the 4th level), and if a collapsed node happened to be
+        // above it in the list, the match simply vanished - the search "found
+        // nothing" although the process is there.
         if (q !== "") return out
 
-        // режим дерева: прячем потомков свёрнутых узлов. Дерево идёт в
-        // DFS-порядке, поэтому достаточно запомнить глубину свёрнутого узла
-        // и пропускать всё, что глубже, до возврата на тот же уровень.
+        // tree mode: hide the descendants of collapsed nodes. The tree is in DFS
+        // order, so it is enough to remember the depth of the collapsed node and
+        // skip everything deeper until we return to the same level.
         var res = [], skip = -1
         for (var j = 0; j < out.length; j++) {
             var p2 = out[j]
@@ -254,8 +255,8 @@ Item {
         return res
     }
 
-    // СВОРАЧИВАЕМАЯ СЕКЦИЯ SIDEBAR — та же логика, что у блоков графа:
-    // заголовок со счётчиком, клик раскрывает и показывает ВСЕ строки.
+    // A COLLAPSIBLE SIDEBAR SECTION - the same logic as the graph blocks:
+    // a header with a counter, a click expands it and shows ALL the rows.
     component InfoSection: ColumnLayout {
         id: isec
         property string title
@@ -294,7 +295,7 @@ Item {
         }
     }
 
-    // ключ-значение одной строкой
+    // a key-value pair on one line
     component KV: RowLayout {
         property string k
         property string v
@@ -312,7 +313,7 @@ Item {
             font.pointSize: Kirigami.Theme.smallFont.pointSize
         }
     }
-    // мини-секция со списком моноширинных строк
+    // a mini section with a list of monospaced lines
     component Mini: ColumnLayout {
         property string heading
         property var lines: []
@@ -340,7 +341,7 @@ Item {
         }
     }
 
-    // геометрия графа
+    // the geometry of the graph
 
     property real lastRefresh: 0
     property bool stale: false
@@ -350,16 +351,16 @@ Item {
 
     function refresh() {
         view.busy = true
-        // ЗАПОМИНАЕМ ПОЗИЦИЮ: модель подменяется целиком, и список прыгал в
-        // начало на каждом тике — листать длинное дерево было невозможно.
+        // WE REMEMBER THE POSITION: the model is replaced wholesale, and the list
+        // jumped to the start on every tick - scrolling a long tree was impossible.
         var keepY = procList ? procList.contentY : 0
         view.d = backend.dashboardState()
         view.lastRefresh = Date.now()
         view.stale = false
         view.busy = false
-        // ГРАФ СРАЗУ, без обязательного клика: раньше до первого выбора
-        // процесса карточка графа была скрыта, и это читалось как «графов нет».
-        // Берём самый заметный процесс (максимальный риск), иначе первый.
+        // THE GRAPH IMMEDIATELY, without a mandatory click: the graph card used to
+        // be hidden until the first process was chosen, and that read as "there
+        // are no graphs". We take the most notable process (the highest risk).
         if (view.anchorVal === "" && view.d && view.d.tree && view.d.tree.length) {
             var best = view.d.tree[0]
             for (var i = 0; i < view.d.tree.length; i++)
@@ -367,7 +368,7 @@ Item {
             view.setAnchor("process", best.pid, false)
         }
         if (procList) {
-            // восстанавливаем после того, как ListView пересчитает высоту
+            // restore it after the ListView has recomputed the height
             restoreScroll.target = keepY
             restoreScroll.restart()
         }
@@ -381,13 +382,13 @@ Item {
     }
     Component.onCompleted: {
         refresh()
-        // пришли из события — сразу ставим его процесс в центр графа
+        // we came from an event - put its process into the centre of the graph at once
         if (root.processFocus) {
             view.setAnchor("process", String(root.processFocus.pid), false)
             openTimer.start()
         }
     }
-    // граф открываем следующим кадром: до этого он ещё не построен
+        // the graph is opened on the next frame: before that it is not built yet
     Timer {
         id: openTimer
         interval: 250
@@ -456,12 +457,12 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        // ---- шапка: выбор дашборда ----
+        // ---- the header: choosing a dashboard ----
         RowLayout {
             Layout.fillWidth: true
             Layout.margins: Kirigami.Units.smallSpacing
             spacing: Kirigami.Units.smallSpacing
-            // выбор дашборда убран: он был из одного пункта
+            // the dashboard chooser was removed: it had a single item
             Item { Layout.fillWidth: true }
             QQC2.BusyIndicator { running: view.busy; visible: view.busy
                                  Layout.preferredHeight: Kirigami.Units.gridUnit }
@@ -470,8 +471,8 @@ Item {
                 QQC2.ToolTip.text: "Re-read the collected data"
                 QQC2.ToolTip.visible: hovered
             }
-            // СОБРАТЬ СЕЙЧАС — прогнать все источники состояния, не дожидаясь
-            // их расписания (у части источников интервал в часы).
+            // COLLECT NOW - run every state source without waiting for its
+            // schedule (some sources have an interval of hours).
             QQC2.ToolButton {
                 icon.name: "download"
                 text: view.collecting ? "Collecting…" : "Collect now"
@@ -494,7 +495,7 @@ Item {
                 width: scroller.availableWidth
                 spacing: Kirigami.Units.largeSpacing
 
-                // ---- плитки ----
+                // ---- tiles ----
                 Flow {
                     Layout.fillWidth: true
                     Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -529,9 +530,9 @@ Item {
                     }
                 }
 
-                // ---- ВСЕ ПРОЦЕССЫ: дерево + оценка риска ----
-                // Опасное обычно маленькое, поэтому «топ по памяти» не годится:
-                // показываем ВСЕ процессы деревом, а наверх поднимаем по РИСКУ.
+                // ---- ALL PROCESSES: the tree + a risk score ----
+                // The dangerous thing is usually small, so "the top by memory" is no
+                // good: we show ALL processes as a tree and lift them by RISK.
                 Kirigami.AbstractCard {
                     Layout.fillWidth: true
                     Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -547,7 +548,7 @@ Item {
                                       ? listKindBox.model[listKindBox.currentIndex].t
                                       : "Processes"
                             }
-                            // ПЕРЕКЛЮЧАТЕЛЬ ИСТОЧНИКА СПИСКА
+                            // THE LIST SOURCE SWITCH
                             QQC2.ComboBox {
                                 id: listKindBox
                                 Layout.preferredWidth: Kirigami.Units.gridUnit * 10
@@ -570,12 +571,12 @@ Item {
                                 visible: view.listKind === "process"
                                 opacity: 0.6
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                // ЧЕСТНЫЙ СЧЁТЧИК: строк меньше, чем процессов,
-                                // потому что одинаковые потомки свёрнуты в
-                                // «имя ×N» — раньше «214 of 439» читалось как
-                                // «половина процессов потеряна».
-                                // дерево полное: сколько строк — столько и
-                                // процессов, ничего не свёрнуто и не скрыто
+                                // AN HONEST COUNTER: there used to be fewer rows
+                                // than processes because identical children were
+                                // collapsed into "name xN" - and "214 of 439" read
+                                // as "half the processes are lost".
+                                // the tree is complete: as many rows as processes,
+                                // nothing is collapsed and nothing is hidden
                                 text: view.procShown.length + " processes"
                                       + (view.d.proc_total
                                          && view.procShown.length < view.d.proc_total
@@ -759,10 +760,10 @@ Item {
                             }
                         }
 
-                        // ---- СПИСОК СУЩНОСТЕЙ (не процессы) ----
-                        // Приложения, порты, пользователи, конфиги, открытые
-                        // файлы. Клик по строке строит ПОЛНЫЙ граф вокруг неё —
-                        // с процессами и всем остальным контекстом.
+                        // ---- THE LIST OF ENTITIES (not processes) ----
+                        // Applications, ports, users, configs, open files. A click
+                        // on a row builds the FULL graph around it - with the
+                        // processes and all the rest of the context.
                         ListView {
                             id: entList
                             visible: view.listKind !== "process"
@@ -830,10 +831,11 @@ Item {
                 }
 
 
-                // ---- ГРАФ ВЫБРАННОГО ПРОЦЕССА ----
-                // Окружение процесса: пользователь, пакет, родитель и потомки,
-                // порты, ОТКРЫТЫЕ ФАЙЛЫ и события. Клик по узлу — подробности
-                // справа; клик по процессу переносит фокус графа на него.
+                // ---- THE GRAPH OF THE SELECTED PROCESS ----
+                // The surroundings of the process: the user, the package, the
+                // parent and the children, the ports, the OPEN FILES and the
+                // events. A click on a node shows the details on the right; a
+                // click on a process moves the graph focus onto it.
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.leftMargin: Kirigami.Units.smallSpacing
@@ -873,13 +875,13 @@ Item {
                             Layout.fillHeight: true
                             spacing: 2
 
-                            // ---- «СМОТРЕТЬ ПО» + ХЛЕБНЫЕ КРОШКИ ПИВОТА ----
+                            // ---- "VIEW BY" + THE PIVOT BREADCRUMBS ----
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: Kirigami.Units.smallSpacing
-                                // «Смотреть по» убрано: источник выбирается
-                                // переключателем СПИСКА слева, одним механизмом.
-                                // хлебные крошки: путь пивота, клик — назад
+                                // "View by" was removed: the source is chosen by
+                                // the LIST switch on the left, one mechanism.
+                                // breadcrumbs: the pivot path, a click goes back
                                 Repeater {
                                     model: view.pivotStack
                                     delegate: RowLayout {
@@ -907,9 +909,9 @@ Item {
                                     elide: Text.ElideRight
                                     Layout.maximumWidth: Kirigami.Units.gridUnit * 16
                                 }
-                                // через какой элемент вошли в граф процесса —
-                                // иначе непонятно, почему по клику на порт
-                                // открылся процесс
+                                // which element we entered the process graph
+                                // through - otherwise it is unclear why clicking a
+                                // port opened a process
                                 QQC2.Label {
                                     visible: !!(view.plinks && view.plinks.entered_via)
                                     opacity: 0.75
@@ -929,10 +931,10 @@ Item {
                                           : ""
                                 }
                                 Item { Layout.fillWidth: true }
-                                // ЛЕГЕНДА ТИПОВ УБРАНА: слова «процесс»,
-                                // «событие», «пакет» дублировали то, что и так
-                                // видно по иконке узла, цвет-полосе категории и
-                                // подписи блока лесенки.
+                                // THE TYPE LEGEND WAS REMOVED: the words "process",
+                                // "event", "package" duplicated what is already
+                                // visible from the node icon, the category colour
+                                // stripe and the label of the ladder block.
                                 QQC2.ToolButton {
                                     icon.name: "view-fullscreen"
                                     text: "Full Screen"
@@ -954,12 +956,12 @@ Item {
                             }
                         }
 
-                        // ---- ПОЛНАЯ ПАНЕЛЬ ПРОЦЕССА (справа, раскрывается) ----
-                        // Клик по процессу в дереве/графе -> здесь ВСЯ информация
-                        // из state по нему: как запустился, пакет, открытые файлы,
-                        // сокеты, события, дети. Секции сворачиваются; списки
-                        // прокручиваются. Отдельно — деталь узла, выбранного на
-                        // полотне (view.sideInfo).
+                        // ---- THE FULL PROCESS PANEL (on the right, expandable) ----
+                        // A click on a process in the tree/graph -> ALL the state
+                        // information about it here: how it started, the package,
+                        // the open files, the sockets, the events, the children.
+                        // The sections collapse; the lists scroll. Separately - the
+                        // detail of the node selected on the canvas (view.sideInfo).
                         Rectangle {
                             Layout.preferredWidth: Kirigami.Units.gridUnit * 20
                             Layout.fillHeight: true
@@ -978,7 +980,7 @@ Item {
                                     width: sideScroll.availableWidth
                                     spacing: Kirigami.Units.smallSpacing
 
-                                    // --- шапка процесса ---
+                                    // --- the process header ---
                                     Kirigami.Heading {
                                         Layout.fillWidth: true
                                         level: 3
@@ -1008,7 +1010,7 @@ Item {
                                         text: view.deep ? view.deep.command : ""
                                     }
 
-                                    // компонент сворачиваемой секции
+                                    // the collapsible section component
                                     component Section: ColumnLayout {
                                         id: sec
                                         property string title
@@ -1046,7 +1048,7 @@ Item {
                                         }
                                     }
 
-                                    // --- как запустился ---
+                                    // --- how it started ---
                                     Section {
                                         title: "How It Started"
                                         count: view.deep && !view.deep.error ? 1 : 0
@@ -1072,7 +1074,7 @@ Item {
                                         }
                                     }
 
-                                    // --- пакет ---
+                                    // --- the package ---
                                     Section {
                                         title: "Package"
                                         count: view.deep && view.deep.package ? 1 : 0
@@ -1090,7 +1092,7 @@ Item {
                                         }
                                     }
 
-                                    // --- открытые файлы (ВСЕ, прокручиваются) ---
+                                    // --- the open files (ALL of them, scrollable) ---
                                     Section {
                                         title: "Open Files"
                                         count: view.deep ? (view.deep.files || []).length : 0
@@ -1109,7 +1111,7 @@ Item {
                                         }
                                     }
 
-                                    // --- сокеты ---
+                                    // --- the sockets ---
                                     Section {
                                         title: "Sockets"
                                         count: view.deep ? (view.deep.sockets || []).length : 0
@@ -1128,10 +1130,10 @@ Item {
                                         }
                                     }
 
-                                    // --- события ---
+                                    // --- the events ---
                                     Section {
-                                        // если упёрлись в потолок — говорим прямо,
-                                        // а не показываем срез как «всё»
+                                        // if we hit the ceiling - we say so plainly
+                                        // instead of showing a slice as "everything"
                                         title: view.deep && view.deep.events_truncated
                                                ? "Events (last 200)" : "Events"
                                         count: view.deep ? (view.deep.events || []).length : 0
@@ -1149,7 +1151,7 @@ Item {
                                         }
                                     }
 
-                                    // --- дети ---
+                                    // --- the children ---
                                     Section {
                                         title: "Child Processes"
                                         count: view.deep ? (view.deep.children || []).length : 0
@@ -1165,7 +1167,7 @@ Item {
                                         }
                                     }
 
-                                    // --- деталь выбранного НА ПОЛОТНЕ узла ---
+                                    // --- the detail of the node selected ON THE CANVAS ---
                                     Kirigami.Separator {
                                         Layout.fillWidth: true
                                         visible: view.sideNode !== null
@@ -1200,8 +1202,8 @@ Item {
                                             required property int index
                                             title: modelData.title
                                             count: (modelData.rows || []).length
-                                            // первая секция («Что это») открыта,
-                                            // остальные — по клику, как блоки графа
+                                            // the first section ("What this is") is
+                                            // open, the rest on a click, like graph blocks
                                             shown: index === 0
                                             Repeater {
                                                 model: modelData.rows || []
@@ -1227,10 +1229,10 @@ Item {
         }
     }
 
-    // ---- ГРАФ ВО ВЕСЬ ЭКРАН ----
-    // То же полотно и те же обработчики, только на всю площадь окна: длинную
-    // лесенку (у systemd она в 2000 px) иначе приходится разглядывать в
-    // четверти экрана. Боковая панель узла здесь же, справа.
+    // ---- THE GRAPH FULL SCREEN ----
+    // The same canvas and the same handlers, only over the whole window area: a
+    // long ladder (2000 px for systemd) otherwise has to be examined in a quarter
+    // of the screen. The node side panel is right here, on the right.
     QQC2.Popup {
         id: fullGraph
         parent: QQC2.Overlay.overlay
@@ -1277,7 +1279,7 @@ Item {
                     onAnchorRequested: function (n) { view.graphAnchor(n) }
                     onDrillRequested: function (a, n) { view.graphDrill(a, n) }
                 }
-                // детали выбранного узла прямо в полноэкранном режиме
+                // the details of the selected node right in full-screen mode
                 Rectangle {
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 22
                     Layout.fillHeight: true
@@ -1353,6 +1355,6 @@ Item {
         }
     }
 
-    // ---- ВЫБОР СУЩНОСТИ для «смотреть по» ----
-    // Список берётся из backend.anchorList(kind); выбор строит граф от неё.
+    // ---- CHOOSING AN ENTITY for "view by" ----
+    // The list comes from backend.anchorList(kind); a choice builds a graph from it.
 }

@@ -3,7 +3,7 @@ id: LS-I-37
 type: input
 version: 1.0.0
 title: DNS
-# Целостность DNS: resolv.conf + per-link (resolvectl) + /etc/hosts + dnssec.
+# DNS integrity: resolv.conf + per-link (resolvectl) + /etc/hosts + dnssec.
 command: |
   grep -E '^(nameserver|search|domain)' /etc/resolv.conf 2>/dev/null | sed 's/^/resolv\t/'
   resolvectl dns 2>/dev/null | sed -n 's/^Link [0-9]* (\([^)]*\)): \(.*\)/link-dns\t\1\t\2/p'

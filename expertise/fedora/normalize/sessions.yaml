@@ -3,50 +3,23 @@ id: LS-N-27
 type: normalization_rule
 version: 3.0.0
 title: Active sessions (into logins)
-code: |
-  from datetime import datetime, timezone
-
-  def _utc_from_hm(hm):
-      """`w` печатает время входа как ЧЧ:ММ — достраиваем сегодняшней датой
-      и переводим в UTC, чтобы время сеанса сравнивалось с историей входов."""
-      hm = (hm or "").strip()
-      if not hm or ":" not in hm or len(hm) > 5:
-          return ""
-      try:
-          now = datetime.now()
-          h, m = [int(x) for x in hm.split(":")[:2]]
-          d = now.replace(hour=h, minute=m, second=0, microsecond=0)
-          if d > now:                       # вход был вчера
-              d = d.replace(day=d.day - 1) if d.day > 1 else d
-          return d.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-      except Exception:
-          return ""
-
-  def normalize(text):
-      sess, order = {}, []
-      for ln in text.split("\n"):
-          f = ln.split("\t")
-          kind = f[0] if f else ""
-          user = tty = ""
-          if kind == "w" and len(f) >= 7:
-              user, tty = f[1], f[2]
-          elif kind == "lc" and len(f) >= 7:
-              user, tty = f[3], f[5]
-          if user == "" or tty in ("", "-"):
-              continue
-          k = user + "@" + tty
-          if k not in sess:
-              # колонки те же, что у истории входов: одна таблица —
-              # «кто входил и кто сейчас в системе»
-              sess[k] = {"user": user, "tty": tty, "from": "", "start": "",
-                         "until": "", "duration": "", "active": "yes",
-                         "idle": "", "what": "", "seat": "", "class": ""}
-              order.append(k)
-          cur = sess[k]
-          if kind == "w":
-              cur["from"] = f[3]
-              cur["start"] = _utc_from_hm(f[4]) or f[4]
-              cur["idle"], cur["what"] = f[5], f[6]
-          else:
-              cur["seat"], cur["class"] = f[4], f[6]
-      return [sess[k] for k in order]
+code: "from datetime import datetime, timezone\n\ndef _utc_from_hm(hm):\n    \"\"\"`w` prints the login\
+  \ time as HH:MM - we complete it with today's date and\n    convert it to UTC so that the session time\
+  \ compares with the login history.\"\"\"\n    hm = (hm or \"\").strip()\n    if not hm or \":\" not\
+  \ in hm or len(hm) > 5:\n        return \"\"\n    try:\n        now = datetime.now()\n        h, m =\
+  \ [int(x) for x in hm.split(\":\")[:2]]\n        d = now.replace(hour=h, minute=m, second=0, microsecond=0)\n\
+  \        if d > now:                       # the login was yesterday\n            d = d.replace(day=d.day\
+  \ - 1) if d.day > 1 else d\n        return d.astimezone(timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%SZ\"\
+  )\n    except Exception:\n        return \"\"\n\ndef normalize(text):\n    sess, order = {}, []\n  \
+  \  for ln in text.split(\"\\n\"):\n        f = ln.split(\"\\t\")\n        kind = f[0] if f else \"\"\
+  \n        user = tty = \"\"\n        if kind == \"w\" and len(f) >= 7:\n            user, tty = f[1],\
+  \ f[2]\n        elif kind == \"lc\" and len(f) >= 7:\n            user, tty = f[3], f[5]\n        if\
+  \ user == \"\" or tty in (\"\", \"-\"):\n            continue\n        k = user + \"@\" + tty\n    \
+  \    if k not in sess:\n            # the columns are the same as in the login history: one table for\n\
+  \            # \"who logged in and who is in the system now\"\n            sess[k] = {\"user\": user,\
+  \ \"tty\": tty, \"from\": \"\", \"start\": \"\",\n                       \"until\": \"\", \"duration\"\
+  : \"\", \"active\": \"yes\",\n                       \"idle\": \"\", \"what\": \"\", \"seat\": \"\"\
+  , \"class\": \"\"}\n            order.append(k)\n        cur = sess[k]\n        if kind == \"w\":\n\
+  \            cur[\"from\"] = f[3]\n            cur[\"start\"] = _utc_from_hm(f[4]) or f[4]\n       \
+  \     cur[\"idle\"], cur[\"what\"] = f[5], f[6]\n        else:\n            cur[\"seat\"], cur[\"class\"\
+  ] = f[4], f[6]\n    return [sess[k] for k in order]\n"

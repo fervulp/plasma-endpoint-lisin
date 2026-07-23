@@ -1,10 +1,12 @@
-"""База состояния: SQLite, вкладка = таблица.
+"""The state database: SQLite, one tab = one table.
 
-Таблицы наполняет конвейер (agent/pipeline.py) через ensure_table/upsert:
-upsert по ключу правила, пользовательские колонки не трогаются,
-исчезнувшие строки удаляются. Пользовательские вкладки/колонки создаются
-из UI. Имена санитизируются до [a-zа-яё0-9_], значения — только через
-параметры, имена таблиц сверяются с реестром _tabs.
+The tables are filled by the pipeline (agent/pipeline.py) through
+ensure_table/upsert: upsert by the rule's key, user columns are left alone,
+rows that disappeared are deleted. User tabs/columns are created from the UI.
+Names are sanitised to word characters (Cyrillic is allowed on purpose, so that
+a user can name their own tables in their own language), values go only through
+parameters,
+table names are checked against the _tabs registry.
 """
 import re
 import sqlite3
@@ -17,6 +19,8 @@ DB_PATH = Path.home() / ".local/share/lisin/state.db"
 
 
 def _san(name: str, prefix: str) -> str:
+    # Cyrillic is kept in the character class deliberately: a user may name
+    # their own tables and columns in their own language (see the module docstring)
     s = re.sub(r"[^a-zа-яё0-9_]", "_", name.strip().lower())
     s = re.sub(r"_+", "_", s).strip("_")
     if not s or s[0].isdigit() or s == "_id":
@@ -35,8 +39,8 @@ class StateDB:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._con() as c:
-            # WAL: один писатель (агент) + параллельные читатели (UI) без
-            # блокировок и без затирания. Ставится один раз (хранится в файле).
+            # WAL: one writer (the agent) + concurrent readers (the UI) with no
+            # locks and no clobbering. Set once (it is stored in the file).
             c.execute("PRAGMA journal_mode=WAL")
             c.execute("CREATE TABLE IF NOT EXISTS _tabs("
                       "name TEXT PRIMARY KEY, title TEXT, icon TEXT,"
@@ -44,10 +48,10 @@ class StateDB:
             try:
                 c.execute("ALTER TABLE _tabs ADD COLUMN colcfg TEXT DEFAULT ''")
             except sqlite3.OperationalError:
-                pass    # колонка уже есть
+                pass    # the column already exists
 
     def _con(self):
-        # timeout=busy_timeout: короткая блокировка записи ретраится, не падает
+        # timeout=busy_timeout: a short write lock is retried instead of failing
         con = sqlite3.connect(self.path, timeout=5.0)
         con.row_factory = sqlite3.Row
         return con
@@ -60,15 +64,15 @@ class StateDB:
         return [r["name"] for r in c.execute(f'PRAGMA table_info("{tab}")')
                 if r["name"] not in ("_id", "_src")]
 
-    # -------- вызывается конвейером --------
+    # -------- called by the pipeline --------
     def _ensure_collected_col(self, c):
-        """колонка со временем сбора: добавляется на месте, старым базам тоже"""
+        """the collection-time column: added in place, old databases too"""
         have = [r[1] for r in c.execute('PRAGMA table_info("_tabs")')]
         if "collected_at" not in have:
             c.execute('ALTER TABLE "_tabs" ADD COLUMN collected_at TEXT')
 
     def mark_collected(self, name: str):
-        """отметить, что таблицу только что наполнил конвейер"""
+        """mark that the pipeline has just filled this table"""
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         with self._con() as c:
             self._ensure_collected_col(c)
@@ -82,12 +86,12 @@ class StateDB:
                       f'(_id INTEGER PRIMARY KEY,{coldef})')
             c.execute("INSERT OR IGNORE INTO _tabs(name,title,icon,builtin,keys)"
                       " VALUES(?,?,?,1,'')", (name, title, icon))
-            # правило нормализации — источник истины для заголовка/иконки
+            # the normalization rule is the source of truth for title/icon
             c.execute("UPDATE _tabs SET title=?, icon=? WHERE name=?",
                       (title, icon, name))
-            # _src: тег писателя (точки выхода) для staleness. При ПЕРВОМ
-            # добавлении чистим доисторические строки без тега — так уходят
-            # мёртвые процессы и прочий мусор, накопленный до этого механизма.
+            # _src: the writer tag (of an output) used for staleness. On the
+            # FIRST insert we clear prehistoric rows without a tag - that is how
+            # dead processes and other rubbish from before this mechanism go away.
             info = [r["name"] for r in c.execute(f'PRAGMA table_info("{name}")')]
             if "_src" not in info:
                 c.execute(f'ALTER TABLE "{name}" ADD COLUMN "_src" TEXT DEFAULT \'\'')
@@ -99,11 +103,11 @@ class StateDB:
                     c.execute(f'ALTER TABLE "{name}" ADD COLUMN "{x}" TEXT')
 
     def clear_src(self, name: str, src: str):
-        """Убрать все строки одного писателя: источник опустел.
+        """Remove all rows of one writer: the source came back empty.
 
-        Нужно там, где пустой результат — это ответ, а не сбой: уязвимость
-        закрыта патчем, контейнер остановлен. Без этого таблица показывала бы
-        то, чего в системе уже нет.
+        Needed where an empty result is an answer rather than a failure: a
+        vulnerability closed by a patch, a stopped container. Without this the
+        table would keep showing what is no longer in the system.
         """
         name = _san(name, "t")
         with self._con() as c:
@@ -116,17 +120,17 @@ class StateDB:
 
     def upsert(self, name: str, keys: list[str], cols: list[str],
                rows: list[dict], src: str = "") -> dict:
-        """Записать строки и ВЕРНУТЬ разницу с прошлым состоянием.
+        """Write the rows and RETURN the difference from the previous state.
 
-        Разницу upsert вычислял и раньше (какие ключи новые, какие исчезли),
-        но выбрасывал. А переход — самое ценное, что у нас есть: «программа
-        появилась» несравнимо информативнее, чем «программа есть». Поэтому
-        теперь возвращаем {added, removed, changed, was_empty}, а решение,
-        порождать ли из этого события, принимает конвейер (см. _walk).
+        upsert computed the difference before as well (which keys are new, which
+        disappeared), but threw it away. Yet a transition is the most valuable
+        thing we have: "a program appeared" is incomparably more informative than
+        "a program exists". So now we return {added, removed, changed, was_empty},
+        and the pipeline decides whether to turn that into events (see _walk).
 
-        was_empty важно отдельно: если таблица была пуста, это ПЕРВИЧНАЯ
-        ИНВЕНТАРИЗАЦИЯ, а не изменение. Машина существовала до нас, и
-        выдавать 3000 «установок» за события мы не имеем права.
+        was_empty matters separately: if the table was empty, this is the FIRST
+        INVENTORY, not a change. The machine existed before us, and we have no
+        right to present 3000 "installations" as events.
         """
         name = _san(name, "t")
         diff = {"added": [], "removed": [], "changed": [], "was_empty": False,
@@ -134,10 +138,10 @@ class StateDB:
         with self._con() as c:
             if not self._valid(c, name):
                 return diff
-            # первое вхождение ключа — каноническое; повторы (наследие старого
-            # кода, напр. построчные ssh-ключи) удаляем, чтобы ключ был уникален
+            # the first occurrence of a key is canonical; repeats (a legacy of old
+            # code, e.g. per-line ssh keys) are deleted so the key stays unique
             have = {}
-            prev = {}          # прошлые значения — чтобы увидеть, ЧТО изменилось
+            prev = {}          # previous values - to see WHAT changed
             dup_ids = []
             for r in c.execute(f'SELECT * FROM "{name}"'):
                 k = tuple(r[kk] for kk in keys)
@@ -147,7 +151,7 @@ class StateDB:
                     have[k] = r["_id"]
                     prev[k] = {kk: r[kk] for kk in r.keys()
                                if not kk.startswith("_")}
-            # пустая таблица = первый сбор, а не изменение
+            # an empty table means the first collection, not a change
             diff["was_empty"] = not have
             if dup_ids:
                 c.executemany(f'DELETE FROM "{name}" WHERE _id=?',
@@ -172,10 +176,10 @@ class StateDB:
                     ph = ",".join("?" * (len(cols) + 1))
                     c.execute(f'INSERT INTO "{name}"({names}) VALUES({ph})',
                               [*vals.values(), src])
-            # staleness по ПИСАТЕЛЮ (_src): удаляем строки ЭТОЙ точки выхода,
-            # которых больше нет в живом наборе (мёртвые процессы, закрытые
-            # сокеты). Другие правила пишут в ту же таблицу под своим _src —
-            # их строки не трогаем.
+            # staleness by WRITER (_src): we delete the rows of THIS output that
+            # are no longer in the live set (dead processes, closed sockets).
+            # Other rules write into the same table under their own _src - their
+            # rows are left alone.
             keycols = ",".join(f'"{k}"' for k in keys)
             stale = []
             for r in c.execute(
@@ -195,9 +199,9 @@ class StateDB:
         return diff
 
     def prune(self, keep: set):
-        """Удаляет служебные (builtin) таблицы, которых больше нет среди
-        активных точек выхода — напр. осиротевший `connections` после слияния
-        в `ports`. Пользовательские таблицы (u_*, builtin=0) не трогаются."""
+        """Deletes builtin tables that no longer have an active output - e.g. the
+        orphaned `connections` after it was merged into `ports`. User tables
+        (u_*, builtin=0) are left alone."""
         keep = {_san(k, "t") for k in keep}
         with self._con() as c:
             for r in c.execute("SELECT name FROM _tabs WHERE builtin=1").fetchall():
@@ -206,7 +210,7 @@ class StateDB:
                     c.execute(f'DROP TABLE IF EXISTS "{n}"')
                     c.execute("DELETE FROM _tabs WHERE name=?", (n,))
 
-    # -------- чтение всего для UI --------
+    # -------- reading everything for the UI --------
     def snapshot(self) -> dict:
         import json
         tabs = []
@@ -221,24 +225,24 @@ class StateDB:
                 tabs.append({"name": t["name"], "title": t["title"],
                              "icon": t["icon"], "builtin": bool(t["builtin"]),
                              "columns": cols, "rows": rows, "colcfg": colcfg,
-                             # КОГДА ЭТУ ТАБЛИЦУ НАПОЛНЯЛИ В ПОСЛЕДНИЙ РАЗ:
-                             # без этого «пусто» не отличить от «давно не
-                             # собиралось»
+                             # WHEN THIS TABLE WAS FILLED LAST TIME:
+                             # without it "empty" cannot be told apart from
+                             # "not collected for a long time"
                              "collected_at": (t["collected_at"]
                                               if "collected_at" in t.keys() else "")})
         return {"os": coll.os_info(), "tabs": tabs,
                 "collected_at": time.strftime("%H:%M:%S")}
 
-    # -------- SQL-поиск (только чтение) --------
+    # -------- SQL search (read only) --------
     def query(self, sql: str) -> dict:
         try:
             con = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
             con.row_factory = sqlite3.Row
             cur = con.execute(sql)
             cols = [d[0] for d in cur.description] if cur.description else []
-            # берём на одну строку больше лимита, чтобы ЧЕСТНО сказать,
-            # что выборка обрезана: раньше запрос на 5000 строк молча
-            # возвращал 1000, и пользователь считал, что видит всё
+            # we read one row more than the limit so that we can HONESTLY say
+            # the result was truncated: a query for 5000 rows used to return
+            # 1000 silently, and the user assumed they saw everything
             LIMIT = 1000
             raw = cur.fetchmany(LIMIT + 1)
             truncated = len(raw) > LIMIT
@@ -250,7 +254,7 @@ class StateDB:
         except Exception as e:
             return {"columns": [], "rows": [], "error": str(e)}
 
-    # -------- правки из UI --------
+    # -------- edits from the UI --------
     def add_column(self, tab: str, col: str):
         col = _san(col, "c")
         with self._con() as c:

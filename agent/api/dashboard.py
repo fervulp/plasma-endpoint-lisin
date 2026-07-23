@@ -1,10 +1,10 @@
-"""Дашборды и агрегация: сводка состояния, EDR-разбор процесса, инвентарь."""
+"""Dashboards and aggregation: the state summary, the EDR process breakdown, the inventory."""
 from PySide6.QtCore import Slot
 
 
 class DashboardApi:
-    # Миксин Backend: слоты регистрируются в metaObject при
-    # наследовании Backend(QObject, ...) — проверено.
+    # A Backend mixin: the slots are registered in metaObject on
+    # inheritance Backend(QObject, ...) - verified.
 
     @Slot(result="QVariant")
     def dashboardState(self):
@@ -18,20 +18,20 @@ class DashboardApi:
 
     @Slot(str, result="QVariant")
     def processDeep(self, pid):
-        """EDR-разбор процесса для дашборда: потребление, как запустился,
-        что сделал, пакет и его зависимости, соседи бинарника, systemd-юнит."""
+        """The EDR breakdown of a process for the dashboard: consumption, how it
+        started, what it did, the package and its dependencies, the systemd unit."""
         from agent import dashboard
         try:
             return dashboard.process_detail(self.db, self.pipe.events(), pid)
         except Exception as e:
             return {"error": str(e)}
 
-    # -------- Process context: агрегация процессов в сущности --------
+    # -------- Process context: aggregating processes into entities --------
     @Slot(result="QVariant")
     def processEntities(self):
-        # схлопывает сырые процессы в СУЩНОСТИ (вендорский набор из 6
-        # процессов → одна строка) с агрегированным контекстом из ports/
-        # unix_sockets/persistence/config/applications. Open files — лениво.
+        # collapses raw processes into ENTITIES (a vendor set of 6 processes ->
+        # one row) with aggregated context from ports/unix_sockets/persistence/
+        # config/applications. Open files are loaded lazily.
         from agent import entities
         try:
             return entities.build(self.db)
@@ -40,18 +40,18 @@ class DashboardApi:
 
     @Slot("QVariant", result="QVariant")
     def entityFiles(self, pids):
-        # ленивая догрузка открытых файлов сущности при разворачивании
+        # lazy loading of the open files of an entity when it is expanded
         from agent import entities
         try:
             return entities.files_for([str(p) for p in pids])
         except Exception:
             return []
 
-    # -------- события (таксономия + events.db) --------
+    # -------- events (the taxonomy + events.db) --------
     @Slot(result="QVariant")
     def programsInventory(self):
-        # классификация applications на ПРОГРАММЫ vs зависимости
-        # (3000 пакетов → ~200 программ, остальное — зависимости под ними)
+        # classifying applications into PROGRAMS vs dependencies
+        # (3000 packages -> ~200 programs, the rest are dependencies under them)
         from agent import entities
         try:
             return entities.programs(self.db)
@@ -60,11 +60,11 @@ class DashboardApi:
 
     @Slot(result="QVariant")
     def systemFindings(self):
-        """Находки: что в системе выглядит не так и что с этим делать."""
+        """Findings: what looks wrong in the system and what to do about it."""
         from agent import findings
         try:
-            # правила берём из ЭКСПЕРТИЗЫ, а не из кода: их видно в разделе
-            # «Экспертиза» (категория «Находки») и можно править в YAML
+            # the rules come from the EXPERTISE, not from the code: they are visible
+            # in the "Expertise" section (the "Findings" category) and editable in YAML
             return findings.build(self.db, self.pipe.events(),
                                   self.pipe.objects.get("findings", {}))
         except Exception as e:
@@ -74,10 +74,10 @@ class DashboardApi:
     @Slot(result="QVariant")
     @Slot(str, result="QVariant")
     def vulnRows(self, where):
-        """Бюллетени по SQL-условию — тем же способом, что лента событий.
+        """Advisories by an SQL condition - the same way as the event feed.
 
-        Фильтр больше не разбирается в интерфейсе: OR, NOT и MATCH там
-        понимались неверно, и часть условий молча не срабатывала.
+        The filter is no longer parsed in the interface: OR, NOT and MATCH were
+        understood incorrectly there, and part of a condition silently did not fire.
         """
         sql = ("SELECT status, severity, cvss_score, cvss_rating, cvss_vector, "
                "cvss_source, cvss_covered, advisory, packages, packages_count, "
@@ -96,20 +96,20 @@ class DashboardApi:
 
     @Slot(result="QVariant")
     def vulnerabilities(self):
-        """Уязвимости: и открытые, и уже закрытые патчем.
+        """Vulnerabilities: both the open ones and the ones already closed by a patch.
 
-        Закрытые не выбрасываются намеренно. Пользователь обновил систему —
-        он должен УВИДЕТЬ, что вопрос закрыт (и когда), а не обнаружить, что
-        строки просто исчезли и непонятно, сработало обновление или сломался
-        сбор данных. Сортировка — по баллу CVSS: он сравним между
-        бюллетенями, в отличие от словесной критичности Fedora.
+        The closed ones are deliberately not dropped. If a user updated the system
+        they must SEE that the question is closed (and when) rather than discover
+        that the rows simply vanished, with no way to tell whether the update worked
+        or the data collection broke. Sorted by the CVSS score: it is comparable
+        between advisories, unlike the wording of the Fedora severity.
         """
         try:
             q = self.db.query(
                 "SELECT status, severity, cvss_score, cvss_rating, cvss_vector, "
                 "cvss_source, cvss_covered, advisory, packages, packages_count, "
                 "installed_version, fixed_version, cve, cve_count, issued, "
-                # references — ключевое слово SQL, поэтому в кавычках
+                # references is an SQL keyword, hence the quotes
                 'title, action, risk, source, "references", description '
                 "FROM vulnerabilities"
                 " ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END, "
@@ -129,7 +129,7 @@ class DashboardApi:
                 except ValueError:
                     pass
             op = [r for r in rows if r.get("status") == "open"]
-            # покрытие оценкой — честный признак «сколько ещё не оценено»
+                # the scoring coverage - an honest measure of "how much is unscored"
             have = sum(1 for s in scored if s > 0)
             return {"rows": rows, "total": len(rows), "open": len(op),
                     "closed": len(rows) - len(op), "by_severity": by,
@@ -140,14 +140,14 @@ class DashboardApi:
             return {"rows": [], "total": 0, "open": 0, "closed": 0,
                     "by_severity": {}, "by_cvss": {}, "scored": 0, "error": str(e)}
 
-    # -------- связи между компонентами --------
+    # -------- links between components --------
     @staticmethod
     def _str_list(v):
-        """Список строк из того, что пришло из QML.
+        """A list of strings out of whatever arrived from QML.
 
-        JS-массив приходит как QJSValue, а он НЕ итерируемый: попытка
-        пройти по нему роняла слот, граф возвращал ошибку и карточка графа
-        просто исчезала. Разворачиваем через toVariant().
+        A JS array arrives as a QJSValue, and that is NOT iterable: trying to walk
+        it crashed the slot, the graph returned an error and the graph card simply
+        disappeared. We unwrap it through toVariant().
         """
         if v is None:
             return []
@@ -164,7 +164,7 @@ class DashboardApi:
     @Slot(str, "QVariantList", result="QVariant")
     @Slot(str, "QVariant", result="QVariant")
     def processLinks(self, pid, expanded=None):
-        """Граф вокруг процесса; expanded — какие категории раскрыты."""
+        """The graph around a process; expanded is which categories are open."""
         from agent import links
         try:
             return links.around(self.db, self.pipe.events(), str(pid),
@@ -176,9 +176,9 @@ class DashboardApi:
     @Slot(str, str, "QVariantList", result="QVariant")
     @Slot(str, str, "QVariant", result="QVariant")
     def anchorGraph(self, kind, val, expanded=None):
-        """ПИВОТ: граф вокруг сущности любого типа (process|application|port|
-        user|config|open_file). Раскладка в Python, expanded — раскрытые
-        категории. Контракт возврата один и тот же для всех якорей."""
+        """THE PIVOT: a graph around an entity of any type (process|application|port|
+        user|config|open_file). The layout is computed in Python, expanded holds the
+        open categories. The return contract is the same for every anchor."""
         from agent import links
         try:
             return links.anchor_graph(self.db, self.pipe.events(),
@@ -189,11 +189,11 @@ class DashboardApi:
 
     @Slot("QVariant", result="QVariant")
     def nodeInfo(self, node):
-        """ВСЁ об объекте узла графа — для боковой панели.
+        """EVERYTHING about the object of a graph node - for the side panel.
 
-        Узел события ведёт в events и показывает ВСЕ непустые поля
-        таксономии, сгруппированные как в разделе «События». Остальные узлы
-        идут в links.node_detail (строка своей таблицы + связанные строки).
+        An event node leads into events and shows ALL the non-empty taxonomy fields,
+        grouped as in the "Events" section. The other nodes go to links.node_detail
+        (the row of their own table + the related rows).
         """
         n = node.toVariant() if hasattr(node, "toVariant") else (node or {})
         if not isinstance(n, dict):
@@ -208,7 +208,7 @@ class DashboardApi:
                                  str(n.get("col") or ""), str(n.get("val") or ""))
 
     def _event_node_info(self, n):
-        """Все поля конкретного события, сгруппированные по таксономии."""
+        """All the fields of a specific event, grouped by the taxonomy."""
         ev = self.pipe.events()
         if ev is None:
             return {"sections": [], "error": "event database is unavailable"}
@@ -241,7 +241,7 @@ class DashboardApi:
                 items.append({"k": name, "v": str(v)[:400]})
             if items:
                 sections.append({"title": g["group"], "rows": items})
-        # поля вне таксономии (диагностика контракта) — тоже показываем
+        # fields outside the taxonomy (a diagnostic of the contract) are shown too
         rest = [{"k": k, "v": str(v)[:400]} for k, v in row.items()
                 if k not in shown and not k.startswith("_")
                 and str(v or "").strip()]
@@ -251,8 +251,8 @@ class DashboardApi:
 
     @Slot(str, result="QVariant")
     def anchorList(self, kind):
-        """Список сущностей выбранного типа для «view by» — чтобы выбрать,
-        от чего строить граф. Только чтение, значения экранированы."""
+        """The list of entities of the chosen type for "view by" - to pick what to
+        build the graph from. Read only, the values are escaped."""
         from agent import links
         SRC = {"process": ("processes", "pid", "command"),
                "application": ("applications", "name", "description"),
@@ -263,10 +263,10 @@ class DashboardApi:
         k = str(kind)
         if k not in SRC:
             return {"items": []}
-        # ПОРТЫ — это СОКЕТЫ, а не просто номера. Показываем адреса целиком
+        # PORTS ARE SOCKETS, not just numbers. We show the addresses in full,
         # («tcp 192.0.2.10:33244 → 198.51.100.7:993 · thunderbird»),
-        # иначе по IP в этом списке ничего не найти: раньше были только номер
-        # порта и имя процесса.
+        # otherwise nothing can be found by IP in this list: it used to hold only
+        # the port number and the process name.
         if k == "port":
             try:
                 q = self.db.query(
@@ -303,8 +303,8 @@ class DashboardApi:
 
     @Slot(str, str, str, result="QVariant")
     def nodeDetail(self, table, col, val):
-        """Всё, что известно об объекте узла графа: своя строка + связанные
-        таблицы (по обнаруженной карте связей) + его последние события."""
+        """Everything known about the object of a graph node: its own row + the
+        related tables (by the discovered link map) + its latest events."""
         from agent import links
         try:
             return links.node_detail(self.db, self.pipe.events(),
@@ -314,14 +314,14 @@ class DashboardApi:
 
     @Slot(result="QVariant")
     def linkModel(self):
-        """Карта связей между таблицами — обнаруживается измерением
-        пересечения значений колонок, а не зашита в коде."""
+        """The map of links between tables - discovered by measuring the overlap of
+        column values, not hard-coded."""
         from agent import links
         try:
             return links.model(self.db)
         except Exception as e:
             return {"error": str(e), "nodes": [], "links": []}
-    # -------- тематические панели расследования --------
+    # -------- thematic investigation panels --------
     @Slot(result="QVariant")
     def fileActivity(self):
         from agent import panels
@@ -348,7 +348,7 @@ class DashboardApi:
 
     @Slot(str, result="QVariant")
     def flowDetail(self, ip):
-        """Клик по сессии: кто говорил, когда, чем и куда смотреть дальше."""
+        """A click on a session: who talked, when, with what and where to look next."""
         from agent import panels
         try:
             return panels.flow_detail(self.db, self.pipe.events(), str(ip))
@@ -357,7 +357,7 @@ class DashboardApi:
 
     @Slot(str, result="QVariant")
     def whoisLookup(self, ip):
-        """Интерактивный WHOIS по клику на адрес."""
+        """Interactive WHOIS on a click on an address."""
         from agent import ipintel
         try:
             return ipintel.whois_details(str(ip))
@@ -366,7 +366,7 @@ class DashboardApi:
 
     @Slot(str, result="QVariant")
     def whoisLookup(self, ip):
-        """Интерактивный WHOIS по клику на адрес."""
+        """Interactive WHOIS on a click on an address."""
         from agent import ipintel
         try:
             return ipintel.whois_details(str(ip))

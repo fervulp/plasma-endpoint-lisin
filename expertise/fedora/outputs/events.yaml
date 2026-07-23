@@ -3,8 +3,8 @@ id: LS-O-events
 type: events
 version: 1.0.0
 title: Events (taxonomy)
-# Точка выхода в events.db. Таблица и ключ дедупликации берутся из
-# ТАКСОНОМИИ (expertise/taxonomy/events.yaml), а не отсюда: схема одна на
-# все источники событий, поэтому сюда сходятся journal, network и т.д.
+# The output into events.db. The table and the deduplication key come from the
+# TAXONOMY (expertise/taxonomy/events.yaml), not from here: the schema is one for
+# all event sources, which is why journal, network and the rest converge here.
 table: events
 icon: view-calendar-list

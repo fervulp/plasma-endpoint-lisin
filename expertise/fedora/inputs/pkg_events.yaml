@@ -3,10 +3,10 @@ id: LS-I-41
 type: input
 version: 1.0.0
 title: Package install/update events (rpmdb)
-# ВТОРАЯ точка входа для событий — принципиально другой источник (rpmdb,
-# не журнал). Доказывает главное свойство: события со ВСЕХ точек входа
-# сходятся в ОДНО окно, потому что нормализация приводит их к одной
-# таксономии. Формат: epoch<TAB>имя<TAB>версия.
+# A SECOND input for events - a fundamentally different source (rpmdb, not the
+# journal). It demonstrates the main property: events from ALL inputs converge
+# into ONE window because the normalization brings them to one taxonomy.
+# Format: epoch<TAB>name<TAB>version.
 command: rpm -qa --qf '%{INSTALLTIME}\t%{NAME}\t%{VERSION}-%{RELEASE}\n' 2>/dev/null | sort -rn | head -300
 interval: 900
 enabled: true

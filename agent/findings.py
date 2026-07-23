@@ -1,25 +1,25 @@
-"""ДВИЖОК находок. Сами правила живут в экспертизе, а не здесь.
+"""The findings ENGINE. The rules themselves live in the expertise, not here.
 
-Раньше в этом файле лежали одиннадцать правил, написанных прямо на Python:
-чтобы добавить проверку, надо было править код приложения. Это нарушало
-положение 2 из expertise/PRINCIPLES.md («логика живёт в экспертизе»):
-пользователь не мог ни прочитать правило, ни поправить его, не открывая
-исходники.
+This file used to hold eleven rules written directly in Python: to add a check
+you had to edit the application code. That broke principle 2 of
+expertise/PRINCIPLES.md ("the logic lives in the expertise"): a user could
+neither read a rule nor fix it without opening the sources.
+sources.
 
-Теперь правила — объекты экспертизы `expertise/findings/*.yaml`
-(type: finding). Здесь остался только исполнитель: взять SQL правила,
-выполнить против нужной базы, собрать доказательства по шаблону и отдать
-в интерфейс.
+Now the rules are expertise objects in `expertise/findings/*.yaml`
+(type: finding). What is left here is only the executor: take the SQL of a rule,
+run it against the right database, collect the evidence from the template and
+hand it to the interface.
 
-Формат правила:
+The rule format:
     severity   high | medium | low
-    source     state | events   — против какой базы выполняется sql
-    sql        SELECT ...       — только чтение, база открыта в режиме ro
-    evidence   "{колонка} ..."  — шаблон строки-доказательства
-    why        почему это важно (без этого находка бесполезна)
-    action     что с этим делать
-    time_col   колонка со временем — попадает в поле when
-    explore_*  куда перейти в «Состоянии», чтобы посмотреть самому
+    source     state | events   - which database the sql runs against
+    sql        SELECT ...       - read only, the database is opened ro
+    evidence   "{column} ..."   - the template of an evidence line
+    why        why this matters (without it a finding is useless)
+    action     what to do about it
+    time_col   the column with the time - it goes into the when field
+    explore_*  where to jump in "State" to look at it yourself
 """
 import sqlite3
 
@@ -27,7 +27,7 @@ SEV = {"high": 3, "medium": 2, "low": 1}
 
 
 class _Safe(dict):
-    """Шаблон доказательства не должен падать из-за отсутствующей колонки."""
+    """The evidence template must not fail because a column is missing."""
 
     def __missing__(self, key):
         return ""
@@ -44,8 +44,8 @@ def _run(rule: dict, con) -> list:
     if not sql:
         return []
     low = sql.lower()
-    # правило может только ЧИТАТЬ: база и так открыта ro, но лучше отказать
-    # сразу и понятно, чем получить ошибку sqlite посреди прогона
+    # a rule may only READ: the database is opened ro anyway, but it is better
+    # to refuse right away and clearly than to get an sqlite error mid-run
     if not low.startswith("select") or any(
             w in low for w in ("attach", "pragma", "insert", "update",
                                "delete", "drop", "alter", "create")):
@@ -54,8 +54,8 @@ def _run(rule: dict, con) -> list:
 
 
 def build(db, eventsdb=None, rules: dict | None = None) -> dict:
-    """rules — объекты экспертизы категории findings (ref -> yaml)."""
-    if rules is None:                       # автономный вызов (тесты, CLI)
+    """rules - expertise objects of the findings category (ref -> yaml)."""
+    if rules is None:                       # standalone call (tests, CLI)
         from .pipeline import StatePipeline
         rules = StatePipeline(db).objects.get("findings", {})
 
@@ -75,8 +75,8 @@ def build(db, eventsdb=None, rules: dict | None = None) -> dict:
                         cons[src] = _ro(db.path)
                 rows = _run(r, cons[src])
             except Exception as e:
-                # правило может ссылаться на таблицу, которой ещё нет — это
-                # не повод ронять весь дашборд, но и молчать нельзя
+                # a rule may refer to a table that does not exist yet - that is
+                # no reason to break the whole dashboard, but staying silent is wrong
                 errors.append("%s: %s" % (r.get("name", ref), e))
                 continue
             if not rows:
@@ -95,7 +95,7 @@ def build(db, eventsdb=None, rules: dict | None = None) -> dict:
                 "why": str(r.get("why") or ""),
                 "action": str(r.get("action") or ""),
                 "evidence": ev[:12], "count": len(rows),
-                "when": when,               # когда это было в последний раз
+                "when": when,               # when this happened last
                 "rule": r.get("name", ref), "rule_id": r.get("id", ""),
                 "source": src,
                 "table": str(r.get("explore_table") or ""),

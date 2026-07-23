@@ -3,28 +3,51 @@ id: LS-I-55
 type: input
 version: 3.0.0
 title: Security advisories (open and closed)
-command: "# ЧИТАЕМ ИЗ КЭША МЕТАДАННЫХ (-C). Без этого dnf при истёкшем кэше сам лезет\n# обновлять репозитории, и точка входа то отрабатывает за 2 с, то висит за\n# пределом 60 с и падает. Кэш обновляет\
-  \ сама система (dnf-makecache.timer);\n# если кэша нет вовсе — один раз пробуем обычным вызовом.\nq() { timeout 25 dnf -q -C \"$@\" 2>/dev/null || timeout 25 dnf -q \"$@\" 2>/dev/null; }\na=$(q updateinfo\
-  \ list --security --available); ra=$?\ni=$(q updateinfo list --security --installed); ri=$?\nif [ -z \"$a$i$(timeout 20 dnf -q -C updateinfo list --security 2>/dev/null)\" ] \\\n   && [ \"$ra\" -ne 0\
-  \ ] && [ \"$ri\" -ne 0 ]; then\n  echo '===STATUS==='; echo fail; exit 0\nfi\necho '===STATUS==='; echo ok\necho '===OPEN==='; printf '%s\\n' \"$a\"\necho '===FIXED==='; printf '%s\\n' \"$i\"\nia=$(q\
-  \ updateinfo info --security --available)\nii=$(q updateinfo info --security --installed)\necho '===INFO_OPEN==='; printf '%s\\n' \"$ia\"\necho '===INFO_FIXED==='; printf '%s\\n' \"$ii\"\necho '===RPM===';\
-  \ rpm -qa --qf '%{NAME}\\t%{EVR}\\n' 2>/dev/null\necho \"===CVSS===\"\nadv=$(mktemp); printf '%s\\n' \"$ia\" \"$ii\" > \"$adv\"\n# ЖЁСТКОЕ ограничение снаружи: таймаут urlopen не спасает, если\n# висит\
-  \ разрешение имени. timeout(1) гарантирует, что точка входа\n# завершится, а недобранные оценки подтянутся следующим прогоном.\nLISIN_ADV=\"$adv\" timeout 12 python3 - <<'PYCVSS'\nimport json, os, re,\
-  \ subprocess, sys, time, urllib.request\nHOME = os.path.expanduser(\"~/.local/share/lisin\")\nCACHE = os.path.join(HOME, \"cvss.json\")\n# лимит реестра — 5 запросов за 30 с; делаем ровно 5 и раз в 6\
-  \ часов,\n# поэтому пауз не нужно (раньше они добавляли 26 с и узел не укладывался)\nNVD_BUDGET, OSV_BUDGET = 5, 40\n# ОБЩИЙ бюджет времени: у точки входа 60 с на всё, а сетевой запрос\n# может висеть\
-  \ до таймаута. Упёрлись в предел — просто выходим,\n# остальные оценки доберём следующим прогоном.\nDEADLINE = time.time() + 10\n\n# какие CVE нам нужны — ровно те, что упомянуты в бюллетенях ЭТОЙ машины.\n\
-  # Полный реестр NVD (300 тыс. записей) качать незачем: 99.97% его записей\n# про софт, которого здесь нет.\nneed = []\n# путь к файлу с текстом бюллетеней приходит через переменную окружения:\n# heredoc\
-  \ занимает stdin, конвейером сюда ничего не передать\ntry:\n    _src = open(os.environ.get(\"LISIN_ADV\", \"\"), errors=\"replace\").read()\nexcept OSError:\n    _src = \"\"\nfor ln in _src.splitlines():\n\
-  \    for c in re.findall(r\"CVE-\\d{4}-\\d{4,7}\", ln):\n        if c not in need:\n            need.append(c)\n\ncache = {}\ntry:\n    with open(CACHE) as f:\n        cache = json.load(f)\nexcept Exception:\n\
-  \    cache = {}\n\ndef get(url, timeout=6):\n    rq = urllib.request.Request(url, headers={\"User-Agent\": \"lisin-edr\"})\n    return json.loads(urllib.request.urlopen(rq, timeout=timeout).read())\n\n\
-  def nvd(cve):\n    try:\n        d = get(\"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=\" + cve, 6)\n        c = d[\"vulnerabilities\"][0][\"cve\"]\n    except Exception:\n        return None\n\
-  \    met = c.get(\"metrics\") or {}\n    for k in (\"cvssMetricV31\", \"cvssMetricV30\", \"cvssMetricV40\"):\n        if met.get(k):\n            x = met[k][0].get(\"cvssData\", {})\n            return\
-  \ [\"NVD\", x.get(\"vectorString\", \"\"), str(x.get(\"baseScore\", \"\")),\n                    (c.get(\"published\") or \"\")[:10]]\n    return None\n\ndef osv(cve):\n    try:\n        d = get(\"https://api.osv.dev/v1/vulns/\"\
-  \ + cve)\n    except Exception:\n        return None\n    for s in d.get(\"severity\") or []:\n        if str(s.get(\"type\", \"\")).startswith(\"CVSS_V3\"):\n            return [\"OSV.dev\", s.get(\"\
-  score\", \"\"), \"\",\n                    (d.get(\"published\") or \"\")[:10]]\n    return None\n\nnvd_used = osv_used = 0\nfor cve in need:\n    if time.time() > DEADLINE:\n        break\n    old =\
-  \ cache.get(cve)\n    if old and old[0] == \"NVD\":\n        continue                       # уточнять уже нечего\n    got = None\n    if nvd_used < NVD_BUDGET:\n        nvd_used += 1\n        got = nvd(cve)\n\
-  \    if not got and not old and osv_used < OSV_BUDGET:\n        osv_used += 1\n        got = osv(cve)\n    if got:\n        cache[cve] = got\n\ntry:\n    os.makedirs(HOME, exist_ok=True)\n    with open(CACHE,\
-  \ \"w\") as f:\n        json.dump(cache, f)\nexcept OSError:\n    pass\n\nfor cve in need:\n    v = cache.get(cve)\n    if v:\n        print(\"\\t\".join([cve] + [str(x) for x in v]))\nPYCVSS\nrm -f \"\
-  $adv\"\n"
+command: "# WE READ FROM THE METADATA CACHE (-C). Without it dnf goes to refresh the\n# repositories when\
+  \ the cache has expired, and the input either finishes in 2 s\n# or hangs past the 60 s limit and fails.\
+  \ The cache is refreshed by the system\n# itself (dnf-makecache.timer); if there is no cache at all\
+  \ we try once normally.\nq() { timeout 25 dnf -q -C \"$@\" 2>/dev/null || timeout 25 dnf -q \"$@\" 2>/dev/null;\
+  \ }\na=$(q updateinfo list --security --available); ra=$?\ni=$(q updateinfo list --security --installed);\
+  \ ri=$?\nif [ -z \"$a$i$(timeout 20 dnf -q -C updateinfo list --security 2>/dev/null)\" ] \\\n   &&\
+  \ [ \"$ra\" -ne 0 ] && [ \"$ri\" -ne 0 ]; then\n  echo '===STATUS==='; echo fail; exit 0\nfi\necho '===STATUS===';\
+  \ echo ok\necho '===OPEN==='; printf '%s\\n' \"$a\"\necho '===FIXED==='; printf '%s\\n' \"$i\"\nia=$(q\
+  \ updateinfo info --security --available)\nii=$(q updateinfo info --security --installed)\necho '===INFO_OPEN===';\
+  \ printf '%s\\n' \"$ia\"\necho '===INFO_FIXED==='; printf '%s\\n' \"$ii\"\necho '===RPM==='; rpm -qa\
+  \ --qf '%{NAME}\\t%{EVR}\\n' 2>/dev/null\necho \"===CVSS===\"\nadv=$(mktemp); printf '%s\\n' \"$ia\"\
+  \ \"$ii\" > \"$adv\"\n# A HARD limit from outside: the urlopen timeout does not help if name\n# resolution\
+  \ hangs. timeout(1) guarantees that the input finishes, and the\n# scores that were not fetched are\
+  \ picked up on the next run.\nLISIN_ADV=\"$adv\" timeout 12 python3 - <<'PYCVSS'\nimport json, os, re,\
+  \ subprocess, sys, time, urllib.request\nHOME = os.path.expanduser(\"~/.local/share/lisin\")\nCACHE\
+  \ = os.path.join(HOME, \"cvss.json\")\n# the registry limit is 5 requests per 30 s; we make exactly\
+  \ 5 and once every\n# 6 hours, so no pauses are needed (they used to add 26 s and the node did not fit)\n\
+  NVD_BUDGET, OSV_BUDGET = 5, 40\n# A TOTAL time budget: the input has 60 s for everything, and a network\
+  \ request\n# may hang until the timeout. If we hit the limit we simply exit and pick up the\n# remaining\
+  \ scores on the next run.\nDEADLINE = time.time() + 10\n\n# which CVEs we need - exactly those mentioned\
+  \ in the advisories of THIS machine.\n# There is no point downloading the whole NVD registry (300 thousand\
+  \ records):\n# 99.97% of it is about software that is not here.\nneed = []\n# the path to the file with\
+  \ the advisory text arrives through an environment\n# variable: the heredoc occupies stdin, nothing\
+  \ can be piped in here\ntry:\n    _src = open(os.environ.get(\"LISIN_ADV\", \"\"), errors=\"replace\"\
+  ).read()\nexcept OSError:\n    _src = \"\"\nfor ln in _src.splitlines():\n    for c in re.findall(r\"\
+  CVE-\\d{4}-\\d{4,7}\", ln):\n        if c not in need:\n            need.append(c)\n\ncache = {}\ntry:\n\
+  \    with open(CACHE) as f:\n        cache = json.load(f)\nexcept Exception:\n    cache = {}\n\ndef\
+  \ get(url, timeout=6):\n    rq = urllib.request.Request(url, headers={\"User-Agent\": \"lisin-edr\"\
+  })\n    return json.loads(urllib.request.urlopen(rq, timeout=timeout).read())\n\ndef nvd(cve):\n   \
+  \ try:\n        d = get(\"https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=\" + cve, 6)\n    \
+  \    c = d[\"vulnerabilities\"][0][\"cve\"]\n    except Exception:\n        return None\n    met = c.get(\"\
+  metrics\") or {}\n    for k in (\"cvssMetricV31\", \"cvssMetricV30\", \"cvssMetricV40\"):\n        if\
+  \ met.get(k):\n            x = met[k][0].get(\"cvssData\", {})\n            return [\"NVD\", x.get(\"\
+  vectorString\", \"\"), str(x.get(\"baseScore\", \"\")),\n                    (c.get(\"published\") or\
+  \ \"\")[:10]]\n    return None\n\ndef osv(cve):\n    try:\n        d = get(\"https://api.osv.dev/v1/vulns/\"\
+  \ + cve)\n    except Exception:\n        return None\n    for s in d.get(\"severity\") or []:\n    \
+  \    if str(s.get(\"type\", \"\")).startswith(\"CVSS_V3\"):\n            return [\"OSV.dev\", s.get(\"\
+  score\", \"\"), \"\",\n                    (d.get(\"published\") or \"\")[:10]]\n    return None\n\n\
+  nvd_used = osv_used = 0\nfor cve in need:\n    if time.time() > DEADLINE:\n        break\n    old =\
+  \ cache.get(cve)\n    if old and old[0] == \"NVD\":\n        continue                       # there\
+  \ is nothing left to refine\n    got = None\n    if nvd_used < NVD_BUDGET:\n        nvd_used += 1\n\
+  \        got = nvd(cve)\n    if not got and not old and osv_used < OSV_BUDGET:\n        osv_used +=\
+  \ 1\n        got = osv(cve)\n    if got:\n        cache[cve] = got\n\ntry:\n    os.makedirs(HOME, exist_ok=True)\n\
+  \    with open(CACHE, \"w\") as f:\n        json.dump(cache, f)\nexcept OSError:\n    pass\n\nfor cve\
+  \ in need:\n    v = cache.get(cve)\n    if v:\n        print(\"\\t\".join([cve] + [str(x) for x in v]))\n\
+  PYCVSS\nrm -f \"$adv\"\n"
 interval: 21600
 enabled: true

@@ -3,22 +3,42 @@ id: LS-E-18
 type: enrichment
 version: 1.0.2
 title: Who opened the connection
-code: "def enrich(rows):\n    \"\"\"Кто создал соединение — для событий, где владелец сокета уже неизвестен.\n\n    ss показывает users:((\"proc\",pid=...)) только пока сокет ЖИВ. Поэтому у\n    событий\
-  \ «соединение закрыто» процесса нет: к моменту снимка сокета уже\n    не существует. На живой машине так терялось 88% владельцев.\n\n    Восстанавливаем связыванием СВОИХ ЖЕ данных, без догадок:\n   \
-  \   1) точное совпадение сокета (адрес и порт источника и назначения) с\n         более ранним событием, где владелец был известен — это тот же самый\n         сокет, сомнений нет;\n      2) если точного\
-  \ нет — берём процесс из ЖИВОЙ таблицы сокетов (ports),\n         сопоставляя по адресу назначения; такой вывод помечается как\n         вероятный, а не точный.\n    Колонка process_source хранит, каким\
-  \ способом получен ответ.\n    \"\"\"\n    import sqlite3\n    from pathlib import Path\n\n    need = [r for r in rows if not str(r.get(\"process_name\") or \"\").strip()]\n    if not need:\n        for\
-  \ r in rows:\n            r.setdefault(\"process_source\", \"socket was live\")\n        return rows\n\n    exact, by_dest = {}, {}\n    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % (\n \
-  \           Path.home() / \".local/share/lisin/events.db\"), uri=True)\n        con.row_factory = sqlite3.Row\n        q = (\"SELECT source_ip, source_port, destination_ip, destination_port,\"\n     \
-  \        \" process_name, process_pid FROM events \"\n             \"WHERE event_module='netmon' AND COALESCE(process_name,'')<>'' \"\n             \"ORDER BY _id DESC LIMIT 20000\")\n        for e in\
-  \ con.execute(q):\n            k = (e[\"source_ip\"], e[\"source_port\"],\n                 e[\"destination_ip\"], e[\"destination_port\"])\n            exact.setdefault(k, (e[\"process_name\"], e[\"\
-  process_pid\"]))\n            by_dest.setdefault(e[\"destination_ip\"],\n                               (e[\"process_name\"], e[\"process_pid\"]))\n        con.close()\n    except Exception:\n       \
-  \ pass\n\n    live = {}\n    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % (\n            Path.home() / \".local/share/lisin/state.db\"), uri=True)\n        con.row_factory = sqlite3.Row\n\
-  \        for e in con.execute(\"SELECT remote, process, owner_cmd FROM ports \"\n                             \"WHERE COALESCE(process,'')<>''\"):\n            host = str(e[\"remote\"] or \"\").rsplit(\"\
-  :\", 1)[0]\n            if host:\n                live.setdefault(host, str(e[\"process\"]))\n        con.close()\n    except Exception:\n        pass\n\n    for r in rows:\n        if str(r.get(\"process_name\"\
-  ) or \"\").strip():\n            r[\"process_source\"] = \"socket was live\"\n            continue\n        k = (r.get(\"source_ip\"), r.get(\"source_port\"),\n             r.get(\"destination_ip\"),\
-  \ r.get(\"destination_port\"))\n        hit = exact.get(k)\n        if hit:\n            r[\"process_name\"], r[\"process_pid\"] = hit[0], hit[1]\n            r[\"process_source\"] = \"exact socket match\"\
-  \n            continue\n        dst = r.get(\"destination_ip\")\n        hit = by_dest.get(dst)\n        if hit:\n            r[\"process_name\"], r[\"process_pid\"] = hit[0], hit[1]\n            r[\"\
-  process_source\"] = \"by destination address (probable)\"\n            continue\n        nm = live.get(dst)\n        if nm:\n            r[\"process_name\"] = re.sub(r'^\\(\"?|\"?,.*$', \"\", nm)\n  \
-  \          r[\"process_source\"] = \"live socket (probable)\"\n        else:\n            r[\"process_source\"] = \"owner unknown\"\n    # ось субъекта: раз владелец найден, событие снова читается как\
-  \ фраза\n    for r in rows:\n        if r.get(\"process_name\") and not r.get(\"subject_name\"):\n            r[\"subject_type\"], r[\"subject_name\"] = \"process\", r[\"process_name\"]\n    return rows\n"
+code: "def enrich(rows):\n    \"\"\"Who created a connection - for events where the socket owner is already\
+  \ unknown.\n\n    ss shows users:((\"proc\",pid=...)) only while the socket is ALIVE. That is why\n\
+  \    \"connection closed\" events have no process: by the time of the snapshot the socket\n    no longer\
+  \ exists. On a live machine 88% of the owners were lost this way.\n\n    We restore it by linking OUR\
+  \ OWN data, without guessing:\n      1) an exact socket match (source and destination address and port)\
+  \ with an\n            earlier event where the owner was known - that is the very same socket,\n   \
+  \         there is no doubt;\n      2) if there is no exact match, we take the process from the LIVE\
+  \ socket table\n            (ports), matching by destination address; such a conclusion is marked as\n\
+  \            probable, not exact.\n    The process_source column stores how the answer was obtained.\n\
+  \    \"\"\"\n    import sqlite3\n    from pathlib import Path\n\n    need = [r for r in rows if not\
+  \ str(r.get(\"process_name\") or \"\").strip()]\n    if not need:\n        for r in rows:\n        \
+  \    r.setdefault(\"process_source\", \"socket was live\")\n        return rows\n\n    exact, by_dest\
+  \ = {}, {}\n    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % (\n            Path.home()\
+  \ / \".local/share/lisin/events.db\"), uri=True)\n        con.row_factory = sqlite3.Row\n        q =\
+  \ (\"SELECT source_ip, source_port, destination_ip, destination_port,\"\n             \" process_name,\
+  \ process_pid FROM events \"\n             \"WHERE event_module='netmon' AND COALESCE(process_name,'')<>''\
+  \ \"\n             \"ORDER BY _id DESC LIMIT 20000\")\n        for e in con.execute(q):\n          \
+  \  k = (e[\"source_ip\"], e[\"source_port\"],\n                 e[\"destination_ip\"], e[\"destination_port\"\
+  ])\n            exact.setdefault(k, (e[\"process_name\"], e[\"process_pid\"]))\n            by_dest.setdefault(e[\"\
+  destination_ip\"],\n                               (e[\"process_name\"], e[\"process_pid\"]))\n    \
+  \    con.close()\n    except Exception:\n        pass\n\n    live = {}\n    try:\n        con = sqlite3.connect(\"\
+  file:%s?mode=ro\" % (\n            Path.home() / \".local/share/lisin/state.db\"), uri=True)\n     \
+  \   con.row_factory = sqlite3.Row\n        for e in con.execute(\"SELECT remote, process, owner_cmd\
+  \ FROM ports \"\n                             \"WHERE COALESCE(process,'')<>''\"):\n            host\
+  \ = str(e[\"remote\"] or \"\").rsplit(\":\", 1)[0]\n            if host:\n                live.setdefault(host,\
+  \ str(e[\"process\"]))\n        con.close()\n    except Exception:\n        pass\n\n    for r in rows:\n\
+  \        if str(r.get(\"process_name\") or \"\").strip():\n            r[\"process_source\"] = \"socket\
+  \ was live\"\n            continue\n        k = (r.get(\"source_ip\"), r.get(\"source_port\"),\n   \
+  \          r.get(\"destination_ip\"), r.get(\"destination_port\"))\n        hit = exact.get(k)\n   \
+  \     if hit:\n            r[\"process_name\"], r[\"process_pid\"] = hit[0], hit[1]\n            r[\"\
+  process_source\"] = \"exact socket match\"\n            continue\n        dst = r.get(\"destination_ip\"\
+  )\n        hit = by_dest.get(dst)\n        if hit:\n            r[\"process_name\"], r[\"process_pid\"\
+  ] = hit[0], hit[1]\n            r[\"process_source\"] = \"by destination address (probable)\"\n    \
+  \        continue\n        nm = live.get(dst)\n        if nm:\n            r[\"process_name\"] = re.sub(r'^\\\
+  (\"?|\"?,.*$', \"\", nm)\n            r[\"process_source\"] = \"live socket (probable)\"\n        else:\n\
+  \            r[\"process_source\"] = \"owner unknown\"\n    # the subject axis: now that the owner is\
+  \ known the event reads as a phrase again\n    for r in rows:\n        if r.get(\"process_name\") and\
+  \ not r.get(\"subject_name\"):\n            r[\"subject_type\"], r[\"subject_name\"] = \"process\",\
+  \ r[\"process_name\"]\n    return rows\n"

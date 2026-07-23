@@ -3,9 +3,9 @@ id: LS-E-15
 type: enrichment
 version: 1.0.0
 title: Is the process still running
-# ЖИВ ЛИ ЕЩЁ ПРОЦЕСС из события. Расследуя вчерашнее событие, аналитик
-# первым делом спрашивает: он ещё в системе? Сверяем pid события с текущим
-# снимком процессов.
+# IS THE PROCESS OF THE EVENT STILL ALIVE. While investigating yesterday's event
+# an analyst first asks: is it still in the system? We compare the pid of the
+# event with the current process snapshot.
 code: |
   def enrich(rows):
       import sqlite3

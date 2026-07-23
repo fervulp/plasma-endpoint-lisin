@@ -3,15 +3,15 @@ id: LS-E-21
 type: enrichment
 version: 1.0.0
 title: Attach owning package (universal link)
-# УНИВЕРСАЛЬНЫЙ УЗЕЛ СВЯЗИ. Добавляет колонку package в таблицы, у которых
-# есть путь/юнит/модуль, привязываемый к пакету через rpm. После этого
-# таблица связывается с applications.name, а через него — со всем графом.
-# Один узел на несколько потоков (suid, privesc, scheduled, services,
-# kernel_modules): логика в экспертизе, не в коде.
+# THE UNIVERSAL LINKING NODE. It adds a package column to the tables that have a
+# path/unit/module that can be tied to a package through rpm. After that the
+# table links to applications.name and through it to the whole graph.
+# One node for several flows (suid, privesc, scheduled, services,
+# kernel_modules): the logic is in the expertise, not in the code.
 code: |
-  # Общий кэш индекса файл->пакет: строится один раз на процесс, обновляется по
-  # mtime базы rpm. Держим в модульном словаре, чтобы не перечитывать 36 МБ на
-  # каждую таблицу.
+  # A shared cache of the file->package index: built once per process, refreshed by
+  # the mtime of the rpm database. Kept in a module dictionary so as not to reread
+  # 36 MB for every table.
   _PKG_IDX = {}
   _PKG_STAMP = [""]
 
@@ -55,15 +55,15 @@ code: |
 
 
   def enrich(rows):
-      """Привязать строку к ПАКЕТУ — универсальный узел связи между таблицами.
+      """Tie a row to a PACKAGE - the universal linking node between tables.
 
-      После этого таблица связывается с applications.name (инвентарь) и через
-      него со всем остальным. Пакет выводится тремя способами, все системные:
-        * значение-ПУТЬ — прямо по индексу rpm (учитывая объединённый /usr:
-          /usr/sbin/x это симлинк на /usr/bin/x, пакет записан по второму);
-        * значение-ЮНИТ (*.service/*.timer/*.socket) — через FragmentPath;
-        * значение-МОДУЛЬ ядра — через путь /lib/modules/.../name.ko.
-      Никаких списков имён: только сверка с тем, что объявила сама система.
+      After that the table links to applications.name (the inventory) and through
+      it to everything else. The package is derived in three ways, all from the system:
+        * a PATH value - straight from the rpm index (taking the merged /usr into
+          account: /usr/sbin/x is a symlink to /usr/bin/x, the package records the latter);
+        * a UNIT value (*.service/*.timer/*.socket) - through FragmentPath;
+        * a kernel MODULE value - through the path /lib/modules/.../name.ko.
+      No lists of names: only a comparison with what the system itself declared.
       """
       import os
       import subprocess
@@ -78,7 +78,7 @@ code: |
               rp = ""
           return idx.get(rp, "")
 
-      # соберём юниты и модули на батч-резолв (по одному вызову дорого)
+      # collect the units and modules for a batch resolve (one call each is expensive)
       units, mods = set(), set()
       for r in rows:
           for v in r.values():
@@ -98,21 +98,21 @@ code: |
 
       for r in rows:
           pkg = ""
-          # 1) любое значение-путь
+          # 1) any path value
           for v in r.values():
               v = str(v or "")
               if v.startswith("/"):
                   pkg = by_path(v)
                   if pkg:
                       break
-          # 2) юнит
+          # 2) a unit
           if not pkg:
               for v in r.values():
                   if str(v) in unit_pkg:
                       pkg = unit_pkg[str(v)]
                       if pkg:
                           break
-          # 3) модуль ядра (по короткому имени)
+          # 3) a kernel module (by its short name)
           if not pkg and r.get("name") and "/" not in str(r.get("name")):
               nm = str(r["name"]).replace("-", "_")
               try:

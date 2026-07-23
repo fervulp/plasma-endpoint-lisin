@@ -18,7 +18,7 @@ Kirigami.ScrollablePage {
         }
     ]
 
-    // Закреплён вверху: идентичность процесса + кто его запустил (unit).
+    // Pinned at the top: the identity of the process + what started it (the unit).
     header: QQC2.ToolBar {
         contentItem: RowLayout {
             spacing: Kirigami.Units.largeSpacing
@@ -124,7 +124,7 @@ Kirigami.ScrollablePage {
                   (page.d.env_flags || []).join("\n")
         }
 
-        // «Как запустился» — цепочка от init вниз до процесса, закреплена вверху.
+        // "How it started" - the chain from init down to the process, pinned at the top.
         Section {
             heading: "Launch timeline"
             icon2: "chronometer"

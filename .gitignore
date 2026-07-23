@@ -1,5 +1,5 @@
-# Рабочие журналы: полны реальных путей, адресов и имён этой машины —
-# в публичный репозиторий им нельзя (положение 18).
+# Working journals: they are full of real paths, addresses and names of this
+# machine - they must not go into a public repository (principle 18).
 CLAUDE.md
 WISHES.md
 *.draft.yaml
@@ -8,3 +8,30 @@ __pycache__/
 *.pyc
 *.pyo
 .qmlls.ini
+
+# Data of THIS machine: never in the repository (principle 18).
+# The application keeps everything under XDG directories outside the source
+# tree (~/.local/share/lisin, ~/.config/lisin) and creates them itself on the
+# first start (mkdir parents in statedb/eventsdb/config), so a clean checkout
+# needs none of these files. The patterns below are a safety net in case
+# someone runs the agent with a different path or copies a database here.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+state.db*
+events.db*
+settings.json
+lisin.lock
+# on-disk caches built from the local system (rpm index, ASN, CVSS, browser meta)
+appmeta.json
+filepkg.json
+procpkg.json
+progclass.json
+ipintel.json
+cvss.json
+cveintel.json
+net_seen.json
+proc_seen.json
+RPM-GPG-KEY-lisin

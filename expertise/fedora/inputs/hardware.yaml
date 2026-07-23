@@ -3,7 +3,7 @@ id: LS-I-35
 type: input
 version: 1.0.0
 title: Hardware / BIOS
-# dmidecode требует root → sudo -n (без пароля). Нет прав → пусто, без ошибки.
+# dmidecode needs root -> sudo -n (no password). No rights -> empty, without an error.
 command: |
   for s in bios-vendor bios-version bios-release-date \
            system-manufacturer system-product-name system-version \
