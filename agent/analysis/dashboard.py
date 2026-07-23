@@ -209,6 +209,70 @@ def process_detail(db, eventsdb, pid):
     did_truncated = len(did) > 200
     did = did[:200]
 
+    # --- THE ACTIVITY HISTORY: what the process did, in time order ---
+    # "Which commands did it launch, and what did it do, chronologically?" A
+    # process_started event carries parent_pid = this pid for every COMMAND this
+    # process launched (its child's pid is process_pid), while process_pid = this
+    # pid gives the process's OWN actions (connections, file changes). Merging the
+    # two and ordering by time is the history. We take the most recent 500 and
+    # reverse to ascending, so a long-running process shows its latest activity
+    # rather than only its first (and says so if older activity was dropped).
+    #
+    # Honest limit: procmon/journal are pollers, so a command that lived entirely
+    # between two polls is missed; kernel audit (execve) catches more, which is
+    # why packaging/lisin-grant-access installs those rules.
+    history = []
+    hist_truncated = False
+    if eventsdb is not None:
+        try:
+            hrows = eventsdb.query(
+                "SELECT ts, event_category, event_action, process_pid, "
+                "parent_pid, process_name, process_executable, "
+                "process_command_line, destination_ip, destination_port, "
+                "destination_as_org, file_path, object_name, message FROM events "
+                "WHERE process_pid = ? OR parent_pid = ? "
+                "ORDER BY ts DESC, _id DESC LIMIT 501", (pid, pid)).get("rows", [])
+        except Exception:
+            hrows = []
+        hist_truncated = len(hrows) > 500
+        for e in reversed(hrows[:500]):          # back to ascending time
+            act = e.get("event_action") or ""
+            cat = e.get("event_category") or ""
+            ppd = str(e.get("process_pid") or "")
+            ppid = str(e.get("parent_pid") or "")
+            child = ""
+            if act == "process_started" and ppd == pid:
+                kind = "started"          # this process itself came up
+                target = (e.get("process_command_line") or e.get("process_executable")
+                          or e.get("process_name") or "")
+            elif act == "process_started" and ppid == pid:
+                kind = "launched"         # a command this process launched
+                target = (e.get("process_command_line") or e.get("process_executable")
+                          or e.get("process_name") or e.get("message") or "")
+                child = ppd
+            elif cat == "network":
+                kind = "network"
+                dip = e.get("destination_ip") or ""
+                dp = e.get("destination_port")
+                org = e.get("destination_as_org") or ""
+                target = ((dip + (":" + str(dp) if dp else "")) or
+                          (e.get("object_name") or ""))
+                if org:
+                    target += "  (" + org + ")"
+            elif cat == "file":
+                kind = "file"
+                target = e.get("file_path") or e.get("object_name") or ""
+            elif cat == "authentication":
+                kind = "auth"
+                target = e.get("object_name") or e.get("message") or ""
+            else:
+                kind = cat or "event"
+                target = e.get("object_name") or e.get("message") or ""
+            history.append({
+                "ts": e.get("ts", ""), "kind": kind, "action": act,
+                "target": str(target)[:140], "child_pid": child,
+                "message": str(e.get("message") or "")[:160]})
+
     # --- the children of the process ---
     kids = [{"pid": p, "command": (r.get("command") or "")[:120],
              "rss": round(_f(r.get("rss_mb")), 1)}
@@ -231,6 +295,7 @@ def process_detail(db, eventsdb, pid):
         "children": kids,
         "sockets": socks,
         "events": did, "events_truncated": did_truncated,
+        "history": history, "history_truncated": hist_truncated,
         "package": (pkg or {}).get("name", ""),
         "package_kind": (pkg or {}).get("kind", ""),
         "package_version": (pkg or {}).get("version", ""),

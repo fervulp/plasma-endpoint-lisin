@@ -1102,6 +1102,51 @@ Item {
                                         }
                                     }
 
+                                    // --- THE ACTIVITY HISTORY: what the process
+                                    // did, in time order - the commands it
+                                    // LAUNCHED (⤷, with the child pid) interleaved
+                                    // with its own connections and file changes.
+                                    Section {
+                                        title: view.deep && view.deep.history_truncated
+                                               ? "Activity History (latest 500)"
+                                               : "Activity History"
+                                        count: view.deep ? (view.deep.history || []).length : 0
+                                        openByDefault: true
+                                        Repeater {
+                                            model: view.deep ? (view.deep.history || []) : []
+                                            delegate: RowLayout {
+                                                required property var modelData
+                                                Layout.fillWidth: true
+                                                spacing: Kirigami.Units.smallSpacing
+                                                property bool launched: modelData.kind === "launched"
+                                                QQC2.Label {
+                                                    text: Fmt.localTime(modelData.ts)
+                                                    color: Kirigami.Theme.disabledTextColor
+                                                    font.family: "monospace"
+                                                    font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
+                                                }
+                                                Kirigami.Icon {
+                                                    source: parent.launched ? "arrow-right"
+                                                            : modelData.kind === "network" ? "network-connect"
+                                                            : modelData.kind === "file" ? "document-edit"
+                                                            : modelData.kind === "started" ? "media-playback-start"
+                                                            : "dialog-information"
+                                                    implicitWidth: Kirigami.Units.iconSizes.small
+                                                    implicitHeight: Kirigami.Units.iconSizes.small
+                                                }
+                                                QQC2.Label {
+                                                    Layout.fillWidth: true
+                                                    elide: Text.ElideRight
+                                                    font.bold: parent.launched
+                                                    font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
+                                                    text: (parent.launched ? "launched  " : "")
+                                                          + (modelData.target || modelData.message || modelData.action)
+                                                          + (modelData.child_pid ? "  [pid " + modelData.child_pid + "]" : "")
+                                                }
+                                            }
+                                        }
+                                    }
+
                                     // --- the package ---
                                     Section {
                                         title: "Package"

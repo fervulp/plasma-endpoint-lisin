@@ -59,9 +59,12 @@ the process that owns the socket.
 
 ![Process graph](docs/screenshots/graph.png)
 
-The same graph lives inside the State dashboard, next to the process tree:
+The same graph lives inside the State dashboard, next to the process tree. The
+side panel gives an **activity history** — in time order, the commands the
+process *launched* (with the child PID) interleaved with the connections it
+opened and the files it changed, answering "what did this process do, and when":
 
-![Dashboard](docs/screenshots/dashboard.png)
+![Dashboard with activity history](docs/screenshots/process-history.png)
 
 **Findings** answer *what should I look at?* — each with why it matters, what to
 do, the evidence, and a jump to the state it came from:
