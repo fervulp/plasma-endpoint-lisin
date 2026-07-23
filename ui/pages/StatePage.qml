@@ -22,6 +22,25 @@ Kirigami.Page {
         return t.filter(function (x) { return x.name !== "vulnerabilities" })
     }
     property int tabIndex: 0
+    // THE ROWS OF THE CURRENT TABLE, fetched by name. The snapshot used to carry
+    // the rows of all 50 tables - 115 thousand of them, 22.9 MB - and it is
+    // rebuilt on every refresh, which froze the window for a second at a time.
+    // Now the snapshot is the map of the tables and only what is on screen is
+    // fetched (7 ms instead of 195 ms per refresh).
+    property var curRows: []          // ONE page, as the database returned it
+    property int curTotal: 0          // how many rows the condition matches in total
+    property string rowsError: ""
+    function loadRows() {
+        if (!cur) { curRows = []; curTotal = 0; rowsError = ""; return }
+        var where = page.whereSql()
+        var order = sortCol !== "" ? (sortCol + (sortAsc ? " ASC" : " DESC")) : ""
+        var r = backend.tableRows(cur.name, where, order,
+                                  pageLimit > 0 ? pageLimit : 0,
+                                  pageLimit > 0 ? pageIndex * pageLimit : 0)
+        curRows = r.rows || []
+        curTotal = r.total || 0
+        rowsError = r.error || ""
+    }
     // filtering the list of tables by name
     property string tabFilter: ""
     readonly property var shownTabs: {
@@ -52,10 +71,21 @@ Kirigami.Page {
     // private keys the value is empty), and public keys are open by definition -
     // we show their content directly. Only real secrets are masked.
     readonly property var sensitiveCols: ["secret", "private", "token", "password"]
-    property var hiddenCols: cur && cur.colcfg && cur.colcfg.hidden
-                             ? cur.colcfg.hidden
-                             : listCols.filter(c => longCols.includes(c)
-                                                    || sensitiveCols.includes(c))
+    // HOW MANY COLUMNS ARE SHOWN BY DEFAULT. Events shows 8 of its 98 fields for
+    // the same reason: a row of twenty columns is not read, it is scrolled, and
+    // every extra column is 50 more objects on the page - a tab switch to
+    // applications took 1.2 s with all 19 shown. The rest are one click away in
+    // the query bar (SELECT) or in the Columns panel, and a saved choice always
+    // wins over this default.
+    readonly property int defaultCols: 8
+    property var hiddenCols: {
+        if (cur && cur.colcfg && cur.colcfg.hidden) return cur.colcfg.hidden
+        var hide = listCols.filter(c => longCols.includes(c)
+                                        || sensitiveCols.includes(c))
+        var shown = listCols.filter(c => !hide.includes(c))
+        for (var i = defaultCols; i < shown.length; i++) hide.push(shown[i])
+        return hide
+    }
     property var visibleCols: colOrder.filter(c => !hiddenCols.includes(c))
 
     property var savedWidths: cur && cur.colcfg && cur.colcfg.widths
@@ -68,33 +98,57 @@ Kirigami.Page {
     onCurNameChanged: {
         // A DIFFERENT TABLE HAS DIFFERENT FIELDS: both the selection and the
         // condition of the previous table are meaningless here - reset them with the view.
-        page.queryText = ""; page.queryRows = []; page.queryError = ""
+        page.loadRows()
+        page.queryText = ""; page.queryError = ""
         if (typeof qbar !== "undefined") qbar.clearAll()
         liveWidths = ({}); selRows = []; selAnchor = -1; pageIndex = 0
-        sortCol = ""; sortAsc = true; colFilters = ({}); lastSel = null; selName = ""
+        sortCol = ""; sortAsc = true; lastSel = null; selName = ""
     }
     // The same tab, fresh data: we re-point the selection and the details row at
     // the NEW row objects by _id (so that they show the current values).
     onCurChanged: {
+        // fresh data for the same table: re-read the rows, then re-point the
+        // selection at the new objects
+        if (cur && cur.name === curName && curRows.length === 0) page.loadRows()
         if (!cur || cur.name !== selName) return
         const byId = ({})
-        for (const r of cur.rows) byId[r._id] = r
+        for (const r of curRows) byId[r._id] = r
         selRows = selRows.map(r => byId[r._id]).filter(r => r !== undefined)
         lastSel = lastSel ? (byId[lastSel._id] || null) : null
         if (!lastSel && detailsPanel.open) detailsPanel.open = false
     }
-    // "Explore" from an event: open the right tab and filter it.
-    // The order matters: first the tab (changing it resets colFilters), then the filter.
+    // "Explore" from an event: open the right tab and put the condition into the
+    // query bar - the SAME mechanism the user types into, executed by the
+    // database (principle 17). It used to set a per-column filter evaluated in
+    // JS; once the rows started arriving already selected by the database, that
+    // filter quietly stopped doing anything and the jump landed on an unfiltered
+    // table.
+    // The order matters: first the tab (changing it clears the query), then the
+    // condition.
     function applyFocus() {
         var f = root ? root.stateFocus : null
         if (!f) return
         for (var i = 0; i < tabsModel.length; i++) {
             if (tabsModel[i].name === f.table) { tabIndex = i; break }
         }
-        filtersOn = true
-        setColFilter(f.col, f.val)
+        if (typeof qbar !== "undefined") {
+            qbar.clearAll()
+            qbar.addCondition(f.col, "=", String(f.val))
+            qbar.apply()
+        }
     }
-    Component.onCompleted: applyFocus()
+    Component.onCompleted: { page.loadRows(); applyFocus() }
+
+    // FRESH DATA WITHOUT THRASHING. The snapshot arrives while the pipeline
+    // collects (once a second at most), and re-reading the table on every one of
+    // them would keep the list rebuilding under the cursor. We coalesce them: one
+    // read shortly after the last snapshot, and only for the table on screen.
+    onSChanged: rowsTimer.restart()
+    Timer {
+        id: rowsTimer
+        interval: 400
+        onTriggered: page.loadRows()
+    }
     Connections {
         target: root
         function onStateFocusChanged() { page.applyFocus() }
@@ -173,37 +227,21 @@ Kirigami.Page {
     // sort + filters + pagination
     property string sortCol: ""
     property bool sortAsc: true
-    property var colFilters: ({})
-    property bool filtersOn: false
-    // the unique values of a column; if there are few, the filter is a combo box
-    function uniqueVals(col) {
-        if (!cur) return []
-        const set = {}
-        for (const r of cur.rows) {
-            const v = String(r[col] ?? "")
-            if (v !== "") set[v] = 1
-        }
-        const arr = Object.keys(set)
-        return arr.length <= 15 ? arr.sort() : null   // null -> an ordinary text field
-    }
-    function setColFilter(c, v) {
-        const o = Object.assign({}, colFilters)
-        o[c] = v
-        colFilters = o
-        pageIndex = 0
-    }
     function toggleSort(c) {
         if (sortCol === c) {
             if (sortAsc) sortAsc = false
             else { sortCol = ""; sortAsc = true }   // the third click resets it
         } else { sortCol = c; sortAsc = true }
+        pageIndex = 0
+        page.loadRows()          // ORDER BY is the database's job
     }
+    onPageIndexChanged: page.loadRows()
+    onPageLimitChanged: { pageIndex = 0; page.loadRows() }
     // ---- THE SINGLE SEARCH, AS IN EVENTS ----
     // The condition is executed by the DATABASE (stateRows), not by parsing a
     // string in the interface: that way MATCH, OR and NOT work, and the mechanism
     // is one for every section.
     property string queryText: ""
-    property var queryRows: []
     property string queryError: ""
     // THE SELECTION SETS THE COLUMNS for the current view; the permanent setup is
     // the "Columns" panel, and that is what persists (otherwise one query would
@@ -287,56 +325,33 @@ Kirigami.Page {
             parts.push('CAST("' + cols[i] + "\" AS TEXT) LIKE '%" + e + "%'")
         return parts.length ? "(" + parts.join(" OR ") + ")" : ""
     }
+    // THE CONDITION IS ASSEMBLED IN ONE PLACE and executed by the database: the
+    // text of the query (or a free-text search over the columns of this table)
+    // plus the group picked on the left.
+    function whereSql() {
+        var w = queryText === "" ? ""
+              : (hasOperator(queryText) ? queryText : freeText(queryText))
+        var g = groupCond()
+        if (g) w = w ? "(" + w + ") AND " + g : g
+        return w
+    }
     function applyQuery(sql) {
         queryText = (sql || "").trim()
         pageIndex = 0
         reloadGroups()
-        if (queryText === "" && !groupPicked) { queryRows = []; queryError = ""; return }
-        if (!cur) { queryRows = []; queryError = ""; return }
-        var where = hasOperator(queryText) ? queryText : freeText(queryText)
-        var g = groupCond()
-        if (g) where = where ? "(" + where + ") AND " + g : g
-        var r = backend.stateRows(cur.name, where)
-        queryRows = r.rows || []
-        queryError = r.error || ""
+        page.loadRows()
+        queryError = page.rowsError
     }
-    property var filteredRows: {
-        if (!cur) return []
-        // if a condition is set - we work with what the database returned
-        // rows from the database - when there is a condition OR a group is selected
-        let rows = ((queryText !== "" || groupPicked) && queryError === "")
-                   ? queryRows : cur.rows
-        // the text selection is done by the database (applyQuery), what is left
-        // here is only the per-column filters and the sorting
-        for (const c in colFilters) {
-            const v = String(colFilters[c] || "")
-            if (!v) continue
-            const uniq = uniqueVals(c)
-            if (uniq !== null && uniq.includes(v))     // combo -> exact match
-                rows = rows.filter(r => String(r[c] ?? "") === v)
-            else                                        // text -> substring
-                rows = rows.filter(r => String(r[c] ?? "").toLowerCase()
-                                          .includes(v.toLowerCase()))
-        }
-        if (sortCol !== "") {
-            const col = sortCol, asc = sortAsc ? 1 : -1
-            rows = rows.slice().sort((a, b) => {
-                const x = a[col] ?? "", y = b[col] ?? ""
-                const nx = parseFloat(x), ny = parseFloat(y)
-                if (isFinite(nx) && isFinite(ny) &&
-                    String(nx).length >= String(x).trim().length - 2 &&
-                    String(ny).length >= String(y).trim().length - 2)
-                    return (nx - ny) * asc
-                return String(x).localeCompare(String(y)) * asc
-            })
-        }
-        return rows
-    }
+    // The rows arrive already selected, sorted and paged by the database, so
+    // there is nothing left to do here. Filtering in JS meant carrying every row
+    // of the table across the QML boundary, and that cost grew with the size of
+    // the table: 1.5 s per switch to applications, 0.5 s to package_files.
+    property var filteredRows: curRows
     property int pageLimit: 50
     property int pageIndex: 0
-    property int pageCount: Math.max(1, Math.ceil(filteredRows.length / pageLimit))
-    property var pagedRows: filteredRows.slice(pageIndex * pageLimit,
-                                               (pageIndex + 1) * pageLimit)
+    property int pageCount: pageLimit > 0
+        ? Math.max(1, Math.ceil(curTotal / pageLimit)) : 1
+    property var pagedRows: curRows
 
     property var selRows: []           // the selected rows (_id objects)
     property var lastSel: null         // the last clicked one - for the details sidebar
@@ -414,11 +429,10 @@ Kirigami.Page {
             Item { Layout.fillWidth: true }
             QQC2.Label {
                 opacity: 0.7
-                text: page.filteredRows.length === 0 ? "0 rows"
+                text: page.curTotal === 0 ? "0 rows"
                       : (page.pageIndex * page.pageLimit + 1) + "–" +
-                        Math.min((page.pageIndex + 1) * page.pageLimit,
-                                 page.filteredRows.length) +
-                        " of " + page.filteredRows.length
+                        Math.min((page.pageIndex + 1) * page.pageLimit, page.curTotal) +
+                        " of " + page.curTotal
             }
             QQC2.ToolButton {
                 icon.name: "go-previous"
@@ -499,7 +513,7 @@ Kirigami.Page {
                                 Layout.fillWidth: true
                             }
                             QQC2.Label {   // the counter is always visible on the right
-                                text: modelData.rows.length
+                                text: modelData.count
                                 opacity: 0.55
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize
                             }
@@ -992,26 +1006,44 @@ Kirigami.Page {
                                                          rowDel.rowIndex,
                                                          Qt.ControlModifier)
                             }
+                            // ONE OBJECT PER CELL. There used to be three - a
+                            // wrapper Item, a Label and a Separator - so a page
+                            // of 50 rows by 19 columns created about 2850 items
+                            // and every page change froze for 0.4 s. The column
+                            // separators are now drawn once for the whole table
+                            // (see the overlay below the list), not per cell.
                             Repeater {
                                 model: page.visibleCols
-                                Item {
+                                QQC2.Label {
                                     width: page.colWidth(modelData)
-                                    height: cellLbl.implicitHeight
                                     anchors.verticalCenter: parent.verticalCenter
-                                    QQC2.Label {
-                                        id: cellLbl
-                                        anchors.fill: parent
-                                        text: String(rowDel.rowData[modelData] ?? "")
-                                        elide: Text.ElideRight
-                                        leftPadding: Kirigami.Units.smallSpacing
-                                    }
-                                    Kirigami.Separator {
-                                        anchors.right: parent.right
-                                        anchors.top: parent.top
-                                        anchors.bottom: parent.bottom
-                                        opacity: 0.25
-                                    }
+                                    text: String(rowDel.rowData[modelData] ?? "")
+                                    elide: Text.ElideRight
+                                    leftPadding: Kirigami.Units.smallSpacing
+                                    rightPadding: Kirigami.Units.smallSpacing
                                 }
+                            }
+                        }
+                    }
+
+                    // the column separators for the whole table: one line per
+                    // column instead of one per cell
+                    Item {
+                        anchors.fill: parent
+                        z: 2
+                        Repeater {
+                            model: page.visibleCols
+                            Kirigami.Separator {
+                                required property int index
+                                x: {
+                                    var w = Kirigami.Units.gridUnit * 2
+                                    for (var i = 0; i <= index; i++)
+                                        w += page.colWidth(page.visibleCols[i])
+                                    return w - 1
+                                }
+                                y: 0
+                                height: tableView.height
+                                opacity: 0.25
                             }
                         }
                     }
@@ -1132,32 +1164,6 @@ Kirigami.Page {
                 }
                 }
             }
-        }
-    }
-
-    Component {
-        id: textFilter
-        QQC2.TextField {
-            property string col: parent.col
-            placeholderText: "filter…"
-            font.pointSize: Kirigami.Theme.smallFont.pointSize
-            text: page.colFilters[col] || ""
-            onTextEdited: page.setColFilter(col, text)
-        }
-    }
-    Component {
-        id: comboFilter
-        QQC2.ComboBox {
-            property string col: parent.col
-            property var uniq: parent.uniq
-            font.pointSize: Kirigami.Theme.smallFont.pointSize
-            model: ["(all)"].concat(uniq)
-            currentIndex: {
-                const v = page.colFilters[col] || ""
-                const i = uniq.indexOf(v)
-                return i >= 0 ? i + 1 : 0
-            }
-            onActivated: page.setColFilter(col, currentIndex === 0 ? "" : currentText)
         }
     }
 

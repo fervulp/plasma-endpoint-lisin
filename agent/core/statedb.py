@@ -211,20 +211,70 @@ class StateDB:
                     c.execute("DELETE FROM _tabs WHERE name=?", (n,))
 
     # -------- reading everything for the UI --------
+    # rows of ONE table are fetched separately (see table_rows): a snapshot that
+    # carried every row shipped 22.9 MB and 115 thousand rows to the interface on
+    # EVERY refresh - the whole model was rebuilt and the window froze for a
+    # second at a time. The snapshot is the map of the tables; the rows of the
+    # one on screen are asked for by name.
+    MAX_ROWS = 5000
+
+    def table_rows(self, name: str, where: str = "", order: str = "",
+                   limit: int = 0, offset: int = 0) -> dict:
+        """ONE PAGE of one table: the condition, the order and the paging are the
+        database's job.
+
+        Measured cost of doing it the other way: handing the rows to the
+        interface takes time proportional to the number of VALUES crossing the
+        boundary - applications (3505 rows x 20 columns) took 1.5 s per tab
+        switch, package_files 0.5 s, while small tables took 0.10 s. A page is 50
+        rows, so the boundary crossing is constant no matter how large the table.
+
+        The table name is checked against the registry and the ORDER BY column
+        against the real columns; the condition is executed by a read-only
+        connection, as everywhere else.
+        """
+        with self._con() as c:
+            names = {r["name"] for r in c.execute("SELECT name FROM _tabs")}
+            if name not in names:
+                return {"rows": [], "total": 0, "error": "no such table"}
+            cols = set(self._columns(c, name)) | {"_id"}
+        sql = f'SELECT * FROM "{name}"'
+        cnt = f'SELECT COUNT(*) FROM "{name}"'
+        if where and where.strip():
+            sql += " WHERE " + where
+            cnt += " WHERE " + where
+        if order:
+            field, _, direction = order.partition(" ")
+            if field in cols:
+                sql += f' ORDER BY "{field}"'
+                sql += " DESC" if direction.upper().startswith("DESC") else " ASC"
+        if limit:
+            sql += f" LIMIT {int(limit)} OFFSET {int(offset)}"
+        try:
+            con = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=5)
+            con.row_factory = sqlite3.Row
+            rows = [dict(r) for r in con.execute(sql)]
+            total = con.execute(cnt).fetchone()[0]
+            con.close()
+        except Exception as e:
+            return {"rows": [], "total": 0, "error": str(e)}
+        return {"rows": rows, "total": total, "error": ""}
+
     def snapshot(self) -> dict:
         import json
         tabs = []
         with self._con() as c:
             for t in c.execute("SELECT * FROM _tabs"):
                 cols = self._columns(c, t["name"])
-                rows = [dict(r) for r in c.execute(f'SELECT * FROM "{t["name"]}"')]
+                count = c.execute(
+                    f'SELECT COUNT(*) FROM "{t["name"]}"').fetchone()[0]
                 try:
                     colcfg = json.loads(t["colcfg"]) if t["colcfg"] else None
                 except Exception:
                     colcfg = None
                 tabs.append({"name": t["name"], "title": t["title"],
                              "icon": t["icon"], "builtin": bool(t["builtin"]),
-                             "columns": cols, "rows": rows, "colcfg": colcfg,
+                             "columns": cols, "count": count, "colcfg": colcfg,
                              # WHEN THIS TABLE WAS FILLED LAST TIME:
                              # without it "empty" cannot be told apart from
                              # "not collected for a long time"

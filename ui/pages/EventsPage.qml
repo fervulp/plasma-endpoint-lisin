@@ -572,7 +572,18 @@ Kirigami.Page {
         // column setup is done in the "Columns" panel - and that is what persists.
     }
 
-    function reload() {
+    // ONE LOAD PER CHANGE, not one per binding that happened to fire. Opening the
+    // section used to call the backend three times over (rows, statistics, live
+    // pids) because several handlers ask for a reload while the page settles.
+    // They are coalesced here: the last request within a frame wins.
+    Timer {
+        id: reloadTimer
+        interval: 30
+        onTriggered: page.reloadNow()
+    }
+    function reload() { reloadTimer.restart() }
+
+    function reloadNow() {
         page.feed = backend.eventRows(whereText, pageLimit,
                                       pageIndex * pageLimit, page.orderText)
         // the map of live processes - for the same page
@@ -590,7 +601,7 @@ Kirigami.Page {
         // an external jump (from the network dashboard) is applied INSTEAD of the
         // ordinary load: otherwise the condition would be overwritten by an empty filter
         if (root.eventFocus) applyEventFocus()
-        else reload()
+        else reloadNow()
     }
     Connections {
         target: backend

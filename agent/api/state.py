@@ -54,6 +54,23 @@ class StateApi:
                 out[pid] = str(r.get("command") or "")
         return out
 
+    @Slot(str, str, str, int, int, result="QVariant")
+    def tableRows(self, table, where, order, limit, offset):
+        """ONE PAGE of a state table: condition, order and paging done by the DB.
+
+        A snapshot used to carry every row of every table - 115 thousand rows,
+        22.9 MB - and the model was rebuilt on each refresh. Worse, the cost of
+        handing rows to the interface grows with the number of VALUES crossing
+        the boundary: a tab switch to applications (3505 rows x 20 columns) took
+        1.5 s. A page is 50 rows, so the cost no longer depends on the size of
+        the table.
+        """
+        try:
+            return self.db.table_rows(str(table), str(where), str(order),
+                                      int(limit), int(offset))
+        except Exception as e:
+            return {"rows": [], "total": 0, "error": str(e)}
+
     @Slot(str, str, result="QVariant")
     def stateRows(self, table, where):
         """ROWS OF A STATE TABLE BY AN SQL CONDITION.

@@ -2,6 +2,45 @@
 from PySide6.QtCore import Slot
 
 
+# ---- THE COST OF AN AGGREGATE IS PAID ONCE ----
+# Every panel recomputes from scratch: the network one walks 104 thousand
+# network events (468 ms), the dashboard rebuilds the process tree (145 ms).
+# The interface asks for them on every state refresh - and a refresh now arrives
+# once a second while the pipeline collects, so the window froze for half of
+# every second.
+#
+# The answer only changes when the DATA changes, so it is cached by the
+# modification time of the two databases plus a short ceiling: a repeat within
+# the same second returns the previous answer, and a write invalidates it at
+# once. Nothing is stored between runs - this is a memo, not a store.
+_CACHE = {}
+_TTL = 3.0
+
+
+def _stamp(*paths):
+    import os
+    out = []
+    for p in paths:
+        try:
+            out.append(os.path.getmtime(p))
+        except OSError:
+            out.append(0)
+    return tuple(out)
+
+
+def _memo(self, name, build):
+    import time
+    ev = getattr(self.pipe, "_events", None)
+    sig = _stamp(self.db.path, getattr(ev, "path", "")) if ev else _stamp(self.db.path)
+    hit = _CACHE.get(name)
+    now = time.time()
+    if hit and hit[0] == sig and now - hit[1] < _TTL:
+        return hit[2]
+    val = build()
+    _CACHE[name] = (sig, now, val)
+    return val
+
+
 class DashboardApi:
     # A Backend mixin: the slots are registered in metaObject on
     # inheritance Backend(QObject, ...) - verified.
@@ -10,7 +49,8 @@ class DashboardApi:
     def dashboardState(self):
         from agent.analysis import dashboard
         try:
-            return dashboard.build(self.db, self.pipe.events())
+            return _memo(self, "dashboard",
+                         lambda: dashboard.build(self.db, self.pipe.events()))
         except Exception as e:
             return {"error": str(e), "tiles": [], "graph": {"nodes": [], "edges": []},
                     "top_rss": [], "top_cpu": [], "top_deps": [], "top_dest": [],
@@ -318,7 +358,7 @@ class DashboardApi:
         column values, not hard-coded."""
         from agent.analysis import links
         try:
-            return links.model(self.db)
+            return _memo(self, "linkmodel", lambda: links.model(self.db))
         except Exception as e:
             return {"error": str(e), "nodes": [], "links": []}
     # -------- thematic investigation panels --------
@@ -326,7 +366,8 @@ class DashboardApi:
     def fileActivity(self):
         from agent.analysis import panels
         try:
-            return panels.file_activity(self.db, self.pipe.events())
+            return _memo(self, "files",
+                         lambda: panels.file_activity(self.db, self.pipe.events()))
         except Exception as e:
             return {"error": str(e), "events": [], "by_action": [], "by_dir": []}
 
@@ -334,7 +375,8 @@ class DashboardApi:
     def privescActivity(self):
         from agent.analysis import panels
         try:
-            return panels.privesc_activity(self.db, self.pipe.events())
+            return _memo(self, "privesc",
+                         lambda: panels.privesc_activity(self.db, self.pipe.events()))
         except Exception as e:
             return {"error": str(e), "events": [], "vectors": []}
 
@@ -342,7 +384,8 @@ class DashboardApi:
     def networkFlows(self):
         from agent.analysis import panels
         try:
-            return panels.network_flows(self.db, self.pipe.events())
+            return _memo(self, "netflows",
+                         lambda: panels.network_flows(self.db, self.pipe.events()))
         except Exception as e:
             return {"error": str(e), "flows": [], "dns": []}
 

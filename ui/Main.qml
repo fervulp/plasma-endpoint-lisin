@@ -57,6 +57,29 @@ Kirigami.ApplicationWindow {
         open("dashboards")
     }
 
+    // A SECTION IS BUILT ONCE AND KEPT. Every navigation used to destroy the page
+    // and create it again: opening Events cost about a second, because that page
+    // rebuilds a query bar over 98 taxonomy fields, a table and its panels from
+    // scratch. Seven pages are cheap to keep, and the state of a section - the
+    // query, the scroll position, the selected row - survives leaving it, which
+    // is what an investigation needs anyway.
+    property var pageCache: ({})
+    function pageFor(name) {
+        if (pageCache[name] !== undefined)
+            return pageCache[name]
+        var comp = name === "state" ? statePageComp
+                 : name === "dashboards" ? dashboardPageComp
+                 : name === "events" ? eventsPageComp
+                 : name === "sql" ? sqlPageComp
+                 : name === "pipeline" ? pipelinePageComp
+                 : name === "expertise" ? expertisePageComp
+                 : name === "settings" ? settingsPageComp
+                 : placeholder
+        var obj = comp.createObject(root)
+        pageCache[name] = obj
+        return obj
+    }
+
     function open(name) {
         if (root.section === name)
             return
@@ -64,14 +87,7 @@ Kirigami.ApplicationWindow {
         while (root.pageStack.layers.depth > 1)   // close fullscreen layers
             root.pageStack.layers.pop()
         root.pageStack.clear()                    // drop leftover columns
-        root.pageStack.push(name === "state" ? statePageComp
-                          : name === "dashboards" ? dashboardPageComp
-                          : name === "events" ? eventsPageComp
-                          : name === "sql" ? sqlPageComp
-                          : name === "pipeline" ? pipelinePageComp
-                          : name === "expertise" ? expertisePageComp
-                          : name === "settings" ? settingsPageComp
-                          : placeholder)
+        root.pageStack.push(pageFor(name))
     }
 
     globalDrawer: Kirigami.GlobalDrawer {
