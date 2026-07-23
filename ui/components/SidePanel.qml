@@ -69,6 +69,13 @@ Rectangle {
         anchors.leftMargin: Kirigami.Units.smallSpacing * 2
         spacing: Kirigami.Units.smallSpacing
         width: panel.panelWidth
+        // the contents fade with the panel instead of flashing at full width
+        // while it is still sliding open
+        opacity: panel.open ? 1 : 0
+        Behavior on opacity {
+            NumberAnimation { duration: Kirigami.Units.longDuration
+                              easing.type: Easing.OutCubic }
+        }
 
         RowLayout {
             Layout.fillWidth: true

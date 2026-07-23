@@ -507,7 +507,28 @@ Item {
                     Repeater {
                         model: view.d.tiles
                         Kirigami.AbstractCard {
+                            id: tile
+                            required property var modelData
+                            required property int index
                             width: Kirigami.Units.gridUnit * 9
+                            // the tiles rise into place one after another when the
+                            // dashboard loads - a staggered fade, all on the render
+                            // thread
+                            opacity: 0
+                            Component.onCompleted: tileIn.start()
+                            SequentialAnimation {
+                                id: tileIn
+                                PauseAnimation { duration: Math.min(tile.index, 6) * 40 }
+                                ParallelAnimation {
+                                    OpacityAnimator { target: tile; from: 0; to: 1
+                                        duration: Kirigami.Units.longDuration
+                                        easing.type: Easing.OutCubic }
+                                    NumberAnimation { target: tile; property: "y"
+                                        from: Kirigami.Units.gridUnit; to: 0
+                                        duration: Kirigami.Units.longDuration
+                                        easing.type: Easing.OutCubic }
+                                }
+                            }
                             contentItem: RowLayout {
                                 spacing: Kirigami.Units.smallSpacing
                                 Kirigami.Icon {

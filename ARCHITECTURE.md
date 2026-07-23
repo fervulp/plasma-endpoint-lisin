@@ -249,7 +249,7 @@ Measured, not assumed - each of these was a number before it was a change:
 | The state snapshot handed to the interface | 195 ms, 22.9 MB, every row of every table | **7 ms, 12.6 KB** - the map of the tables |
 | Rows of the table on screen | the whole table crossed into QML | **one page of 50**, selected/sorted/paged by SQLite |
 | Switching to applications (3505 rows) | 1.5 s | **0.41 s** |
-| upsert of 93 thousand unchanged rows | 0.68 s (93k UPDATEs) | **0.38 s** (no write at all) |
+| upsert of 93 thousand unchanged rows | 0.68 s (93k UPDATEs) | **0.06 s** (a set fingerprint skips the whole compare) |
 | Indexes on events | 45, of which 26 were never filtered by - 107 MB | **19**, database 314 -> 246 MB |
 | Appending events | - | **20 000 events/s** |
 | Panels (network walks 104k events) | 468 ms on every refresh | **0 ms** on a repeat (memoised by the mtime of the databases) |
@@ -264,6 +264,19 @@ The rules behind them:
 * **a row that did not change is not written.** In WAL mode a write is a real page.
 * **an index is a write on every insert.** Index what is filtered, nothing else;
   the taxonomy is the schema, so removing `index: true` drops the index.
+
+Two more, added later:
+
+* **the same set costs one integer.** A collector re-reads the same inventory
+  every run; a per-output fingerprint (count XOR per-row hash) short-circuits the
+  whole read-compare-write when nothing changed. Our own CPU for a full state
+  sweep 1.63 s -> 0.94 s.
+* **skip work the run does not need.** Only 4 of 50 outputs turn a change into an
+  event; the other 46 pass `want_diff=False` and never build the old row.
+
+Animations are all on the render thread (OpacityAnimator, ColorAnimation
+Behaviors, ListView add/displaced transitions), so a section fade, a row hover
+or a staggered tile does not touch the UI thread that is busy building a page.
 
 ## 8. How to verify (mandatory before calling something done)
 

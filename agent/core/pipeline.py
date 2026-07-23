@@ -599,8 +599,11 @@ class StatePipeline:
                             self.db.ensure_table(
                                 table, out.get("title", table),
                                 out.get("icon", "view-list-details"), cols)
-                            diff = self.db.upsert(table, key, cols, c["rows"],
-                                                  src=n["id"])
+                            # the field-level diff is only needed when this
+                            # output turns a change into an event
+                            diff = self.db.upsert(
+                                table, key, cols, c["rows"], src=n["id"],
+                                want_diff=bool(out.get("track_changes")))
                             self.db.mark_collected(table)
                         # STATE TRANSITION -> EVENT. Switched on by the
                         # track_changes flag in the output: fluid tables

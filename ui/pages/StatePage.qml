@@ -506,10 +506,23 @@ Kirigami.Page {
                     model: page.shownTabs
                     clip: true
                     delegate: QQC2.ItemDelegate {
+                        id: tabItem
                         required property var modelData
                         width: ListView.view.width
                         highlighted: page.cur && page.cur.name === modelData.name
                         onClicked: page.openTable(modelData.name)
+                        // the selected tab lights up smoothly
+                        background: Rectangle {
+                            radius: 3
+                            color: tabItem.highlighted
+                                   ? Qt.alpha(Kirigami.Theme.highlightColor, 0.18)
+                                   : tabItem.hovered
+                                     ? Qt.alpha(Kirigami.Theme.textColor, 0.05)
+                                     : "transparent"
+                            Behavior on color {
+                                ColorAnimation { duration: Kirigami.Units.shortDuration }
+                            }
+                        }
                         contentItem: RowLayout {
                             spacing: Kirigami.Units.smallSpacing
                             Kirigami.Icon {
@@ -889,6 +902,9 @@ Kirigami.Page {
                     // delegate recycling: rows are rebuilt on every
                     // refresh, and without reuse the view stutters
                     reuseItems: true
+                    add: Transition {
+                        OpacityAnimator { from: 0; to: 1; duration: Kirigami.Units.shortDuration }
+                    }
                     clip: true
                     headerPositioning: ListView.OverlayHeader
                     QQC2.ScrollBar.vertical: QQC2.ScrollBar {}
@@ -979,9 +995,15 @@ Kirigami.Page {
                         background: Rectangle {
                             color: rowDel.highlighted
                                    ? Qt.alpha(Kirigami.Theme.highlightColor, 0.20)
-                                   : index % 2 === 0
-                                     ? Kirigami.Theme.backgroundColor
-                                     : Kirigami.Theme.alternateBackgroundColor
+                                   : rowDel.hovered
+                                     ? Qt.alpha(Kirigami.Theme.textColor, 0.05)
+                                     : index % 2 === 0
+                                       ? Kirigami.Theme.backgroundColor
+                                       : Kirigami.Theme.alternateBackgroundColor
+                            // selection and hover fade in (cheap colour Behavior)
+                            Behavior on color {
+                                ColorAnimation { duration: Kirigami.Units.shortDuration }
+                            }
                             Kirigami.Separator {
                                 anchors.bottom: parent.bottom
                                 width: parent.width

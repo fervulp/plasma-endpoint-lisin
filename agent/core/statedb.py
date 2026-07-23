@@ -35,6 +35,18 @@ def _txt(v) -> str:
 
 
 class StateDB:
+    # THE FAST PATH FOR "NOTHING CHANGED". A collector re-reads the same
+    # inventory over and over: package_files is 93 thousand rows that are
+    # identical run after run. Comparing them against the database still reads
+    # all 93 thousand rows and builds a dict per row (~0.37 s). Instead we keep a
+    # one-integer fingerprint of the last row-set written by each output: the
+    # count plus the XOR of a per-row hash (order-independent, so a reshuffle is
+    # not a false change). If the new set has the same fingerprint, the whole
+    # read-compare-write is skipped - an unchanged package_files run drops to the
+    # cost of hashing alone. In-memory only: the first run after a restart takes
+    # the full path, which is correct.
+    _setsig: dict = {}
+
     def __init__(self, path: Path = DB_PATH):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -119,7 +131,7 @@ class StateDB:
             c.execute(f'DELETE FROM "{name}" WHERE "_src"=?', (src,))
 
     def upsert(self, name: str, keys: list[str], cols: list[str],
-               rows: list[dict], src: str = "") -> dict:
+               rows: list[dict], src: str = "", want_diff: bool = True) -> dict:
         """Write the rows and RETURN the difference from the previous state.
 
         upsert computed the difference before as well (which keys are new, which
@@ -131,26 +143,52 @@ class StateDB:
         was_empty matters separately: if the table was empty, this is the FIRST
         INVENTORY, not a change. The machine existed before us, and we have no
         right to present 3000 "installations" as events.
+
+        want_diff=False skips the field-level "what changed" work entirely: only
+        4 of 50 outputs turn a change into an event, and building the old row for
+        every one of the other 46 was the single biggest cost of a run. When it
+        is off we compare a JOINED value string per row - one comparison instead
+        of one dict per row - and only decide UPDATE / INSERT / DELETE.
         """
         name = _san(name, "t")
         diff = {"added": [], "removed": [], "changed": [], "was_empty": False,
                 "table": name}
+        # fingerprint of the incoming set for this writer
+        combined = 0
+        for row in rows:
+            h = hash("\x00".join(_txt(row.get(k)) for k in cols))
+            combined ^= (h & 0xFFFFFFFFFFFFFFFF)
+        sigkey = (name, src)
+        newsig = (len(rows), combined)
+        if self._setsig.get(sigkey) == newsig and rows:
+            return diff        # identical to the last write - nothing to do
         with self._con() as c:
             if not self._valid(c, name):
                 return diff
             # the first occurrence of a key is canonical; repeats (a legacy of old
             # code, e.g. per-line ssh keys) are deleted so the key stays unique
-            have = {}
-            prev = {}          # previous values - to see WHAT changed
+            # We read only what the run actually needs. When change events are
+            # not wanted, the old row is never touched: have[key] -> (_id, sig),
+            # where sig is the stored column values joined - comparing that one
+            # string tells UPDATE from no-op without a dict per row.
+            have = {}          # key -> _id
+            sig = {}           # key -> joined stored values (want_diff off)
+            prev = {}          # key -> old row (want_diff on, for change events)
             dup_ids = []
-            for r in c.execute(f'SELECT * FROM "{name}"'):
+            sel = "*" if want_diff else ("_id," + ",".join(f'"{k}"' for k in cols))
+            for r in c.execute(f'SELECT {sel} FROM "{name}"'):
                 k = tuple(r[kk] for kk in keys)
                 if k in have:
                     dup_ids.append(r["_id"])
-                else:
-                    have[k] = r["_id"]
+                    continue
+                have[k] = r["_id"]
+                if want_diff:
                     prev[k] = {kk: r[kk] for kk in r.keys()
                                if not kk.startswith("_")}
+                else:
+                    sig[k] = "\x00".join("" if r[cc] is None else str(r[cc])
+                                          for cc in cols)
+            keyidx = [cols.index(k) for k in keys if k in cols]
             # an empty table means the first collection, not a change
             diff["was_empty"] = not have
             if dup_ids:
@@ -164,19 +202,25 @@ class StateDB:
             alive = set()
             to_update, to_insert = [], []
             for row in rows:
-                vals = {k: _txt(row.get(k)) for k in cols}
-                key = tuple(vals[k] for k in keys)
+                vals = [_txt(row.get(k)) for k in cols]
+                key = tuple(vals[ki] for ki in keyidx)
                 alive.add(key)
-                if key in have:
+                oid = have.get(key)
+                if oid is None:
+                    if want_diff:
+                        diff["added"].append(
+                            {"key": list(key), "row": dict(zip(cols, vals))})
+                    to_insert.append([*vals, src])
+                elif want_diff:
                     was = prev.get(key, {})
-                    ch = {k: [str(was.get(k, "")), vals[k]] for k in cols
-                          if str(was.get(k, "")) != vals[k]}
+                    ch = {cols[i]: [str(was.get(cols[i], "")), vals[i]]
+                          for i in range(len(cols))
+                          if str(was.get(cols[i], "")) != vals[i]}
                     if ch:
                         diff["changed"].append({"key": list(key), "fields": ch})
-                        to_update.append([*vals.values(), src, have[key]])
-                else:
-                    diff["added"].append({"key": list(key), "row": dict(vals)})
-                    to_insert.append([*vals.values(), src])
+                        to_update.append([*vals, src, oid])
+                elif "\x00".join(vals) != sig.get(key):
+                    to_update.append([*vals, src, oid])
             if to_update:
                 sets = ",".join(f'"{k}"=?' for k in cols)
                 c.executemany(f'UPDATE "{name}" SET {sets},"_src"=? WHERE _id=?',
@@ -203,6 +247,7 @@ class StateDB:
             if stale:
                 c.executemany(f'DELETE FROM "{name}" WHERE _id=?',
                               [(i,) for i in stale])
+        self._setsig[sigkey] = newsig
         return diff
 
     def prune(self, keep: set):

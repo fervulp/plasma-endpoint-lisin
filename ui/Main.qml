@@ -81,6 +81,29 @@ Kirigami.ApplicationWindow {
                           : name === "expertise" ? expertisePageComp
                           : name === "settings" ? settingsPageComp
                           : placeholder)
+        // A SOFT ENTRANCE. The new section fades and rises a few pixels into
+        // place - an OpacityAnimator and an x animation both run on the render
+        // thread, so the effect costs nothing on the UI thread that is busy
+        // building the page. It replaces the hard cut a clear()+push() gives.
+        var it = root.pageStack.currentItem
+        if (it) {
+            it.opacity = 0
+            it.x = Kirigami.Units.gridUnit
+            pageEnter.target = it
+            pageEnter.restart()
+        }
+    }
+    ParallelAnimation {
+        id: pageEnter
+        property var target: null
+        OpacityAnimator {
+            target: pageEnter.target; from: 0; to: 1
+            duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            target: pageEnter.target; property: "x"; to: 0
+            duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic
+        }
     }
 
     globalDrawer: Kirigami.GlobalDrawer {

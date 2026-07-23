@@ -1247,6 +1247,9 @@ Kirigami.Page {
                         reuseItems: true
                         cacheBuffer: Kirigami.Units.gridUnit * 40
                         clip: true
+                        add: Transition {
+                            OpacityAnimator { from: 0; to: 1; duration: Kirigami.Units.shortDuration }
+                        }
                         headerPositioning: ListView.OverlayHeader
                         QQC2.ScrollBar.vertical: QQC2.ScrollBar {}
 
@@ -1349,6 +1352,9 @@ Kirigami.Page {
                                           ? Qt.alpha(Kirigami.Theme.textColor, 0.07)
                                           : (index % 2 === 0 ? Kirigami.Theme.backgroundColor
                                                              : Kirigami.Theme.alternateBackgroundColor))
+                                Behavior on color {
+                                    ColorAnimation { duration: Kirigami.Units.shortDuration }
+                                }
                                 Kirigami.Separator {
                                     anchors.bottom: parent.bottom
                                     width: parent.width

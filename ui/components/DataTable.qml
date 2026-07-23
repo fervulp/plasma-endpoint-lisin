@@ -156,6 +156,15 @@ Item {
                 id: list
                 model: table.rows
                 reuseItems: true
+                // new rows fade in rather than appearing abruptly; the animator
+                // runs on the render thread and does not touch scrolling cost
+                add: Transition {
+                    OpacityAnimator { from: 0; to: 1; duration: Kirigami.Units.shortDuration }
+                }
+                displaced: Transition {
+                    NumberAnimation { property: "y"; duration: Kirigami.Units.shortDuration
+                                      easing.type: Easing.OutCubic }
+                }
                 cacheBuffer: Kirigami.Units.gridUnit * 40
                 QQC2.ScrollBar.vertical: QQC2.ScrollBar {}
 
@@ -174,6 +183,11 @@ Item {
                                   : (row.index % 2
                                      ? Qt.alpha(Kirigami.Theme.textColor, 0.03)
                                      : "transparent"))
+                        // hover and selection fade instead of snapping; a colour
+                        // Behavior is cheap even on a full page of reused rows
+                        Behavior on color {
+                            ColorAnimation { duration: Kirigami.Units.shortDuration }
+                        }
                         Rectangle {
                             anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
                             width: 3
