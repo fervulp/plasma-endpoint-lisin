@@ -44,14 +44,23 @@ class StateApi:
         It is needed so that an event can offer a jump into the process graph:
         offering it for a long-dead process makes no sense. Computed once per page
         of events, not once per event.
+
+        It reads the processes table DIRECTLY. It used to read db.snapshot(), but
+        snapshot() was optimised to return only per-table metadata (no rows), so
+        this map came back EMPTY and EVERY event reported "no process" - even when
+        the pid was clearly alive and findable by searching the state.
         """
-        snap = self.db.snapshot()
-        tab = next((t for t in snap.get("tabs", []) if t["name"] == "processes"), None)
         out = {}
-        for r in (tab.get("rows", []) if tab else []):
-            pid = str(r.get("pid") or "").strip()
-            if pid:
-                out[pid] = str(r.get("command") or "")
+        try:
+            con = self.db._reader()
+            for r in con.execute(
+                    "SELECT pid, command FROM processes "
+                    "WHERE COALESCE(pid,'') <> ''"):
+                pid = str(r["pid"]).strip()
+                if pid:
+                    out[pid] = str(r["command"] or "")
+        except Exception:
+            pass
         return out
 
     @Slot(str, str, str, int, int, result="QVariant")

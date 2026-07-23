@@ -79,6 +79,13 @@ Item {
         // EVERYTHING about the object of a node: for an event all of its fields by
         // taxonomy, for a config/service/package its own row + the related ones
         view.sideInfo = backend.nodeInfo(n)
+        // CLICKING A PROCESS NODE refreshes the full process panel for THAT
+        // process - How it started, the package, and the ACTIVITY HISTORY - so
+        // its activity is shown in the sidebar without having to re-anchor. It
+        // used to stay on the previous anchor (or be empty), so the history
+        // "disappeared" when clicking a process in the graph.
+        if (n && (n.kind === "process" || n.table === "processes") && n.val)
+            view.deep = backend.processDeep(String(n.val))
     }
     function graphToggle(cat) {
         // THE ACTIVITY-HISTORY BLOCK opens the TIMELINE in the side panel instead
@@ -1298,7 +1305,7 @@ Item {
                                         }
                                         QQC2.Label {
                                             Layout.fillWidth: true
-                                            text: view.sideNode ? view.sideNode.label : ""
+                                            text: view.sideNode ? (view.sideNode.label || "") : ""
                                             font.bold: true
                                             elide: Text.ElideRight
                                         }
@@ -1423,7 +1430,7 @@ Item {
                                     Layout.fillWidth: true
                                     font.bold: true
                                     elide: Text.ElideRight
-                                    text: view.sideNode ? view.sideNode.label : ""
+                                    text: view.sideNode ? (view.sideNode.label || "") : ""
                                 }
                             }
                             QQC2.Label {
