@@ -45,8 +45,7 @@ After=network.target
 [Service]
 Type=simple
 # -B line: flush each event promptly; append: survive restarts and logrotate
-ExecStart=/usr/bin/bpftrace -q -B line /usr/local/lib/lisin/lisin-ebpf-exec.bt
-StandardOutput=append:$SPOOL
+ExecStart=/usr/bin/bpftrace -q -B line -o $SPOOL /usr/local/lib/lisin/lisin-ebpf-exec.bt
 Restart=on-failure
 RestartSec=3
 
