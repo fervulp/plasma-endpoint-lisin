@@ -48,6 +48,8 @@ Item {
              : kind === "user"      ? "#2980b9"   // blue
              : kind === "package"   ? "#27ae60"   // green
              : kind === "service"   ? "#2471a3"   // dark blue
+             : kind === "boot"      ? "#1f6390"   // deep blue - power on
+             : kind === "session"   ? "#3498db"   // light blue - login
              : kind === "remote"    ? "#e67e22"   // orange
              : kind === "listen"    ? "#c0392b"   // red
              : kind === "socket"    ? "#8e44ad"   // violet
@@ -80,6 +82,8 @@ Item {
              : kind === "privesc"   ? "dialog-warning"
              : kind === "scheduled" ? "chronometer"
              : kind === "service"   ? "applications-system"
+             : kind === "boot"      ? "system-shutdown"
+             : kind === "session"   ? "system-users"
              : kind === "kmod"      ? "cpu"
              : kind === "file"      ? "document-open"
              : kind === "dir"       ? "folder"
@@ -188,35 +192,11 @@ Item {
                 xScale: canvasRoot.zoom; yScale: canvasRoot.zoom
             }
 
-            // Same faint grid as the pipeline editor: it gives the eye a
-            // reference for alignment without competing with the content.
-            Canvas {
-                id: gridLayer
-                anchors.fill: parent
-                z: -1
-                opacity: 0.5
-                onWidthChanged: requestPaint()
-                onHeightChanged: requestPaint()
-                Component.onCompleted: requestPaint()
-                onPaint: {
-                    var ctx = getContext("2d")
-                    ctx.reset()
-                    var g = 40
-                    ctx.lineWidth = 1
-                    for (var x = g; x < width; x += g) {
-                        ctx.strokeStyle = Qt.alpha(Kirigami.Theme.textColor,
-                                                   (x / g) % 4 === 0 ? 0.10 : 0.05)
-                        ctx.beginPath(); ctx.moveTo(x + 0.5, 0)
-                        ctx.lineTo(x + 0.5, height); ctx.stroke()
-                    }
-                    for (var y = g; y < height; y += g) {
-                        ctx.strokeStyle = Qt.alpha(Kirigami.Theme.textColor,
-                                                   (y / g) % 4 === 0 ? 0.10 : 0.05)
-                        ctx.beginPath(); ctx.moveTo(0, y + 0.5)
-                        ctx.lineTo(width, y + 0.5); ctx.stroke()
-                    }
-                }
-            }
+            // No decorative grid here: a Canvas the size of the whole world
+            // (systemd's graph is ~1000x2000) allocates a backing image of that
+            // size for a faint pattern nobody reads. The pipeline editor keeps
+            // its grid for aligning nodes by hand; the investigation graph is
+            // laid out by Python and does not need one.
 
             Canvas {
                 id: wires
@@ -486,44 +466,51 @@ Item {
                         }
                     }
 
-                    // ---- ACTION BUTTONS (drill), shown on the selected/hovered node ----
-                    Row {
+                    // ---- ACTION BUTTONS (drill), built ONLY on the hovered/selected
+                    // node. They used to be four ToolButtons per node, always
+                    // constructed - 130+ live objects on a 34-node graph for
+                    // buttons that are visible one node at a time. A Loader builds
+                    // them on demand and frees them when the pointer leaves.
+                    Loader {
                         z: 20
                         anchors { bottom: parent.top; right: parent.right; bottomMargin: 1 }
-                        spacing: 1
-                        visible: !chip.isGroup && (canvasRoot.selectedId === modelData.id
-                                                   || canvasRoot.hoveredId === modelData.id)
-                        QQC2.ToolButton {
-                            width: 22; height: 22
-                            icon.name: "draw-arrow-forward"
-                            visible: modelData.drill === "reanchor"
-                            QQC2.ToolTip.text: "Make this the centre of the graph"
-                            QQC2.ToolTip.visible: hovered
-                            onClicked: canvasRoot.anchorRequested(modelData)
-                        }
-                        QQC2.ToolButton {
-                            width: 22; height: 22
-                            icon.name: "network-connect"
-                            visible: modelData.drill === "whois"
-                            QQC2.ToolTip.text: "WHOIS for this address"
-                            QQC2.ToolTip.visible: hovered
-                            onClicked: canvasRoot.drillRequested("whois", modelData)
-                        }
-                        QQC2.ToolButton {
-                            width: 22; height: 22
-                            icon.name: "view-calendar-list"
-                            visible: modelData.drill === "events"
-                            QQC2.ToolTip.text: "Events for this"
-                            QQC2.ToolTip.visible: hovered
-                            onClicked: canvasRoot.drillRequested("events", modelData)
-                        }
-                        QQC2.ToolButton {
-                            width: 22; height: 22
-                            icon.name: "view-list-details"
-                            visible: (modelData.table || "") !== ""
-                            QQC2.ToolTip.text: "Show in State"
-                            QQC2.ToolTip.visible: hovered
-                            onClicked: canvasRoot.drillRequested("state", modelData)
+                        active: !chip.isGroup && (canvasRoot.selectedId === modelData.id
+                                                  || canvasRoot.hoveredId === modelData.id)
+                        visible: active
+                        sourceComponent: Row {
+                            spacing: 1
+                            QQC2.ToolButton {
+                                width: 22; height: 22
+                                icon.name: "draw-arrow-forward"
+                                visible: modelData.drill === "reanchor"
+                                QQC2.ToolTip.text: "Make this the centre of the graph"
+                                QQC2.ToolTip.visible: hovered
+                                onClicked: canvasRoot.anchorRequested(modelData)
+                            }
+                            QQC2.ToolButton {
+                                width: 22; height: 22
+                                icon.name: "network-connect"
+                                visible: modelData.drill === "whois"
+                                QQC2.ToolTip.text: "WHOIS for this address"
+                                QQC2.ToolTip.visible: hovered
+                                onClicked: canvasRoot.drillRequested("whois", modelData)
+                            }
+                            QQC2.ToolButton {
+                                width: 22; height: 22
+                                icon.name: "view-calendar-list"
+                                visible: modelData.drill === "events"
+                                QQC2.ToolTip.text: "Events for this"
+                                QQC2.ToolTip.visible: hovered
+                                onClicked: canvasRoot.drillRequested("events", modelData)
+                            }
+                            QQC2.ToolButton {
+                                width: 22; height: 22
+                                icon.name: "view-list-details"
+                                visible: (modelData.table || "") !== ""
+                                QQC2.ToolTip.text: "Show in State"
+                                QQC2.ToolTip.visible: hovered
+                                onClicked: canvasRoot.drillRequested("state", modelData)
+                            }
                         }
                     }
                 }

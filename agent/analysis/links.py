@@ -24,10 +24,11 @@ NOISE_VALUES = {"", "-", "—", "0", "1", "yes", "no", "none", "(none)",
                 "unknown", "n/a", "root"}
 
 
-def _ro(path):
-    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    con.row_factory = sqlite3.Row
-    return con
+def _ro(db):
+    # the shared per-thread reader (StateDB._reader): a graph makes ~11 reads on
+    # one click; reusing one connection is the 5 ms -> 0.7 ms SQLite win. Never
+    # closed here - it lives in threading.local and is reused across calls.
+    return db._reader()
 
 
 def _columns(con, table):
@@ -99,7 +100,7 @@ def model(db, min_overlap: float = 0.5, min_values: int = 3) -> dict:
     column occur in the other. The threshold and the min_values requirement cut
     off accidental coincidences on two or three rows.
     """
-    con = _ro(db.path)
+    con = _ro(db)
     try:
         tabs = [r["name"] for r in
                 con.execute("SELECT name FROM _tabs ORDER BY name")]
@@ -111,7 +112,7 @@ def model(db, min_overlap: float = 0.5, min_values: int = 3) -> dict:
                         and not _is_measure(v):
                     vals[(t, c)] = v
     finally:
-        con.close()
+        pass
 
     links, seen = [], set()
     keys = list(vals)
@@ -267,6 +268,7 @@ CATMAP = {
 # type is visible from the icon and the contents, the word is only noise.
 CAT_META = {
     "tree":        ("",             "#4c7ef3", 0),
+    "session":     ("Session & boot", "#3498db", 0.5),
     "package":     ("Application",   "#27ae60", 1),
     # services + scheduled + persistence - one question, "what starts and when";
     # as three blocks it forced you to look in three places
@@ -280,6 +282,7 @@ CAT_META = {
     "vulns":       ("Vulnerabilities","#c0392b", 11),
     "events":      ("",             "#7f8c8d", 12),
     "kmod":        ("Kernel Modules","#7d3c98", 13),
+    "location":    ("Working directory", "#5d6d7e", 4.5),
 }
 # WHAT TO WRITE ON THE SECOND LINE of a satellite node. It used to be the TABLE
 # NAME ("app_config", "services") - that is about the storage layout, not about
@@ -290,6 +293,7 @@ SUBCOL = {
     "suid_binaries": "owner", "privesc": "risk", "scheduled": "detail",
     "kernel_modules": "description", "unix_sockets": "type",
     "open_files": "kind", "ports": "exposure", "applications": "version",
+    "boot_sessions": "source", "logins": "from",
 }
 COLLAPSE_MIN = 4      # a bigger category collapses into a meta node
 # a free corridor between the process tree and the column of blocks:
@@ -446,7 +450,7 @@ def _owner_pid(db, kind: str, val: str) -> str:
     Returns the pid, or "" if there is no owner (then a generic graph is built).
     We invent nothing: the pid comes from the same pipeline tables.
     """
-    con = _ro(db.path)
+    con = _ro(db)
     try:
         if kind == "port":
             for r in _q(con, "SELECT process FROM ports WHERE port=? "
@@ -470,7 +474,7 @@ def _owner_pid(db, kind: str, val: str) -> str:
                              "AND command NOT LIKE '[%' LIMIT 1", (val,)):
                 return str(r["pid"])
     finally:
-        con.close()
+        pass
     return ""
 
 
@@ -516,7 +520,7 @@ def anchor_graph(db, eventsdb, kind: str, val: str, expanded=()) -> dict:
 
 
 def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
-    con = _ro(db.path)
+    con = _ro(db)
     try:
         tabs = {r["name"] for r in con.execute("SELECT name FROM _tabs")}
         if table not in tabs:
@@ -528,7 +532,7 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
                         % (table, col), ("%" + val + "%",))
         center = center[0] if center else {}
     finally:
-        con.close()
+        pass
 
     nodes, edges, seen = [], [], set()
 
@@ -577,7 +581,7 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
     # (users has only 2 rows, config/open_file is a path). This is not an
     # invention: the columns exist (processes.user, open_files.path), it is just
     # that the model() threshold does not catch them. We pull them directly.
-    mc = _ro(db.path)
+    mc = _ro(db)
     try:
         if kind == "user":
             for r in _q(mc, "SELECT pid, command FROM processes WHERE user=? "
@@ -706,9 +710,9 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
                 except Exception:
                     pass
     finally:
-        mc.close()
+        pass
 
-    con3 = _ro(db.path)
+    con3 = _ro(db)
     try:
         seen_sat = set()
         for l in model_links:
@@ -745,7 +749,7 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
                     table=ot, col=lcol, val=raw,
                     rel="declares", drill=drill, risk=risky))
     finally:
-        con3.close()
+        pass
 
     categories = _emit_categories(add, link, root, ax, ay, cats, expanded)
     _normalize_xy(nodes)
@@ -773,8 +777,9 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
     addresses) is added as separate nodes - one can drill through them further.
     The layout is computed here: x = the step, y = the row within the step.
     """
+    import os
     pid = str(pid)
-    con = _ro(db.path)
+    con = _ro(db)
     try:
         rows = _q(con, "SELECT pid, ppid, user, command, package, purpose, "
                        "title, rss_mb, cpu, arg_files FROM processes")
@@ -809,7 +814,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
             if m:
                 unix_n[m.group(1)] = unix_n.get(m.group(1), 0) + 1
     finally:
-        con.close()
+        pass
 
     # ---- the branch: ancestors up, descendants down ----
     chain = []
@@ -928,9 +933,8 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
     if unit:
         udesc = ""
         try:
-            uc = _ro(db.path)
+            uc = _ro(db)
             urow2 = _q(uc, "SELECT desc FROM services WHERE unit=? LIMIT 1", (unit,))
-            uc.close()
             if urow2:
                 udesc = urow2[0].get("desc", "")
         except Exception:
@@ -984,13 +988,12 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
     # open files AND DIRECTORIES
     opened = []
     try:
-        con2 = _ro(db.path)
+        con2 = _ro(db)
         opened = [{"target": r["path"], "kind": r["kind"], "deleted": r["deleted"]}
                   for r in _q(con2, "SELECT path, kind, deleted FROM open_files "
                                     "WHERE pid=? AND kind IN ('file','device',"
                                     "'system state','directory') "
                                     "ORDER BY deleted DESC LIMIT 400", (pid,))]
-        con2.close()
     except Exception:
         opened = []
     if not opened:
@@ -1030,36 +1033,55 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
              f_.rsplit("/", 1)[-1][:26], "given on the command line",
              "app_config", "path", f_, rel="declares", drill="state")
 
-    # WHEN THE SYSTEM WAS TURNED ON and WHETHER ANYONE WAS IN A SESSION. A process
-    # lives inside a system boot and, as a rule, inside somebody's session:
-    # without that "when did it appear" hangs in the air.
-    # its own connection: the previous one (uc) lives in another block and is already closed
-    bc = _ro(db.path)
+    # THE TIMELINE THE PROCESS LIVES INSIDE: the computer was turned on at T1, the
+    # owning user logged in at T2, and these are that user's services - so "when
+    # did this process appear" is answered by the context around it. All carry a
+    # time (when=), which the graph shows.
+    bc = _ro(db)
     try:
         for b_ in _q(bc, "SELECT boot_id, started FROM boot_sessions "
                          "WHERE kind = 'boot' AND started <> '' "
                          "ORDER BY started DESC LIMIT 1"):
-            push("startup", "boot:" + str(b_.get("boot_id") or ""), "event",
-                 "system started", str(b_.get("started") or ""),
+            push("session", "boot:" + str(b_.get("boot_id") or ""), "boot",
+                 "computer turned on", "boot " + str(b_.get("boot_id") or "")[:12],
                  "boot_sessions", "boot_id", str(b_.get("boot_id") or ""),
-                 rel="within", drill="state", when=str(b_.get("started") or ""))
+                 rel="booted", drill="state", when=str(b_.get("started") or ""))
     except Exception:
         pass
-    if me.get("user"):
+    if user:
         try:
-            for s_ in _q(bc, "SELECT user, tty, \"from\", start FROM logins "
-                             "WHERE user = ? AND active = 'yes' "
-                             "ORDER BY start DESC LIMIT 5", (me.get("user"),)):
-                push("user", "sess:%s:%s" % (s_.get("user"), s_.get("tty")),
-                     "user", "%s on %s" % (s_.get("user"), s_.get("tty")),
-                     "session since " + str(s_.get("start") or ""),
+            for s_ in _q(bc, "SELECT user, tty, \"from\", start, active FROM logins "
+                             "WHERE user = ? AND COALESCE(start,'') <> '' "
+                             "ORDER BY start DESC LIMIT 4", (user,)):
+                frm = str(s_.get("from") or "local")
+                push("session", "sess:%s:%s" % (s_.get("user"), s_.get("tty")),
+                     "session",
+                     "%s logged in on %s" % (s_.get("user"), s_.get("tty")),
+                     ("from " + frm) if frm and frm != "local" else "local login",
                      "logins", "tty", str(s_.get("tty") or ""),
-                     rel="session", drill="state", when=str(s_.get("start") or ""))
+                     rel="logged_in", drill="state", when=str(s_.get("start") or ""))
         except Exception:
             pass
+        try:
+            for sv in _q(bc, "SELECT unit, desc FROM services "
+                             "WHERE scope = 'user' AND enabled = 'enabled' "
+                             "ORDER BY unit LIMIT 30"):
+                push("session", "usvc:" + str(sv.get("unit") or ""), "service",
+                     str(sv.get("unit") or ""),
+                     str(sv.get("desc") or "") or "user service",
+                     "services", "unit", str(sv.get("unit") or ""),
+                     rel="user_service", drill="state")
+        except Exception:
+            pass
+
+    # THE WORKING DIRECTORY - where the process runs from (live from /proc; only
+    # ours is readable without root). It catches a process running out of /tmp.
     try:
-        bc.close()
-    except Exception:
+        cwd = os.readlink("/proc/%s/cwd" % pid)
+        if cwd:
+            push("location", "cwd:" + pid, "dir", cwd.rsplit("/", 1)[-1] or "/",
+                 cwd, "open_files", "dir", cwd, rel="runs_in", drill="state")
+    except OSError:
         pass
 
     # events - what the process did (drill: events by pid)
@@ -1086,7 +1108,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
                ("processes", "user"): user, ("applications", "name"): pkg}
     # what was collected manually above is not duplicated
     SKIP = {"processes", "applications", "users", "services", "ports", "open_files"}
-    con3 = _ro(db.path)
+    con3 = _ro(db)
     try:
         seen_sat = set()
         for l in model_links:
@@ -1123,7 +1145,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
                 push(cat, nid, k2, lab, sub, ot, lcol, raw,
                      rel="declares", drill=drill, risk=risky)
     finally:
-        con3.close()
+        pass
 
     # the blocks go TO THE RIGHT of the process tree
     tree_right = max((n["x"] for n in nodes if n["id"].startswith("proc:")),
@@ -1159,7 +1181,7 @@ def node_detail(db, eventsdb, table: str, col: str, val: str) -> dict:
     if not table:
         return {"sections": [], "error": "this node has no source table"}
 
-    con = _ro(db.path)
+    con = _ro(db)
     try:
         tabs = {r["name"] for r in con.execute("SELECT name FROM _tabs")}
         if table not in tabs:
@@ -1218,7 +1240,7 @@ def node_detail(db, eventsdb, table: str, col: str, val: str) -> dict:
                 "title": "%s (via %s)" % (rtable, viacol),
                 "rows": body})
     finally:
-        con.close()
+        pass
 
     # what this object did - from the events, if it is mentioned there
     if eventsdb is not None and val:

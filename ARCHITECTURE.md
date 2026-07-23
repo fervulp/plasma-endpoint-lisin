@@ -224,6 +224,10 @@ Settings**. Navigation goes only through `root.open(name)`.
 | others | — | `pages/ProcessPage`, `views/FindingsView`, `views/PrivescView`, `views/FileActivityView`, `components/SidePanel`, `components/QueryBar`, `components/DataTable`, `components/FieldPicker` |
 
 ### How the investigation graph works (the core of the UX)
+- **Session & boot block**: every process graph carries the timeline it lives
+  inside - when the computer was turned on, when the owning user logged in (with
+  times), that user's services, and the process's working directory. So "when
+  did this appear" is answered next to it.
 - **The anchor** is an entity of any type: a process, an application, a port,
   a user, a config, an open file. One engine: `anchor_graph`.
 - **A ladder**: the anchor on top, category blocks below it going down —
