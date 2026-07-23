@@ -10,6 +10,7 @@ scheduler, error collection and starting the window. To add a slot, edit the
 relevant mixin, not this file.
 """
 import sys
+import ctypes
 import threading
 import time
 from pathlib import Path
@@ -47,6 +48,21 @@ class Backend(QObject, StateApi, EventsApi, DashboardApi, ExpertiseApi,
         threading.Thread(target=self._scheduler, daemon=True).start()
 
     # -------- the input scheduler + the metrics sampler --------
+    # RETURN FREED MEMORY TO THE OS. Building row lists every tick leaves the C
+    # heap holding pages it no longer uses; glibc keeps them for reuse and the
+    # RSS only ever grows. malloc_trim(0) hands the free pages back after a
+    # cycle - cheap, and it keeps the resident set from drifting upward while the
+    # agent sits collecting.
+    _libc = None
+
+    def _trim(self):
+        try:
+            if self._libc is None:
+                self._libc = ctypes.CDLL("libc.so.6")
+            self._libc.malloc_trim(0)
+        except Exception:
+            pass
+
     def _scheduler(self):
         # WHAT WAS COLLECTED EARLIER IS SHOWN AT ONCE. The first sweep of the
         # inputs takes tens of seconds (46 s measured on a live machine), and the
@@ -75,6 +91,7 @@ class Backend(QObject, StateApi, EventsApi, DashboardApi, ExpertiseApi,
                 self._collect_errors()
                 self._push_state()
                 self._emit_pipe()
+                self._trim()          # give freed pages back to the OS
             time.sleep(2)
 
     def _push_state(self):

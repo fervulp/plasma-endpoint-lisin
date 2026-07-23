@@ -46,7 +46,10 @@ Item {
     }
     function refresh() { view.d = backend.networkFlows() }
     Component.onCompleted: refresh()
-    Connections { target: backend; function onStateReady(s) { view.refresh() } }
+    property bool _stale: false
+    onVisibleChanged: if (view.visible && view._stale) { view._stale = false; view.refresh() }
+    Connections { target: backend
+        function onStateReady(s) { if (view.visible) view.refresh(); else view._stale = true } }
 
     readonly property var rows: d.flows || []
     // The condition is evaluated here: the flows are aggregated in Python and

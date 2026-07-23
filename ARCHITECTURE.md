@@ -274,9 +274,16 @@ Two more, added later:
 * **skip work the run does not need.** Only 4 of 50 outputs turn a change into an
   event; the other 46 pass `want_diff=False` and never build the old row.
 
-Animations are all on the render thread (OpacityAnimator, ColorAnimation
-Behaviors, ListView add/displaced transitions), so a section fade, a row hover
-or a staggered tile does not touch the UI thread that is busy building a page.
+Sections are built once and kept (pageCache), so returning to one is instant
+(0.25 s against 1-2 s of rebuilding it) and the page's query and scroll survive
+leaving it. A kept page that is not shown does not refresh - a hidden dashboard
+used to recompute on every tick. malloc_trim(0) after a collection returns the
+freed C heap to the OS so the resident set does not drift upward.
+
+Animations stay small and local - row and tile fades, hover and selection
+easing, graph transitions - all on the render thread. There is no page-level
+fade: animating the opacity of a whole section forces an offscreen render of
+hundreds of rows every frame, which was the jerk.
 
 ## 8. How to verify (mandatory before calling something done)
 

@@ -78,6 +78,8 @@ Item {
 
     // the summary (counters by severity) comes from the full set; the rows
     // themselves come from the condition assembled by the query bar and the chips
+    property bool _stale: false
+    onVisibleChanged: if (view.visible && view._stale) { view._stale = false; view.refresh() }
     function refresh() {
         view.d = backend.vulnerabilities()
         view.reloadRows()
@@ -117,7 +119,11 @@ Item {
     Component.onCompleted: refresh()
     Connections {
         target: backend
-        function onStateReady(s) { view.refresh() }
+        // REFRESH ONLY WHEN SHOWN. The page is kept alive; a hidden one
+        // still receives every tick, and recomputing a dashboard the user is not
+        // looking at burns CPU and stalls the animation of the page they ARE
+        // opening. We mark it stale and catch up when it becomes visible.
+        function onStateReady(s) { if (view.visible) view.refresh(); else view._stale = true }
     }
 
     // the colour comes from the CVSS SCORE - it is comparable between advisories,

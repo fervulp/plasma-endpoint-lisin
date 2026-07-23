@@ -47,11 +47,17 @@ Item {
                               : mode === "admins" ? colsAdmins : colsVectors
     property var hiddenCols: []
 
+    property bool _stale: false
+    onVisibleChanged: if (view.visible && view._stale) { view._stale = false; view.refresh() }
     function refresh() { view.d = backend.privescActivity() }
     Component.onCompleted: refresh()
     Connections {
         target: backend
-        function onStateReady(s) { view.refresh() }
+        // REFRESH ONLY WHEN SHOWN. The page is kept alive; a hidden one
+        // still receives every tick, and recomputing a dashboard the user is not
+        // looking at burns CPU and stalls the animation of the page they ARE
+        // opening. We mark it stale and catch up when it becomes visible.
+        function onStateReady(s) { if (view.visible) view.refresh(); else view._stale = true }
     }
 
     // THE TIME IS MANDATORY (principle 6): a vector without a date cannot be

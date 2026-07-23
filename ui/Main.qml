@@ -11,13 +11,16 @@ Kirigami.ApplicationWindow {
     height: 720
 
     property var sysState: null
-    property string section: "state"
+    property string section: ""
 
     Connections {
         target: backend
         function onStateReady(s) { root.sysState = s }
     }
-    Component.onCompleted: backend.reload()   // input scheduling lives in the backend
+    Component.onCompleted: {
+        backend.reload()          // input scheduling lives in the backend
+        open("state")             // the first section goes through the cache too
+    }
 
     // The "explore in state" jump: an event -> the right State table, filtered by
     // the value. The counter n is needed so that clicking the same value again
@@ -66,44 +69,44 @@ Kirigami.ApplicationWindow {
     // a section that does not show. What was gained honestly stays: the rows come
     // from the database a page at a time, a cell is one object, the panels are
     // memoised.
+    //
+    // A SECTION IS BUILT ONCE AND KEPT. Every navigation used to clear() the
+    // stack and push() a fresh page - and clear() does NOT destroy the old page
+    // (measured: the StatePage count went 1, 2, 3 over three visits, ~200 MB a
+    // round). Building a page also costs real time, which is why sections were
+    // slow to open. Now each page is created once, held in pageCache, and swapped
+    // in with replace(): memory is bounded to seven pages and a re-visit is
+    // instant. Its query, scroll position and selection survive leaving it -
+    // which an investigation wants anyway.
+    property var pageCache: ({})
+    property var pageComps: ({
+        state: statePageComp, dashboards: dashboardPageComp, events: eventsPageComp,
+        sql: sqlPageComp, pipeline: pipelinePageComp, expertise: expertisePageComp,
+        settings: settingsPageComp })
+    function pageFor(name) {
+        if (pageCache[name] === undefined) {
+            var comp = pageComps[name] || placeholder
+            pageCache[name] = comp.createObject(root)
+        }
+        return pageCache[name]
+    }
     function open(name) {
         if (root.section === name)
             return
         root.section = name
         while (root.pageStack.layers.depth > 1)   // close fullscreen layers
             root.pageStack.layers.pop()
-        root.pageStack.clear()                    // drop leftover columns
-        root.pageStack.push(name === "state" ? statePageComp
-                          : name === "dashboards" ? dashboardPageComp
-                          : name === "events" ? eventsPageComp
-                          : name === "sql" ? sqlPageComp
-                          : name === "pipeline" ? pipelinePageComp
-                          : name === "expertise" ? expertisePageComp
-                          : name === "settings" ? settingsPageComp
-                          : placeholder)
-        // A SOFT ENTRANCE. The new section fades and rises a few pixels into
-        // place - an OpacityAnimator and an x animation both run on the render
-        // thread, so the effect costs nothing on the UI thread that is busy
-        // building the page. It replaces the hard cut a clear()+push() gives.
-        var it = root.pageStack.currentItem
-        if (it) {
-            it.opacity = 0
-            it.x = Kirigami.Units.gridUnit
-            pageEnter.target = it
-            pageEnter.restart()
-        }
-    }
-    ParallelAnimation {
-        id: pageEnter
-        property var target: null
-        OpacityAnimator {
-            target: pageEnter.target; from: 0; to: 1
-            duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic
-        }
-        NumberAnimation {
-            target: pageEnter.target; property: "x"; to: 0
-            duration: Kirigami.Units.longDuration; easing.type: Easing.OutCubic
-        }
+        var it = pageFor(name)
+        // the kept page is removed from the row by clear() but NOT destroyed,
+        // because pageCache holds a reference - so a re-visit is instant and the
+        // resident set is one page per section, not a fresh one every time
+        root.pageStack.clear()
+        root.pageStack.push(it)
+        // NO PAGE-LEVEL FADE. Animating the opacity of a whole section (a tree of
+        // hundreds of rows, a graph) forces the compositor to render it offscreen
+        // every frame - that was the "jerky" animation. The smoothness lives in
+        // the small, local animations instead: rows and tiles fade, hover and
+        // selection ease, the graph eases. The section itself just appears.
     }
 
     globalDrawer: Kirigami.GlobalDrawer {
@@ -183,7 +186,7 @@ Kirigami.ApplicationWindow {
         ]
     }
 
-    pageStack.initialPage: statePageComp
+    pageStack.initialPage: placeholder
 
     Component { id: statePageComp; StatePage {} }
     Component { id: dashboardPageComp; DashboardPage {} }
