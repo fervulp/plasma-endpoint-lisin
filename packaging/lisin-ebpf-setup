@@ -44,6 +44,8 @@ After=network.target
 
 [Service]
 Type=simple
+# a bigger perf ring buffer -> fewer dropped events under exec/openat/connect bursts
+Environment=BPFTRACE_PERF_RB_PAGES=256
 # -B line: flush each event promptly; append: survive restarts and logrotate
 ExecStart=/usr/bin/stdbuf -oL -eL /usr/bin/bpftrace -q -B line /usr/local/lib/lisin/lisin-ebpf-exec.bt
 StandardOutput=append:$SPOOL

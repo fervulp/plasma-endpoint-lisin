@@ -18,6 +18,11 @@ code: |
 
   _UID = {}
 
+  def _isint(s):
+      # an int, possibly negative (loginuid/sid are -1 for daemons/kthreads)
+      s = str(s)
+      return s[1:].isdigit() if s[:1] == "-" else s.isdigit()
+
   def _user(uid):
       uid = str(uid)
       if uid not in _UID:
@@ -60,10 +65,16 @@ code: |
               except (ValueError, IndexError):
                   btime = 0
               continue
+          # '#' marker lines (BEGIN/END) have no tab; skipped here
           if not line or "\t" not in line:
               continue
           f = line.split("\t")
           k = f[0]
+          # GUARD (injection hardening, per the collector's note): col0 must be a
+          # known type and col1 a plausible monotonic nsecs int, else drop the
+          # line - a process controls its own comm/argv and could try to forge one
+          if k not in ("E", "X", "F", "N") or len(f) < 2 or not f[1].isdigit():
+              continue
 
           if k == "E" and len(f) >= 6:
               # BACKWARD COMPATIBLE: the session fields (loginuid, sid) are
@@ -71,7 +82,7 @@ code: |
               # Extended: E ns pid ppid uid loginuid sid COMM argv (both numeric
               # before comm). comm is a process name, rarely a bare number, so two
               # numeric fields in a row mark the extended form.
-              if len(f) >= 8 and f[5].isdigit() and f[6].isdigit():
+              if len(f) >= 8 and _isint(f[5]) and _isint(f[6]):
                   ns, pid, ppid, uid, loginuid, sid, comm = f[1:8]
                   argv = "\t".join(f[8:]).strip() if len(f) > 8 else ""
               else:
@@ -106,17 +117,28 @@ code: |
 
           elif k == "X" and len(f) >= 4:
               ns, pid, code = f[1], f[2], f[3]
+              # curtask->exit_code is the ENCODED wait-status: (status<<8)|signal
+              # (0x80 = core dumped). Decode to the real exit status and signal.
+              try:
+                  raw = int(code)
+              except ValueError:
+                  raw = 0
+              sig = raw & 0x7f
+              status = (raw >> 8) & 0xff
+              xcode = str(status)
+              outcome = "success" if (sig == 0 and status == 0) else "failure"
+              msg = ("killed by signal %d" % sig) if sig else ("exited %d" % status)
               rows.append({
                   "ts": when(ns), "event_id": "ebpf:exit:%s:%s" % (ns, pid),
                   "event_kind": "event", "event_category": "process",
                   "event_type": "end", "event_action": "process_ended",
-                  "event_outcome": "success" if code in ("0", "") else "failure",
+                  "event_outcome": outcome,
                   "event_severity": 10, "event_module": "ebpf",
                   "event_provider": "ebpf", "event_dataset": "syscalls.exit",
-                  "process_pid": pid, "process_exit_code": code,
+                  "process_pid": pid, "process_exit_code": xcode,
                   "process_source": "ebpf (exit)",
                   "subject_type": "process", "object_type": "process",
-                  "message": "exit pid %s code %s" % (pid, code),
+                  "message": "pid %s %s" % (pid, msg),
               })
 
           elif k == "F" and len(f) >= 6:
@@ -200,10 +222,17 @@ tests:
         destination_ip: 203.0.113.9
         destination_port: "443"
         network_direction: external
-  - name: an exit line becomes process_ended with the code
+  - name: an exit line decodes the wait-status (exit 1 = encoded 256)
     input: |
       BTIME 1750000000
-      X	400	4242	1
+      X	400	4242	256
     expect:
       rows: 1
       contains: {event_action: process_ended, process_exit_code: "1", event_outcome: failure}
+  - name: a signal death is decoded (SIGKILL = 9)
+    input: |
+      BTIME 1750000000
+      X	400	4242	9
+    expect:
+      rows: 1
+      contains: {event_action: process_ended, event_outcome: failure}

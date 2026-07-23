@@ -1,30 +1,214 @@
 #!/usr/bin/env bpftrace
 /*
- * LiSin eBPF collector - process EXECVE and EXIT, the events polling can never
- * catch. `ps`/procmon sample every ~20 s, so a process that starts and dies in
- * between is INVISIBLE (a dropper, a reverse shell, a build step). This catches
- * EVERY execve at the moment it happens, with the FULL command line, the real
- * parent and the uid - exactly what a poller misses.
+ * LiSin eBPF collector — single self-contained script.
  *
- * Output is one TAB-separated line per event, appended to a spool the LiSin
- * input reads (fedora/inputs/ebpf_exec). Times are `nsecs` (monotonic since
- * boot); the input prepends the boot epoch and the normalizer converts to UTC.
+ * Runs as a systemd service:  bpftrace -q -B line -o SPOOL THIS.bt
+ * bpftrace loads the WHOLE script atomically: if any probe fails to verify or
+ * load, NOTHING runs. Every probe below is chosen to be load-safe on a modern
+ * BTF kernel (Linux 7.1, Fedora 44, x86-64, CONFIG_AUDIT=y). Field accesses
+ * (task_struct->{real_parent->tgid,loginuid.val,sessionid,exit_code} and
+ * sock->__sk_common.{skc_family,skc_daddr,skc_v6_daddr,skc_dport}) were
+ * confirmed present in this kernel's /sys/kernel/btf/vmlinux.
  *
- *   E <nsecs> <pid> <ppid> <uid> <comm> <arg0> <arg1> ...
- *   X <nsecs> <pid> <exit_code>
+ * Emits exactly these TAB-separated line types (nsecs = monotonic; the
+ * normalizer converts to wall-clock using boot time — never computed here):
  *
- * Run it as root (needs CAP_BPF/CAP_PERFMON), usually via the systemd unit that
- * packaging/lisin-grant-access installs. Requires the `bpftrace` package.
+ *   E <nsecs> <pid> <ppid> <uid> <loginuid> <sid> <comm> <argv...>
+ *   X <nsecs> <pid> <code>
+ *   F <nsecs> <pid> <uid> <comm> <op> <path>     op in {write,create,unlink,rename}
+ *   N <nsecs> <pid> <uid> <comm> <af> <daddr> <dport>   af in {4,6}; dport host-order decimal
+ *
+ * Lines beginning with '#' are markers (start/stop) — the normalizer ignores
+ * any unknown prefix and uses '# lisin-bpf start' to detect restart/rotation
+ * (bpftrace -o truncates the spool on each (re)start).
+ *
+ * INJECTION LIMITATION (bpftrace has no string sanitizer — no gsub/replace):
+ * the free-form trailing fields (E argv, F path) and the mid-line comm are raw
+ * kernel/user strings. An unprivileged task controls its own comm/argv and can
+ * name a file with an embedded TAB or NEWLINE, so it can in principle forge or
+ * split spool records. This CANNOT be defended in-script. The normalizer MUST:
+ *   - split each line type with an exact maxsplit so embedded TABs stay inside
+ *     the final field (E: split('\t', 7) -> 8 cols; F: split('\t', 5) -> 6 cols;
+ *     N: split('\t', 6) -> 7 cols; X: split('\t', 2) -> 3 cols);
+ *   - validate col0 is a known type char and col1 is a monotonic-plausible int;
+ *   - drop orphan continuation lines produced by an embedded newline.
+ * comm is 16 bytes and NOT the last field on E/F; a TAB inside comm shifts
+ * columns — the field-count/type validation above is what catches it.
  */
 
+/* Only certain-valid keys here: an UNKNOWN config key is a fatal parse error
+ * that would kill the whole script. max_strlen lifts the 64-byte default so
+ * argv (join) and paths (str) survive typical sizes. 2048 covers most command
+ * lines and paths but NOT all: very long argv/deep paths still truncate at
+ * 2048, and join() has its own fixed per-call argument-count cap that is not
+ * configurable — pathological argv loses trailing args. This is accepted, not
+ * "no truncation". Strings live in per-CPU scratch maps, so 2048 does not risk
+ * the 512-byte BPF stack / verifier. Set BPFTRACE_PERF_RB_PAGES in the systemd
+ * unit (an unknown ENV var is ignored, unlike an unknown config key). */
+config = {
+    max_strlen = 2048;
+}
+
+BEGIN {
+    printf("# lisin-bpf start %llu\n", nsecs);
+}
+
+END {
+    printf("# lisin-bpf stop %llu\n", nsecs);
+}
+
+/* ── E: execve + session context ─────────────────────────────────────────
+ * comm/pid/uid reflect the CALLING (pre-exec) task — that is the intended
+ * lineage; the new binary is argv[0] from join(). real_parent->tgid is the
+ * genuine parent process id (->tgid, not ->pid which is a thread id).
+ * loginuid.val and sessionid are u32; unset audit value is 0xffffffff, so the
+ * (int32) cast emits -1 exactly for daemons/kthreads/pre-login tasks.
+ * The printf prefix ends with a trailing TAB and NO newline; join() supplies
+ * the argv fields AND the terminating newline — do not add \n here.
+ * Hooked at sys_enter (not sys_exit) to keep argv; this means a failed execve
+ * also emits an E line (rare) — acceptable, the normalizer keys on pid/nsecs. */
 tracepoint:syscalls:sys_enter_execve
 {
-    $task = (struct task_struct *)curtask;
-    printf("E\t%llu\t%d\t%d\t%d\t%s\t", nsecs, pid, $task->real_parent->tgid, uid, comm);
+    printf("E\t%llu\t%d\t%d\t%d\t%d\t%d\t%s\t",
+           nsecs,
+           pid,
+           curtask->real_parent->tgid,
+           uid,
+           (int32)curtask->loginuid.val,
+           (int32)curtask->sessionid,
+           comm);
     join(args->argv);
 }
 
-tracepoint:syscalls:sys_enter_exit_group
+/* ── X: process exit ─────────────────────────────────────────────────────
+ * Filter to the thread-group leader (tid == pid) so a multithreaded process
+ * emits exactly one X. curtask->exit_code is set in do_exit before this
+ * tracepoint fires; the normalizer decodes status/signal from it. */
+tracepoint:sched:sched_process_exit
+/pid == tid/
 {
-    printf("X\t%llu\t%d\t%d\n", nsecs, pid, args->error_code);
+    printf("X\t%llu\t%d\t%d\n", nsecs, pid, curtask->exit_code);
+}
+
+/* ── F: file MODIFICATIONS only ──────────────────────────────────────────
+ * write-intent open / create / unlink / rename — never plain reads. The
+ * O_RDONLY exclusion below is what prevents the read firehose.
+ *
+ * bpftrace 0.24 has no user functions, so the pseudo-fs/cache skip is repeated
+ * verbatim in each action (a predicate is a single scalar boolean and cannot
+ * hold path logic). The skip uses strcontains (SUBSTRING), chosen deliberately
+ * over a str()-length prefix compare: bpftrace refuses to run as non-root on
+ * this host and ships no local docs, so str(ptr,N)'s exact length semantics
+ * (N chars vs N-incl-NUL) could not be verified — and either off-by-one would
+ * silently DISABLE the pseudo-fs filter and unleash a /dev/null-class write
+ * firehose, a far worse outcome than the known, low-severity cost of the
+ * substring form. That cost: a MODIFICATION whose path merely CONTAINS one of
+ * these tokens mid-path (e.g. a developer's /home/u/dev/notes.txt or
+ * /srv/app/run/state) is over-skipped. Accepted; see residual risks.
+ * '/.cache/' is intentionally substring — a cache dir is always mid-path
+ * (~/.cache/…), so anchoring it would be wrong anyway.
+ * /tmp and /var/tmp are NOT skipped (prime dropper locations).
+ * O_* (x86-64): O_ACCMODE=03=0x3, O_CREAT=0100=0x40=64. write-intent =
+ * (flags & O_ACCMODE) || (flags & O_CREAT); op="create" iff O_CREAT set.
+ * op is emitted as two literal printf branches (never one $var, which bpftrace
+ * would size from the shorter first assignment).
+ *
+ * NOTE: sys_enter_openat2 (which would need a uptr read of open_how->flags) is
+ * intentionally OMITTED — it is the one non-trivial verifier risk and would
+ * take the whole atomic load down with it. openat covers virtually all
+ * glibc-based writers; openat2-only writers are a documented blind spot. Also
+ * dirfd-relative opens carry only the trailing path component in args->filename
+ * — the skip and the emitted path are that component, not the full path. */
+
+tracepoint:syscalls:sys_enter_openat
+/(args->flags & 3) || (args->flags & 64)/
+{
+    $p = str(args->filename);
+    if (strcontains($p, "/proc/") || strcontains($p, "/sys/") ||
+        strcontains($p, "/dev/")  || strcontains($p, "/run/")  ||
+        strcontains($p, "/.cache/")) { return; }
+    if (args->flags & 64) {
+        printf("F\t%llu\t%d\t%d\t%s\tcreate\t%s\n", nsecs, pid, uid, comm, $p);
+    } else {
+        printf("F\t%llu\t%d\t%d\t%s\twrite\t%s\n",  nsecs, pid, uid, comm, $p);
+    }
+}
+
+tracepoint:syscalls:sys_enter_unlink
+{
+    $p = str(args->pathname);
+    if (strcontains($p, "/proc/") || strcontains($p, "/sys/") ||
+        strcontains($p, "/dev/")  || strcontains($p, "/run/")  ||
+        strcontains($p, "/.cache/")) { return; }
+    printf("F\t%llu\t%d\t%d\t%s\tunlink\t%s\n", nsecs, pid, uid, comm, $p);
+}
+
+tracepoint:syscalls:sys_enter_unlinkat
+{
+    $p = str(args->pathname);
+    if (strcontains($p, "/proc/") || strcontains($p, "/sys/") ||
+        strcontains($p, "/dev/")  || strcontains($p, "/run/")  ||
+        strcontains($p, "/.cache/")) { return; }
+    printf("F\t%llu\t%d\t%d\t%s\tunlink\t%s\n", nsecs, pid, uid, comm, $p);
+}
+
+/* rename family: emit the DESTINATION (newname) — where the file lands. */
+tracepoint:syscalls:sys_enter_rename
+{
+    $p = str(args->newname);
+    if (strcontains($p, "/proc/") || strcontains($p, "/sys/") ||
+        strcontains($p, "/dev/")  || strcontains($p, "/run/")  ||
+        strcontains($p, "/.cache/")) { return; }
+    printf("F\t%llu\t%d\t%d\t%s\trename\t%s\n", nsecs, pid, uid, comm, $p);
+}
+
+tracepoint:syscalls:sys_enter_renameat
+{
+    $p = str(args->newname);
+    if (strcontains($p, "/proc/") || strcontains($p, "/sys/") ||
+        strcontains($p, "/dev/")  || strcontains($p, "/run/")  ||
+        strcontains($p, "/.cache/")) { return; }
+    printf("F\t%llu\t%d\t%d\t%s\trename\t%s\n", nsecs, pid, uid, comm, $p);
+}
+
+/* renameat2 is what modern glibc rename()/mv actually issue on x86-64. */
+tracepoint:syscalls:sys_enter_renameat2
+{
+    $p = str(args->newname);
+    if (strcontains($p, "/proc/") || strcontains($p, "/sys/") ||
+        strcontains($p, "/dev/")  || strcontains($p, "/run/")  ||
+        strcontains($p, "/.cache/")) { return; }
+    printf("F\t%llu\t%d\t%d\t%s\trename\t%s\n", nsecs, pid, uid, comm, $p);
+}
+
+/* ── N: outbound TCP connect (IPv4 + IPv6) ───────────────────────────────
+ * Hook tcp_connect (NOT tcp_v4_connect/tcp_v6_connect entry): both families
+ * funnel through it AFTER the destination is written into the sock, so
+ * skc_daddr / skc_v6_daddr / skc_dport are all valid here. tcp_connect is a
+ * non-inlined global symbol, so the kprobe attaches. This is connect-INTENT:
+ * a connect that later fails (RST/timeout) still emits an N line, and only TCP
+ * active opens are covered (UDP/inbound/listen are out of scope by design).
+ * skc_family is host-order (2=AF_INET, 10=AF_INET6) — numeric literals, no
+ * header dependency. skc_dport is __be16 → byte-swap to host-order decimal.
+ * Single-arg ntop() infers AF_INET from the 32-bit skc_daddr and AF_INET6 from
+ * the 16-byte u6_addr8; both are network-order and need no manual swap. */
+kprobe:tcp_connect
+{
+    $sk  = (struct sock *)arg0;
+    $fam = $sk->__sk_common.skc_family;
+
+    $dport = (uint16)$sk->__sk_common.skc_dport;
+    $dport = ($dport >> 8) | (($dport << 8) & 0xff00);
+
+    if ($fam == 2) {
+        printf("N\t%llu\t%d\t%d\t%s\t4\t%s\t%d\n",
+               nsecs, pid, uid, comm,
+               ntop($sk->__sk_common.skc_daddr),
+               $dport);
+    } else if ($fam == 10) {
+        printf("N\t%llu\t%d\t%d\t%s\t6\t%s\t%d\n",
+               nsecs, pid, uid, comm,
+               ntop($sk->__sk_common.skc_v6_daddr.in6_u.u6_addr8),
+               $dport);
+    }
 }
