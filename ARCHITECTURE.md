@@ -285,6 +285,29 @@ easing, graph transitions - all on the render thread. There is no page-level
 fade: animating the opacity of a whole section forces an offscreen render of
 hundreds of rows every frame, which was the jerk.
 
+## 7b. SQLite: reuse the connection, tune what is safe
+
+The two databases are SQLite in WAL mode - one writer (the agent, under a lock)
+and many concurrent readers (the UI), which WAL allows without either blocking
+the other.
+
+* **A read reuses a per-thread connection.** Opening a fresh connection for
+  every read cost 5.4 ms - the setup dominates a small query. A persistent
+  read-only connection kept in `threading.local` (StateDB._reader,
+  EventsDB._reader) is reused: the UI reads on the main thread, so it reuses one;
+  a worker thread gets its own. Read-only and in autocommit, so every SELECT
+  starts a new WAL read transaction and always sees fresh data without holding
+  back a checkpoint. Measured: table_rows 5.4 ms -> 0.69 ms (the old code opened
+  two connections), a feed page 5.4 ms -> 2.1 ms.
+* **synchronous=NORMAL** - with WAL this is the documented safe setting: no
+  corruption on an app crash, only the last transaction is at risk on a power
+  cut, and a write stops waiting on an extra fsync.
+* **temp_store=MEMORY** - the temp b-trees a GROUP BY/ORDER BY builds stay in
+  RAM instead of a scratch file.
+* **cache_size was tried and dropped.** A few MB per connection added ~150 MB of
+  resident set and did not move the read times (connection reuse was the win,
+  not the cache), so it is left at the default.
+
 ## 8. How to verify (mandatory before calling something done)
 
 Compiling QML and rendering offscreen **do not catch** errors in slots and

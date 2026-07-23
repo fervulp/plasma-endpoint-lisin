@@ -11,6 +11,7 @@ INSERT OR IGNORE. That is why an input may collect with an OVERLAPPING window
 is no need to store cursors, the schema heals itself.
 """
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -33,6 +34,22 @@ class EventsDB:
     def _con(self):
         con = sqlite3.connect(self.path, timeout=5.0)
         con.row_factory = sqlite3.Row
+        con.execute("PRAGMA synchronous=NORMAL")
+        con.execute("PRAGMA temp_store=MEMORY")
+        return con
+
+    # a persistent read connection per thread (see StateDB._reader): reused for
+    # the feed, the facets and the statistics rather than opened per call.
+    _readers = threading.local()
+
+    def _reader(self):
+        con = getattr(self._readers, "con", None)
+        if con is None:
+            con = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True,
+                                  timeout=5.0, check_same_thread=False)
+            con.row_factory = sqlite3.Row
+            con.execute("PRAGMA temp_store=MEMORY")
+            self._readers.con = con
         return con
 
     # -------- schema from the taxonomy --------
@@ -168,22 +185,22 @@ class EventsDB:
             sql += f" WHERE {where}"
         sql += f" ORDER BY {order}" if order else " ORDER BY _id DESC"
         sql += f" LIMIT {limit} OFFSET {max(0, int(offset))}"
-        with self._con() as c:
-            rows = [dict(r) for r in c.execute(sql, params)]
+        c = self._reader()
+        rows = [dict(r) for r in c.execute(sql, params)]
         return {"rows": rows, "columns": [f["name"] for f in self.spec["fields"]]}
 
     def count(self, where: str = "", params: tuple = ()) -> int:
         sql = f'SELECT COUNT(*) AS n FROM "{self.table}"'
         if where:
             sql += f" WHERE {where}"
-        with self._con() as c:
-            return c.execute(sql, params).fetchone()["n"]
+        return self._reader().execute(sql, params).fetchone()["n"]
 
     def stats(self) -> dict:
         """A summary for the events page: how many, over what period, by what."""
         out = {"total": 0, "first": "", "last": "", "by_category": [],
                "by_module": [], "by_outcome": []}
-        with self._con() as c:
+        c = self._reader()
+        if True:
             out["total"] = c.execute(
                 f'SELECT COUNT(*) AS n FROM "{self.table}"').fetchone()["n"]
             if not out["total"]:
@@ -210,8 +227,7 @@ class EventsDB:
         were never meant to be shown).
         """
         try:
-            con = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True)
-            con.row_factory = sqlite3.Row
+            con = self._reader()
             cur = con.execute(sql, args)
             cols = [d[0] for d in cur.description] if cur.description else []
             # max_rows raises the limit for internal computations (chains look at
@@ -222,7 +238,6 @@ class EventsDB:
             raw = cur.fetchmany(LIMIT + 1)
             truncated = len(raw) > LIMIT      # we report truncation honestly
             rows = [{k: r[k] for k in cols} for r in raw[:LIMIT]]
-            con.close()
             return {"columns": cols, "rows": rows, "error": "",
                     "truncated": truncated, "limit": LIMIT}
         except Exception as e:

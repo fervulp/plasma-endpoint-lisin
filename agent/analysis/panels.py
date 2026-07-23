@@ -10,10 +10,11 @@ import sqlite3
 import time
 
 
-def _ro(path):
-    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    con.row_factory = sqlite3.Row
-    return con
+def _ro(db):
+    # read through StateDB's per-thread reader (see StateDB._reader): reusing the
+    # one connection saves the ~5 ms of opening a fresh one on every rebuild, and
+    # the panels are memoised so this runs at most once every few seconds anyway.
+    return db._reader()
 
 
 def _q(db, sql, args=()):
@@ -146,22 +147,19 @@ def privesc_activity(db, eventsdb, limit=150) -> dict:
               AND COALESCE(process_command_line,'') <> ''
             GROUP BY process_command_line ORDER BY n DESC LIMIT 15""")
 
-    con = _ro(db.path)
-    try:
-        # THE TIME IS MANDATORY (principle 6): a vector without a date cannot be
-        # tied to an incident. changed is the mtime of the vector's carrier,
-        # age_days is its age. Sorted by freshness: something that appeared
-        # recently matters more than something that has been lying around.
-        vectors = _q(con, "SELECT kind, name, detail, risk, nopasswd, source, "
-                          "changed, age_days FROM privesc "
-                          "ORDER BY changed DESC, risk DESC LIMIT 200")
-        suid = _q(con, "SELECT path, owner, perms FROM suid_binaries LIMIT 200")
-        admins = _q(con, "SELECT name, privilege, admin_groups, shell FROM users "
-                         "WHERE COALESCE(admin_groups,'') <> ''")
-        polkit = _q(con, "SELECT action, title, allow_active FROM polkit_actions "
-                         "WHERE risk = 'high' LIMIT 60")
-    finally:
-        con.close()
+    con = _ro(db)
+    # THE TIME IS MANDATORY (principle 6): a vector without a date cannot be
+    # tied to an incident. changed is the mtime of the vector's carrier,
+    # age_days is its age. Sorted by freshness: something that appeared
+    # recently matters more than something that has been lying around.
+    vectors = _q(con, "SELECT kind, name, detail, risk, nopasswd, source, "
+                      "changed, age_days FROM privesc "
+                      "ORDER BY changed DESC, risk DESC LIMIT 200")
+    suid = _q(con, "SELECT path, owner, perms FROM suid_binaries LIMIT 200")
+    admins = _q(con, "SELECT name, privilege, admin_groups, shell FROM users "
+                     "WHERE COALESCE(admin_groups,'') <> ''")
+    polkit = _q(con, "SELECT action, title, allow_active FROM polkit_actions "
+                     "WHERE risk = 'high' LIMIT 60")
     return {"events": events, "auth_failures": auth_fail, "sudo_commands": sudo_cmd,
             "vectors": vectors, "suid": suid, "admins": admins, "polkit": polkit,
             "total": len(events)}
@@ -216,13 +214,10 @@ def network_flows(db, eventsdb, limit=60) -> dict:
             GROUP BY destination_as_org ORDER BY n DESC LIMIT 15""" % since)
 
     # who the machine is talking to right now - from the socket snapshot
-    con = _ro(db.path)
-    try:
-        live = _q(con, "SELECT proto, local, remote, process, exposure "
-                       "FROM ports WHERE COALESCE(remote,'') <> '' LIMIT 200")
-        resolvers = _q(con, "SELECT item, value FROM dns LIMIT 40")
-    finally:
-        con.close()
+    con = _ro(db)
+    live = _q(con, "SELECT proto, local, remote, process, exposure "
+                   "FROM ports WHERE COALESCE(remote,'') <> '' LIMIT 200")
+    resolvers = _q(con, "SELECT item, value FROM dns LIMIT 40")
 
     ext = sum(1 for f in flows if f.get("direction") == "external")
 
@@ -294,21 +289,18 @@ def flow_detail(db, eventsdb, ip: str) -> dict:
             FROM events WHERE destination_ip = ?
             GROUP BY name ORDER BY sessions DESC""", (str(ip),))
 
-    con = _ro(db.path)
-    try:
-        rows = _q(con, "SELECT proto, local, remote, process, exposure, "
-                       "owner_cmd, owner_user FROM ports WHERE remote LIKE ?",
-                  (str(ip) + ":%",))
-        out["live"] = rows
-        # what the process is: the package and the purpose - from the inventory
-        names = {r["name"] for r in out["processes"] if r["name"] != "(unknown)"}
-        pkg = []
-        for n in list(names)[:10]:
-            pkg += _q(con, "SELECT command, user, pid, package, purpose FROM "
-                           "processes WHERE command LIKE ? LIMIT 3", ("%" + n + "%",))
-        out["packages"] = pkg
-    finally:
-        con.close()
+    con = _ro(db)
+    rows = _q(con, "SELECT proto, local, remote, process, exposure, "
+                   "owner_cmd, owner_user FROM ports WHERE remote LIKE ?",
+              (str(ip) + ":%",))
+    out["live"] = rows
+    # what the process is: the package and the purpose - from the inventory
+    names = {r["name"] for r in out["processes"] if r["name"] != "(unknown)"}
+    pkg = []
+    for n in list(names)[:10]:
+        pkg += _q(con, "SELECT command, user, pid, package, purpose FROM "
+                       "processes WHERE command LIKE ? LIMIT 3", ("%" + n + "%",))
+    out["packages"] = pkg
 
     # where to look next - jumps, not the advice "go and look yourself"
     # Jumps: each has a DESTINATION and a CONDITION. The one for events by
