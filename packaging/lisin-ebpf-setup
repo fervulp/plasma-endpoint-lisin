@@ -66,7 +66,10 @@ $SPOOL {
 ROT
 
 systemctl daemon-reload
-systemctl enable --now lisin-ebpf
+systemctl enable lisin-ebpf
+# restart, not "enable --now": the latter does NOT restart an already-running
+# unit, so a re-run would keep the old process and never pick up ExecStart
+systemctl restart lisin-ebpf
 sleep 2
 echo "==> status"
 systemctl --no-pager --lines=6 status lisin-ebpf || true
