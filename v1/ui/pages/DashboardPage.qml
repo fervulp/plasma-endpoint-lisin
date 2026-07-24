@@ -69,7 +69,8 @@ Kirigami.Page {
             Layout.fillHeight: true
             Loader {
                 anchors.fill: parent
-                anchors.margins: Kirigami.Units.smallSpacing
+                // the view provides its own smallSpacing inset; no extra margin
+                // here, so its search bar sits at the same height as Data's
                 active: page.current !== ""
                 source: page.current === "state" ? Qt.resolvedUrl("../views/DashboardView.qml") : ""
             }

@@ -66,6 +66,7 @@ Item {
         DataTable {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            Layout.topMargin: 10        // same search-to-content gap as Data
             resizable: true
             columns: view.cols
             rows: view.shownRows
