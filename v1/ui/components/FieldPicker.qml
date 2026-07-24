@@ -62,8 +62,8 @@ Item {
     QQC2.Popup {
         id: pop
         y: btn.height
-        width: Math.max(fp.width, Kirigami.Units.gridUnit * 16)
-        height: Kirigami.Units.gridUnit * 18
+        width: Math.max(fp.width, Kirigami.Units.gridUnit * 14)
+        height: Kirigami.Units.gridUnit * 14
         padding: Kirigami.Units.smallSpacing
         onOpened: {
             searchField.text = fp.prefillCurrent ? fp.current : ""
@@ -102,7 +102,7 @@ Item {
                     delegate: QQC2.ItemDelegate {
                         required property var modelData
                         width: ListView.view.width
-                        height: Kirigami.Units.gridUnit * 2
+                        height: Kirigami.Units.gridUnit * 1.7
                         onClicked: {
                             fp.picked(String(modelData))
                             if (!fp.checkMode) pop.close()
@@ -126,7 +126,6 @@ Item {
                                 Layout.fillWidth: true
                                 text: modelData
                                 elide: Text.ElideRight
-                                font.family: "monospace"
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize
                             }
                             QQC2.Label {
