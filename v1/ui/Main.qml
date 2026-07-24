@@ -102,11 +102,31 @@ Kirigami.ApplicationWindow {
     }
 
     globalDrawer: Kirigami.GlobalDrawer {
+        id: drawer
         modal: false
         collapsible: true
+        // the default "Close Sidebar" button is replaced by a cleaner footer toggle
+        collapseButtonVisible: false
         // a grey background over the full height (the Window palette), the content stays light
         Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
+
+        // a tidy collapse control that reads like the menu items above it
+        footer: ColumnLayout {
+            spacing: 0
+            Kirigami.Separator { Layout.fillWidth: true; opacity: 0.4 }
+            QQC2.ItemDelegate {
+                Layout.fillWidth: true
+                icon.name: drawer.collapsed ? "sidebar-expand-left-symbolic"
+                                            : "sidebar-collapse-left-symbolic"
+                text: drawer.collapsed ? "" : "Collapse sidebar"
+                display: drawer.collapsed ? QQC2.AbstractButton.IconOnly
+                                          : QQC2.AbstractButton.TextBesideIcon
+                onClicked: drawer.collapsed = !drawer.collapsed
+                QQC2.ToolTip.text: "Toggle sidebar"
+                QQC2.ToolTip.visible: hovered
+            }
+        }
 
         header: Rectangle {
             Kirigami.Theme.colorSet: Kirigami.Theme.Window

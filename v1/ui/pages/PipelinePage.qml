@@ -10,6 +10,13 @@ Kirigami.ScrollablePage {
     id: page
     title: "Pipelines"
 
+    // grey canvas so the pipeline cards read as floating above it
+    background: Rectangle {
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
+        Kirigami.Theme.inherit: false
+        color: Kirigami.Theme.backgroundColor
+    }
+
     property var pipelines: backend.pipelinesInfo()
 
     Connections {

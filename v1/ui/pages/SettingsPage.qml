@@ -13,17 +13,27 @@ Kirigami.Page {
     title: "Settings"
     padding: 0
 
+    background: Rectangle {
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
+        Kirigami.Theme.inherit: false
+        color: Kirigami.Theme.backgroundColor
+    }
+
     property int section: 0
 
     RowLayout {
         anchors.fill: parent
-        spacing: 0
+        anchors.margins: Kirigami.Units.largeSpacing
+        spacing: Kirigami.Units.largeSpacing
 
         // section list (KDE settings-style)
-        QQC2.ScrollView {
+        FloatCard {
             Layout.preferredWidth: Kirigami.Units.gridUnit * 11
             Layout.fillHeight: true
-            ListView {
+            QQC2.ScrollView {
+                anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
+                ListView {
                 model: [
                     { t: "General", i: "configure" },
                     { t: "SQL", i: "server-database" },
@@ -38,18 +48,21 @@ Kirigami.Page {
                     onClicked: page.section = index
                 }
             }
+            }
         }
 
-        Kirigami.Separator { Layout.fillHeight: true }
-
-        StackLayout {
+        FloatCard {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            currentIndex: page.section
+            StackLayout {
+                anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
+                currentIndex: page.section
 
-            GeneralSettings {}
-            SqlPage { embedded: true }
-            ErrorsView {}
+                GeneralSettings {}
+                SqlPage { embedded: true }
+                ErrorsView {}
+            }
         }
     }
 }

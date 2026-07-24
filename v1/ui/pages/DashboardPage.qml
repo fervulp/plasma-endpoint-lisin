@@ -13,18 +13,28 @@ Kirigami.Page {
     title: "Dashboards"
     padding: 0
 
+    // grey canvas so the panels read as floating cards above it
+    background: Rectangle {
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
+        Kirigami.Theme.inherit: false
+        color: Kirigami.Theme.backgroundColor
+    }
+
     property string current: "state"
 
     RowLayout {
         anchors.fill: parent
-        spacing: 0
+        anchors.margins: Kirigami.Units.largeSpacing
+        spacing: Kirigami.Units.largeSpacing
 
         // the list of dashboards on the left - like the tabs in "State"
         Item {
             Layout.preferredWidth: Kirigami.Units.gridUnit * 11
             Layout.fillHeight: true
+            FloatCard { anchors.fill: parent }
             QQC2.ScrollView {
                 anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
                 ListView {
                     clip: true
                     model: [{ id: "state", title: "State", icon: "computer" }]
@@ -49,18 +59,20 @@ Kirigami.Page {
                 }
             }
         }
-        Kirigami.Separator { Layout.fillHeight: true }
-
         // A PATH, NOT A TYPE NAME: Qt.resolvedUrl resolves against the file it is
         // written in, so after the views moved to ui/views/ these urls pointed at
         // ui/pages/ and the Loader silently loaded nothing - the dashboards were
         // blank with no error anywhere. Compiling QML does not catch it: the file
         // is named in a string, not imported as a type.
-        Loader {
+        FloatCard {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            active: page.current !== ""
-            source: page.current === "state" ? Qt.resolvedUrl("../views/DashboardView.qml") : ""
+            Loader {
+                anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
+                active: page.current !== ""
+                source: page.current === "state" ? Qt.resolvedUrl("../views/DashboardView.qml") : ""
+            }
         }
     }
 }

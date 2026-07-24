@@ -14,6 +14,12 @@ Kirigami.Page {
     title: "Expertise"
     padding: 0
 
+    background: Rectangle {
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
+        Kirigami.Theme.inherit: false
+        color: Kirigami.Theme.backgroundColor
+    }
+
     property var dirs: backend.expertiseDirs()
     property string curDir: "fedora"
     property var allElements: backend.expertiseElements(curDir)
@@ -167,13 +173,17 @@ Kirigami.Page {
 
     RowLayout {
         anchors.fill: parent
-        spacing: 0
+        anchors.margins: Kirigami.Units.largeSpacing
+        spacing: Kirigami.Units.largeSpacing
 
         // -------- directories (collapsible) --------
-        QQC2.ScrollView {
+        FloatCard {
             Layout.preferredWidth: Kirigami.Units.gridUnit * 13
             Layout.fillHeight: true
-            ListView {
+            QQC2.ScrollView {
+                anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
+                ListView {
                 // hide the children of collapsed directories
                 model: page.dirs.filter(d => {
                     for (const c of page.collapsed)
@@ -219,16 +229,18 @@ Kirigami.Page {
                     }
                 }
             }
+            }
         }
 
-        Kirigami.Separator { Layout.fillHeight: true }
-
         // -------- the table of objects --------
-        ColumnLayout {
+        FloatCard {
             visible: page.editing === ""
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 0
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
+                spacing: 0
 
             RowLayout {
                 Layout.fillWidth: true
@@ -342,6 +354,7 @@ Kirigami.Page {
                     }
                 }
             }
+            }
         }
 
         // -------- filter sidebar (full height) --------
@@ -397,11 +410,14 @@ Kirigami.Page {
         }
 
         // -------- the code editor --------
-        ColumnLayout {
+        FloatCard {
             visible: page.editing !== ""
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 0
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
+                spacing: 0
 
             RowLayout {
                 Layout.fillWidth: true
@@ -441,6 +457,7 @@ Kirigami.Page {
                     wrapMode: TextEdit.NoWrap
                     tabStopDistance: 20
                 }
+            }
             }
         }
     }
