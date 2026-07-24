@@ -302,10 +302,17 @@ Item {
     function fullSql() {
         var out = "SELECT "
         if (spec.distinct) out += "DISTINCT "
-        var cols = spec.select.slice()
-        for (var i = 0; i < spec.computed.length; i++)
-            if (spec.computed[i].expr)
-                cols.push(spec.computed[i].expr + " AS " + (spec.computed[i].alias || "calc"))
+        var cols
+        if (spec.groupBy.length) {
+            // grouped: the group fields + a row count
+            cols = spec.groupBy.slice()
+            cols.push("count(*) AS count")
+        } else {
+            cols = spec.select.slice()
+            for (var i = 0; i < spec.computed.length; i++)
+                if (spec.computed[i].expr)
+                    cols.push(spec.computed[i].expr + " AS " + (spec.computed[i].alias || "calc"))
+        }
         out += cols.length ? cols.join(", ") : "*"
         var w = buildSql()
         if (w) out += " WHERE " + w
@@ -958,8 +965,8 @@ Item {
         // right under the query bar: a menu, not a window on top of the table
         x: 0
         y: bar.height + Kirigami.Units.smallSpacing
-        width: Math.min(bar.width, Kirigami.Units.gridUnit * 32)
-        height: Kirigami.Units.gridUnit * 16
+        width: Math.min(bar.width, Kirigami.Units.gridUnit * 22)
+        height: Kirigami.Units.gridUnit * 12
         padding: Kirigami.Units.smallSpacing
         closePolicy: QQC2.Popup.CloseOnEscape | QQC2.Popup.CloseOnPressOutsideParent
 
@@ -1122,8 +1129,6 @@ Item {
                                 Layout.fillWidth: true
                                 text: morePopup.textOf(modelData)
                                 elide: Text.ElideRight
-                                font.family: "monospace"
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
                             }
                             // THE ORDER OF THE FIELDS is set BY DRAGGING the handle
                             // on the left; the arrows were removed as a duplicate.

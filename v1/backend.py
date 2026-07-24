@@ -30,7 +30,10 @@ from core import pipeline, views
 from core.store import Store
 
 _SQL_HISTORY = Path(os.path.expanduser("~/.local/share/lisin")) / "sql_history.json"
-_QUERIES_DIR = Path(__file__).resolve().parent / "expertise" / "queries"
+_EXPERTISE = Path(__file__).resolve().parent / "expertise"
+_QUERIES_DIR = _EXPERTISE / "queries"
+_EXP_CATS = [("inputs", "Inputs"), ("views", "Views"),
+             ("edges", "Edges"), ("queries", "Queries")]
 
 
 def _san_name(name: str) -> str:
@@ -295,6 +298,46 @@ class Backend(QObject):
                     "sql": d.get("sql", ""),
                 })
         return out
+
+    # ---------- expertise catalog (read-only for now) ----------
+    @Slot(result="QVariant")
+    def expertiseDirs(self):
+        out = []
+        for path, title in _EXP_CATS:
+            if (_EXPERTISE / path).is_dir():
+                out.append({"path": path, "title": title, "depth": 0})
+        return out
+
+    @Slot(str, result="QVariant")
+    def expertiseElements(self, d):
+        out = []
+        dd = _EXPERTISE / (d or "")
+        if dd.is_dir():
+            for f in sorted(dd.glob("*.yaml")):
+                try:
+                    spec = yaml.safe_load(f.read_text()) or {}
+                except Exception:  # noqa: BLE001
+                    spec = {}
+                rel = str(f.relative_to(_EXPERTISE))[:-5]  # drop .yaml
+                out.append({
+                    "_id": rel,
+                    "id": spec.get("name", f.stem),
+                    "name": spec.get("name", f.stem),
+                    "title": spec.get("title", spec.get("name", f.stem)),
+                    "type": spec.get("type", ""),
+                    "version": str(spec.get("version", "")),
+                    "rel": rel,
+                    "path": rel,
+                })
+        return out
+
+    @Slot(str, result=str)
+    def readExpertise(self, rel):
+        f = _EXPERTISE / (str(rel) + ".yaml")
+        try:
+            return f.read_text() if f.is_file() else ""
+        except Exception as e:  # noqa: BLE001
+            return "# " + str(e)
 
     @Slot(str, str, str, result=str)
     def saveQuery(self, title, sql, description):

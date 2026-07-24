@@ -21,7 +21,7 @@ Kirigami.Page {
     }
 
     property var dirs: backend.expertiseDirs()
-    property string curDir: "fedora"
+    property string curDir: "inputs"
     property var allElements: backend.expertiseElements(curDir)
     property int typeFilter: 0    // 0 = all
     readonly property var typeNames: ["All types", "Inputs", "Normalization",
@@ -44,6 +44,13 @@ Kirigami.Page {
     property var pagedElements: elements.slice(pageIndex * pageLimit,
                                                (pageIndex + 1) * pageLimit)
     onElementsChanged: pageIndex = 0
+    // columns for the shared DataTable (same as Data's tables)
+    readonly property var expColumns: [
+        { k: "id", t: "ID", w: 10, mono: true },
+        { k: "title", t: "Title", fill: true },
+        { k: "type", t: "Type", w: 8 },
+        { k: "version", t: "Version", w: 6, right: true }
+    ]
     property string editing: ""      // the relative path of the open file
     // "Run now" and "Tests" for the open rule
     property var runResult: null
@@ -242,116 +249,16 @@ Kirigami.Page {
                 anchors.margins: Kirigami.Units.smallSpacing
                 spacing: 0
 
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.margins: Kirigami.Units.smallSpacing
-                spacing: 0
-
-                component HCol: Item {
-                    property string label
-                    property string key
-                    implicitHeight: hl.implicitHeight
-                    visible: !page.colHide[key]
-                    QQC2.Label {
-                        id: hl
-                        anchors.fill: parent
-                        anchors.rightMargin: 8
-                        text: parent.label
-                        font.bold: true
-                        elide: Text.ElideRight
-                    }
-                    MouseArea {   // the resize handle
-                        width: 10
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.bottom: parent.bottom
-                        cursorShape: Qt.SplitHCursor
-                        property real sx
-                        onPressed: m => sx = m.x
-                        onPositionChanged: m => {
-                            if (pressed) page.setW(parent.key, page.colW[parent.key] + (m.x - sx))
-                        }
-                    }
-                }
-
-                HCol { label: "ID"; key: "id"; Layout.preferredWidth: page.colW.id }
-                QQC2.Label { text: "Title"; font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
-                HCol { label: "Type"; key: "type"; Layout.preferredWidth: page.colW.type }
-                HCol { label: "Version"; key: "version"; Layout.preferredWidth: page.colW.version }
-            }
-            Kirigami.Separator { Layout.fillWidth: true }
-
-            QQC2.ScrollView {
+            DataTable {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                ListView {
-                    model: page.pagedElements
-                    clip: true
-                    delegate: QQC2.ItemDelegate {
-                        width: ListView.view.width
-                        background: Rectangle {
-                            color: index % 2 === 0
-                                   ? Kirigami.Theme.backgroundColor
-                                   : Kirigami.Theme.alternateBackgroundColor
-                            Kirigami.Separator {
-                                anchors.bottom: parent.bottom
-                                width: parent.width
-                                opacity: 0.35
-                            }
-                        }
-                        onClicked: {
-                            page.editing = modelData.rel
-                            page.saveError = ""
-                            editor.text = backend.readExpertise(modelData.rel)
-                        }
-                        contentItem: RowLayout {
-                            spacing: 0
-                            QQC2.Label {
-                                visible: !page.colHide.id
-                                text: modelData.id || "—"
-                                font.family: "monospace"
-                                elide: Text.ElideRight
-                                rightPadding: 8
-                                Layout.preferredWidth: page.colW.id
-                            }
-                            ColumnLayout {
-                                spacing: 0
-                                Layout.fillWidth: true
-                                QQC2.Label {
-                                    text: modelData.title || modelData.name
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                                QQC2.Label {
-                                    text: modelData.name
-                                    opacity: 0.6
-                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                            }
-                            QQC2.Label {
-                                visible: !page.colHide.type
-                                text: modelData.type || "—"
-                                opacity: 0.8
-                                elide: Text.ElideRight
-                                rightPadding: 8
-                                Layout.preferredWidth: page.colW.type
-                            }
-                            QQC2.Label {
-                                visible: !page.colHide.version
-                                text: modelData.version || "—"
-                                elide: Text.ElideRight
-                                Layout.preferredWidth: page.colW.version
-                            }
-                        }
-                    }
-                    Kirigami.PlaceholderMessage {
-                        anchors.centerIn: parent
-                        visible: parent.count === 0
-                        text: "Folder is empty"
-                        explanation: "Use “Element…” to create from a template"
-                    }
+                resizable: true
+                columns: page.expColumns
+                rows: page.pagedElements
+                onRowClicked: function (row, index, mods) {
+                    page.editing = row.rel
+                    page.saveError = ""
+                    editor.text = backend.readExpertise(row.rel)
                 }
             }
             }
