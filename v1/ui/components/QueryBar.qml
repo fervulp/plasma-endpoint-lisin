@@ -1183,6 +1183,8 @@ Item {
                 QQC2.TextArea {
                     id: sqlField
                     font.family: "monospace"
+                    topPadding: Kirigami.Units.smallSpacing
+                    bottomPadding: Kirigami.Units.smallSpacing
                     wrapMode: TextEdit.Wrap
                     placeholderText: bar.placeholder
                     readOnly: bar.builderMode

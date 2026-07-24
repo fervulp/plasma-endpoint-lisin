@@ -107,8 +107,12 @@ Kirigami.ApplicationWindow {
         collapsible: true
         // the default "Close Sidebar" button is replaced by a cleaner footer toggle
         collapseButtonVisible: false
-        // a grey background over the full height (the Window palette), the content stays light
-        Kirigami.Theme.colorSet: Kirigami.Theme.Window
+        // keep the header (and the menu icons) in place when collapsed, and give
+        // the collapsed rail a little more width
+        showHeaderWhenCollapsed: true
+        collapsedSize: Kirigami.Units.gridUnit * 3
+        // a WHITE sidebar (View palette), not grey
+        Kirigami.Theme.colorSet: Kirigami.Theme.View
         Kirigami.Theme.inherit: false
 
         // a subtle, icon-only collapse arrow — barely there until hovered
@@ -123,7 +127,7 @@ Kirigami.ApplicationWindow {
         }
 
         header: Rectangle {
-            Kirigami.Theme.colorSet: Kirigami.Theme.Window
+            Kirigami.Theme.colorSet: Kirigami.Theme.View
             Kirigami.Theme.inherit: false
             color: Kirigami.Theme.backgroundColor
             // a STABLE height, so collapsing the drawer does not pull the menu

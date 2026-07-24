@@ -54,6 +54,8 @@ Kirigami.Page {
     readonly property bool onEvents: cur && cur.name === "events"
     // the fields the Details sidebar shows, in SECTIONS: for events, grouped by
     // taxonomy category; for any other table, one unnamed section of its columns
+    // the field-search term for the Details sidebar
+    property string detailFilter: ""
     property var detailSections: {
         if (!lastSel || !cur) return []
         if (onEvents && eventTax.groups && eventTax.groups.length)
@@ -756,7 +758,6 @@ Kirigami.Page {
             QueryBar {
                 id: qbar
                 Layout.fillWidth: true
-                Layout.topMargin: Kirigami.Units.smallSpacing
                 Layout.leftMargin: Kirigami.Units.smallSpacing
                 Layout.rightMargin: Kirigami.Units.smallSpacing
                 // the fields offered in the pickers = THIS table's columns (and the
@@ -1048,7 +1049,7 @@ Kirigami.Page {
                         id: pagePopup
                         y: -height - Kirigami.Units.smallSpacing
                         x: parent.width - width
-                        padding: Kirigami.Units.largeSpacing
+                        padding: Kirigami.Units.smallSpacing
                         ColumnLayout {
                             spacing: Kirigami.Units.smallSpacing
                             QQC2.Label {
@@ -1057,13 +1058,14 @@ Kirigami.Page {
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize
                             }
                             Flow {
-                                Layout.preferredWidth: Kirigami.Units.gridUnit * 15
-                                spacing: Kirigami.Units.smallSpacing
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 9
+                                spacing: 2
                                 Repeater {
                                     model: [50, 100, 200, 500, 1000, 0]
                                     QQC2.Button {
                                         flat: true
                                         checkable: true
+                                        implicitHeight: Kirigami.Units.gridUnit * 1.5
                                         text: modelData === 0 ? "all" : "" + modelData
                                         checked: modelData === 0 ? page.pageLimit >= 100000
                                                                  : page.pageLimit === modelData
@@ -1082,6 +1084,7 @@ Kirigami.Page {
                             RowLayout {
                                 spacing: Kirigami.Units.smallSpacing
                                 QQC2.SpinBox {
+                                    implicitHeight: Kirigami.Units.gridUnit * 1.6
                                     from: 1
                                     to: Math.max(1, page.pageCount)
                                     value: page.pageIndex + 1
@@ -1089,6 +1092,7 @@ Kirigami.Page {
                                 }
                                 QQC2.Label {
                                     opacity: 0.6
+                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
                                     text: "of " + Math.max(1, page.pageCount)
                                 }
                             }
@@ -1114,6 +1118,15 @@ Kirigami.Page {
             iconName: "documentinfo"
             panelWidth: Kirigami.Units.gridUnit * 22
             onCloseRequested: open = false
+
+            // search across the shown fields — same as the tables' search bars
+            Kirigami.SearchField {
+                Layout.fillWidth: true
+                Layout.margins: Kirigami.Units.smallSpacing
+                placeholderText: "find a field…"
+                text: page.detailFilter
+                onTextChanged: page.detailFilter = text
+            }
 
             QQC2.ScrollView {
                 Layout.fillWidth: true
@@ -1152,7 +1165,10 @@ Kirigami.Page {
                             readonly property var nonEmpty: (modelData.fields || [])
                                 .filter(function (f) {
                                     return page.lastSel
-                                        && String(page.lastSel[f] ?? "") !== "" })
+                                        && String(page.lastSel[f] ?? "") !== ""
+                                        && (page.detailFilter === ""
+                                            || f.toLowerCase().indexOf(
+                                                   page.detailFilter.toLowerCase()) >= 0) })
                             visible: nonEmpty.length > 0
                             // the category header (events only - the plain section
                             // for a state table has an empty group name)
