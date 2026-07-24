@@ -1,0 +1,22 @@
+name: listening_ports
+table: listening_ports
+type: input
+version: 1.0.0
+title: Listening ports
+description: Listening sockets with their owning process.
+# The process name is attached by a JOIN inside osquery (fact edge on pid),
+# not by a Python lookup — this is the enrichment-as-join model in miniature.
+query: |
+  SELECT
+    l.pid,
+    l.port,
+    l.protocol,
+    l.family,
+    l.address,
+    l.path        AS socket_path,
+    p.name        AS process,
+    p.cmdline     AS process_cmdline
+  FROM listening_ports l
+  LEFT JOIN processes p ON p.pid = l.pid
+  WHERE l.port > 0
+  ORDER BY l.port

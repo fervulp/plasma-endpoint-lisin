@@ -1,0 +1,26 @@
+name: processes
+table: processes
+type: input
+version: 1.0.0
+title: Processes
+description: Running processes, point-in-time snapshot from osquery.
+# osquery returns clean typed columns; cgroup_path carries the systemd unit,
+# parent is the ppid — both are facts we will join on, not guess.
+query: |
+  SELECT
+    pid,
+    parent        AS ppid,
+    name,
+    path,
+    cmdline,
+    state,
+    uid,
+    gid,
+    euid,
+    resident_size AS rss,
+    start_time,
+    threads,
+    nice,
+    cgroup_path
+  FROM processes
+  ORDER BY pid

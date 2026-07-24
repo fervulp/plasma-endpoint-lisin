@@ -9,6 +9,10 @@ __pycache__/
 *.pyo
 .qmlls.ini
 
+# v1: vendored DuckDB (~59 MB, tied to the local Python ABI) — reinstall with
+# v1/bootstrap.sh, never commit the blob. osquery lives outside the tree.
+v1/vendor/
+
 # Data of THIS machine: never in the repository (principle 18).
 # The application keeps everything under XDG directories outside the source
 # tree (~/.local/share/lisin, ~/.config/lisin) and creates them itself on the
