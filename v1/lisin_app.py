@@ -46,6 +46,7 @@ def main():
     app = QGuiApplication(sys.argv)
     app.setApplicationName("LiSin")
     app.setOrganizationName("lisin")
+    app.setDesktopFileName("lisin")
 
     engine = QQmlApplicationEngine()
     backend = Backend()

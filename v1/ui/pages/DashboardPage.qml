@@ -27,12 +27,7 @@ Kirigami.Page {
                 anchors.fill: parent
                 ListView {
                     clip: true
-                    model: [{ id: "state", title: "State", icon: "computer" },
-                            { id: "findings", title: "Findings", icon: "emblem-warning" },
-                            { id: "vulns", title: "Vulnerabilities", icon: "security-low" },
-                            { id: "files", title: "File activity", icon: "document-edit" },
-                            { id: "privesc", title: "Privilege use", icon: "security-high" },
-                            { id: "net", title: "Network flows", icon: "network-connect" }]
+                    model: [{ id: "state", title: "State", icon: "computer" }]
                     delegate: QQC2.ItemDelegate {
                         width: ListView.view.width
                         highlighted: page.current === modelData.id
@@ -65,12 +60,7 @@ Kirigami.Page {
             Layout.fillWidth: true
             Layout.fillHeight: true
             active: page.current !== ""
-            source: page.current === "state" ? Qt.resolvedUrl("../views/DashboardView.qml")
-                  : page.current === "findings" ? Qt.resolvedUrl("../views/FindingsView.qml")
-                  : page.current === "vulns" ? Qt.resolvedUrl("../views/VulnView.qml")
-                  : page.current === "files" ? Qt.resolvedUrl("../views/FileActivityView.qml")
-                  : page.current === "privesc" ? Qt.resolvedUrl("../views/PrivescView.qml")
-                  : page.current === "net" ? Qt.resolvedUrl("../views/NetFlowView.qml") : ""
+            source: page.current === "state" ? Qt.resolvedUrl("../views/DashboardView.qml") : ""
         }
     }
 }

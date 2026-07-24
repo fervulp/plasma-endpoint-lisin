@@ -1,0 +1,19 @@
+[Unit]
+Description=LiSin EDR (lightweight local endpoint detection)
+Documentation=https://github.com/fervulp/plasma-endpoint-lisin
+# A graphical-session USER service: it runs while the user is logged into their
+# desktop, so collection is always on and the window is available. Bound to the
+# session so it stops on logout.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=PYTHONNOUSERSITE=1
+Environment=QT_QUICK_CONTROLS_STYLE=org.kde.desktop
+ExecStart=/usr/bin/python3 /usr/share/lisin/lisin_app.py
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

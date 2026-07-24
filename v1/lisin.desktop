@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=LiSin
+GenericName=Endpoint Detection and Response
+Comment=Endpoint monitoring and investigation for Fedora
+Exec=lisin
+Icon=view-visible
+Terminal=false
+Categories=System;Security;Monitor;Qt;KDE;
+StartupWMClass=lisin
