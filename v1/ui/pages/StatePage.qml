@@ -722,6 +722,7 @@ Kirigami.Page {
             QQC2.ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.topMargin: 5          // gap between the search and the list
                 ListView {
                     model: page.shownTabs
                     clip: true
@@ -875,6 +876,7 @@ Kirigami.Page {
             RowLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.topMargin: 5          // gap between the search and the table
                 spacing: 0
 
             // ---- THE GROUP PANEL: the SHARED DataTable, so it has the same
@@ -1064,6 +1066,7 @@ Kirigami.Page {
             QQC2.ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.topMargin: 5          // gap between the search and the fields
                 ColumnLayout {
                     width: detailsPanel.panelWidth - Kirigami.Units.largeSpacing * 2
                     spacing: Kirigami.Units.smallSpacing
