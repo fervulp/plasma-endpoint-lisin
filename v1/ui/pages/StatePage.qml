@@ -16,6 +16,13 @@ Kirigami.Page {
     title: ""
     padding: 0
 
+    // grey canvas, so the white panels read as floating cards above it
+    background: Rectangle {
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
+        Kirigami.Theme.inherit: false
+        color: Kirigami.Theme.backgroundColor
+    }
+
     property var s: root.sysState
     // Vulnerabilities live in a separate tab of the "Dashboards" section: that is
     // not an inventory of the system but a list of tasks, "what to patch".
@@ -277,6 +284,11 @@ Kirigami.Page {
         }
     }
     Component.onCompleted: {
+        // v1: the Events tab has no source yet — open the first tab that has
+        // rows so Data does not come up blank on Events.
+        if (page.tabIndex === 0 && page.cur && (page.cur.count || 0) === 0)
+            for (var i = 0; i < page.tabsModel.length; i++)
+                if ((page.tabsModel[i].count || 0) > 0) { page.tabIndex = i; break }
         page.loadRows(); page.refreshEventsTotal(); page.fetchJoinTables(); applyFocus()
     }
 
@@ -694,7 +706,8 @@ Kirigami.Page {
     // -------- page body: main column + full-height right sidebars --------
     RowLayout {
         anchors.fill: parent
-        spacing: 0
+        anchors.margins: Kirigami.Units.largeSpacing
+        spacing: Kirigami.Units.largeSpacing
 
         // -------- the vertical state tabs (resized by the right edge) --------
         Item {
@@ -703,8 +716,11 @@ Kirigami.Page {
             Layout.preferredWidth: panelW
             Layout.fillHeight: true
 
+            FloatCard { anchors.fill: parent }
+
             ColumnLayout {
                 anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
                 spacing: 0
                 // SEARCH BY TABLE NAME: type "release" and only the tables where
                 // it occurs are left. There are almost fifty tables.
@@ -787,12 +803,14 @@ Kirigami.Page {
             }
         }
 
-        Kirigami.Separator { Layout.fillHeight: true }
-
-        ColumnLayout {
+        FloatCard {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 0
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: Kirigami.Units.smallSpacing
+                spacing: 0
 
             // THE SINGLE QUERY BAR - the same component as in "Events"
             QueryBar {
@@ -1056,6 +1074,7 @@ Kirigami.Page {
                 }
             }
             }
+        }
         }
 
 

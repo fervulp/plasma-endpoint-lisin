@@ -8,7 +8,7 @@ import "."
 // button and slide animation. Usage:
 //   SidePanel { id: p; title: "AI"; iconName: "help-hint"
 //               onCloseRequested: p.open = false;  ...content... }
-Rectangle {
+Kirigami.ShadowedRectangle {
     id: panel
 
     property string title: ""
@@ -21,6 +21,13 @@ Rectangle {
     Kirigami.Theme.colorSet: Kirigami.Theme.View
     Kirigami.Theme.inherit: false
     color: Kirigami.Theme.backgroundColor
+    // a floating card: rounded, soft shadow (matches FloatCard)
+    radius: Kirigami.Units.smallSpacing * 1.5
+    border.width: 1
+    border.color: Qt.alpha(Kirigami.Theme.textColor, 0.08)
+    shadow.size: Kirigami.Units.gridUnit
+    shadow.yOffset: 2
+    shadow.color: Qt.rgba(0, 0, 0, 0.18)
 
     Layout.fillHeight: true
     Layout.preferredWidth: open ? panelWidth : 0
@@ -30,19 +37,12 @@ Rectangle {
     // (an event was selected but the sidebar did not appear). A width > 1 is only
     // needed so that the panel does not flicker during the closing animation.
     visible: open || Layout.preferredWidth > 1
-    clip: true
 
     Behavior on Layout.preferredWidth {
         NumberAnimation {
             duration: Kirigami.Units.longDuration
             easing.type: Easing.OutCubic
         }
-    }
-
-    Kirigami.Separator {
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
     }
 
     MouseArea {   // resizing the sidebar by its left edge
@@ -68,7 +68,6 @@ Rectangle {
         anchors.margins: Kirigami.Units.smallSpacing
         anchors.leftMargin: Kirigami.Units.smallSpacing * 2
         spacing: Kirigami.Units.smallSpacing
-        width: panel.panelWidth
         // the contents fade with the panel instead of flashing at full width
         // while it is still sliding open
         opacity: panel.open ? 1 : 0

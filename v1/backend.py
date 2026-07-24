@@ -119,7 +119,8 @@ class Backend(QObject):
                     "colcfg": None,
                     "collected_at": self._collected_at.get(name, ""),
                 })
-        return {"os": self._os_info(), "tabs": tabs}
+        last = max(self._collected_at.values(), default="")
+        return {"os": self._os_info(), "tabs": tabs, "collected_at": last}
 
     def _os_info(self) -> dict:
         return {
