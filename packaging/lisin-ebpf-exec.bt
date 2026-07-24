@@ -198,7 +198,9 @@ kprobe:tcp_connect
     $fam = $sk->__sk_common.skc_family;
 
     $dport = (uint16)$sk->__sk_common.skc_dport;
-    $dport = ($dport >> 8) | (($dport << 8) & 0xff00);
+    /* bpftrace promotes the byte-swap expression to uint64; cast back to uint16
+     * or it refuses to assign a wider type into the uint16 variable. */
+    $dport = (uint16)(($dport >> 8) | (($dport << 8) & 0xff00));
 
     if ($fam == 2) {
         printf("N\t%llu\t%d\t%d\t%s\t4\t%s\t%d\n",
