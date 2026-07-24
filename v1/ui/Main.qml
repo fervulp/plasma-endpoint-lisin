@@ -139,28 +139,28 @@ Kirigami.ApplicationWindow {
         }
         actions: [
             Kirigami.Action {
-                text: "Data"
-                icon.name: "computer"
-                checked: root.section === "state"
-                onTriggered: root.open("state")
-            },
-            Kirigami.Action {
                 text: "Dashboards"
                 icon.name: "office-chart-bar"
                 checked: root.section === "dashboards"
                 onTriggered: root.open("dashboards")
             },
             Kirigami.Action {
-                text: "Pipelines"
-                icon.name: "distribute-graph-directed"
-                checked: root.section === "pipeline"
-                onTriggered: root.open("pipeline")
+                text: "Data"
+                icon.name: "computer"
+                checked: root.section === "state"
+                onTriggered: root.open("state")
             },
             Kirigami.Action {
                 text: "Expertise"
                 icon.name: "document-edit"
                 checked: root.section === "expertise"
                 onTriggered: root.open("expertise")
+            },
+            Kirigami.Action {
+                text: "Pipelines"
+                icon.name: "distribute-graph-directed"
+                checked: root.section === "pipeline"
+                onTriggered: root.open("pipeline")
             },
             Kirigami.Action { separator: true },
             Kirigami.Action {

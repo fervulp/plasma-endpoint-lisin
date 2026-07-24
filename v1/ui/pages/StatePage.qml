@@ -620,30 +620,14 @@ Kirigami.Page {
         RowLayout {
             anchors.fill: parent
             spacing: Kirigami.Units.smallSpacing
-            QQC2.ToolButton {
-                icon.name: "view-refresh"
-                text: "Refresh"
-                display: QQC2.AbstractButton.IconOnly
-                QQC2.ToolTip.text: "Re-read the collected data"
-                QQC2.ToolTip.visible: hovered
-                onClicked: backend.refresh()
-            }
-            // COLLECT NOW: the sources have their own intervals (six hours for
-            // vulnerabilities), and after changing the system there is no point waiting.
-            QQC2.ToolButton {
-                icon.name: "download"
-                text: page.collecting ? "Collecting…" : "Collect now"
-                display: QQC2.AbstractButton.TextBesideIcon
-                enabled: !page.collecting
-                QQC2.ToolTip.text: "Run every state source right now"
-                QQC2.ToolTip.visible: hovered
-                onClicked: { page.collecting = true; backend.collectNow() }
-            }
-            QQC2.BusyIndicator {
-                running: page.collecting
-                visible: page.collecting
-                Layout.preferredHeight: Kirigami.Units.gridUnit * 1.4
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 1.4
+            // HOW MANY ROWS ARE SELECTED — on the LEFT of the footer.
+            QQC2.Label {
+                visible: page.selCount > 0
+                opacity: 0.7
+                text: page.allSelected
+                      ? "Selected: all " + page.curTotal + " rows"
+                      : "Selected: " + page.selRows.length +
+                        (page.selRows.length === 1 ? " row" : " rows")
             }
             // when this table was filled last
             QQC2.Label {
@@ -659,16 +643,6 @@ Kirigami.Page {
                 text: page.s ? "Updated: " + page.s.collected_at : "Collecting…"
             }
             Item { Layout.fillWidth: true }
-            // HOW MANY ROWS ARE SELECTED — shown at the bottom, next to the page
-            // controls, so the count sits with the pagination it belongs to.
-            QQC2.Label {
-                visible: page.selCount > 0
-                opacity: 0.7
-                text: page.allSelected
-                      ? "Selected: all " + page.curTotal + " rows"
-                      : "Selected: " + page.selRows.length +
-                        (page.selRows.length === 1 ? " row" : " rows")
-            }
             // SELECT ALL — every matching record across ALL pages. Toggles with
             // Clear.
             QQC2.ToolButton {

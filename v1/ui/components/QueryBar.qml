@@ -1393,7 +1393,7 @@ Item {
                         }
                     }
                     QQC2.ToolButton {
-                        icon.name: "accessories-calculator"
+                        icon.name: "insert-math-expression"
                         QQC2.ToolTip.text: "Calculated field"
                         QQC2.ToolTip.visible: hovered
                         onClicked: { bar.addClause("calc"); bar.editingCalc = true }
