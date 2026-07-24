@@ -70,7 +70,7 @@ code: |
       import os
       from pathlib import Path
       by_path, by_unit, by_mod = _index(
-          str(Path.home() / ".local/share/lisin/state.db"))
+          str(Path.home() / ".local/share/lisin/data.db"))
       if not by_path:
           return rows
 

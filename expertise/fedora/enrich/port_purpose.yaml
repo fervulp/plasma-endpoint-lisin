@@ -35,7 +35,7 @@ code: |
       # 2) the package description of the owning process (put there by proc_purpose)
       owner = {}
       try:
-          db = Path.home() / ".local/share/lisin/state.db"
+          db = Path.home() / ".local/share/lisin/data.db"
           con = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
           con.row_factory = sqlite3.Row
           for r in con.execute("SELECT pid, purpose, package FROM processes"):

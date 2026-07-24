@@ -98,14 +98,33 @@ def _all_numeric(values: set) -> bool:
     return bool(values) and all(v.isdigit() for v in values)
 
 
+_MODEL_CACHE = {}   # (id(con), data_version, min_overlap, min_values) -> result
+
+
 def model(db, min_overlap: float = 0.5, min_values: int = 3) -> dict:
     """The map of links: which columns of which tables refer to each other.
 
     A link counts as found if no fewer than min_overlap of the values of one
     column occur in the other. The threshold and the min_values requirement cut
     off accidental coincidences on two or three rows.
+
+    CACHED BY data_version. Building the map scans every column of every table
+    (~105 ms, 335 fetchall over 142k values), and it is called several times per
+    graph build. `PRAGMA data_version` bumps whenever ANOTHER connection commits
+    a change to the file, and the pipeline writes through a different connection
+    than this reader - so an unchanged data_version means the tables have not
+    changed and the whole scan can be skipped. Callers only read the result.
     """
     con = _ro(db)
+    try:
+        dv = con.execute("PRAGMA data_version").fetchone()[0]
+    except sqlite3.Error:
+        dv = None
+    ck = (id(con), dv, min_overlap, min_values)
+    if dv is not None:
+        hit = _MODEL_CACHE.get(ck)
+        if hit is not None:
+            return hit
     try:
         tabs = [r["name"] for r in
                 con.execute("SELECT name FROM _tabs ORDER BY name")]
@@ -171,7 +190,14 @@ def model(db, min_overlap: float = 0.5, min_values: int = 3) -> dict:
         nodes.append({"id": t, "label": t, "degree": deg,
                       "x": round(500 + 420 * math.cos(ang)),
                       "y": round(430 + 330 * math.sin(ang))})
-    return {"nodes": nodes, "links": links, "tables": len(involved)}
+    result = {"nodes": nodes, "links": links, "tables": len(involved)}
+    if dv is not None:
+        # keep the cache tiny: only the latest DB state is ever asked for again,
+        # so a single entry is enough (also bounds it across data_version bumps
+        # and threads)
+        _MODEL_CACHE.clear()
+        _MODEL_CACHE[ck] = result
+    return result
 
 
 def _q(con, sql, args=()):
@@ -300,6 +326,19 @@ CAT_META = {
     # panel (not expanded into nodes), because a history is read in order, not
     # scattered across the canvas
     "activity":    ("Activity history", "#b7950b", 11.5),
+    # WHAT THE PROCESS DID, as SEPARATE blocks per kind (the state<->events
+    # bridge). Each block holds the recent events of that kind (address / path /
+    # command visible) plus a "N total" node that opens the full slice. Moved out
+    # of the single timeline so "what is happening" is browsable by type.
+    "netact":      ("Network activity", "#e67e22", 3.10),
+    "fileact":     ("File activity",    "#5d6d7e", 3.20),
+    "cmdact":      ("Commands",         "#8e44ad", 3.30),
+    "authact":     ("Authentication",   "#2980b9", 3.40),
+    "drvact":      ("Driver / module",  "#7d3c98", 3.45),
+    "pkgact":      ("Package activity",  "#229954", 3.50),
+    "sessact":     ("Session activity",  "#3498db", 3.55),
+    "detact":      ("Detections",       "#c0392b", 3.60),
+    "otheract":    ("Other events",     "#7f8c8d", 3.70),
     "kmod":        ("Kernel Modules","#7d3c98", 13),
     "location":    ("Working directory", "#5d6d7e", 4.5),
 }
@@ -317,6 +356,59 @@ SUBCOL = {
     "open_files": "kind", "ports": "exposure", "applications": "version",
     "boot_sessions": "source", "logins": "from",
 }
+# CAN I TURN IT OFF? maps a unit/schedule row to a plain-language control hint,
+# so the graph answers "disable or mask" without the user checking by hand.
+#  enabled     -> systemctl disable stops it starting next boot
+#  static/indirect/generated/transient -> it has no [Install]; `disable` is a
+#      no-op, you must `mask` it to prevent it starting
+#  disabled    -> already off (but could still be started on demand -> mask)
+#  masked      -> already fully blocked
+_ENABLE_HINT = {
+    "enabled":   "disable to stop",
+    "disabled":  "already disabled (mask to fully block)",
+    "static":    "static - cannot disable, mask to stop",
+    "indirect":  "indirect - mask to stop",
+    "generated": "generated - mask to stop",
+    "transient": "transient (runtime) - mask to stop",
+    "masked":    "masked (already blocked)",
+}
+
+
+def _control(table, row):
+    """A short 'how to turn it off' string for a startup row (or '')."""
+    if table == "services":
+        en = str(row.get("enabled") or "").lower()
+        for k, v in _ENABLE_HINT.items():
+            if k in en:
+                return v
+        return en or ""
+    if table == "scheduled":
+        kind = str(row.get("kind") or "")
+        if kind == "timer":
+            return "disable/mask the .timer"
+        if kind == "cron":
+            return "remove the cron entry"
+        if kind == "autostart":
+            return "remove the .desktop autostart"
+        return kind
+    return ""
+
+
+def _startup_sub(table, row):
+    """The second line of a startup/related node: what it is + how controllable."""
+    if table == "services":
+        parts = [p for p in (str(row.get("enabled") or ""),
+                             str(row.get("health") or ""),
+                             str(row.get("desc") or "")) if p]
+        return " · ".join(parts)[:46]
+    if table == "scheduled":
+        parts = [p for p in (str(row.get("kind") or ""),
+                             ("next " + str(row.get("next"))) if row.get("next") else "",
+                             str(row.get("detail") or "")) if p]
+        return " · ".join(parts)[:46]
+    return str(row.get(SUBCOL.get(table, ""), "") or "")[:38]
+
+
 COLLAPSE_MIN = 4      # a bigger category collapses into a meta node
 # a free corridor between the process tree and the column of blocks:
 # the edges need room so as not to run over the cards
@@ -814,8 +906,8 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
             if eventsdb is not None:
                 try:
                     for e in eventsdb.query(
-                            "SELECT event_action a, COUNT(*) n FROM events "
-                            "WHERE file_path=? GROUP BY a LIMIT 100",
+                            "SELECT event_action a, SUM(COALESCE(event_count,1)) n "
+                            "FROM events WHERE file_path=? GROUP BY a LIMIT 100",
                             (val,)).get("rows", []):
                         cats.setdefault("events", []).append(dict(
                             id="ev:%s:%s" % (val, e["a"]), kind="action",
@@ -847,9 +939,11 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
                 continue
             seen_sat.add((ot, oc))
             cat, k2, lcol, drill = CATMAP[ot]
+            # never join on an empty link value (28 services have no package):
+            # an empty column must not pull in unrelated rows.
             try:
-                found = _q(con3, 'SELECT * FROM "%s" WHERE "%s"=? LIMIT 400'
-                           % (ot, oc), (v,))
+                found = _q(con3, 'SELECT * FROM "%s" WHERE "%s"=? AND "%s"<>\'\' '
+                           'LIMIT 400' % (ot, oc, oc), (v,))
             except Exception:
                 found = []
             for fr in found:
@@ -859,9 +953,10 @@ def _anchor_generic(db, eventsdb, kind, table, col, val, nkind, expanded):
                 risky = ot == "vulnerabilities" or str(fr.get("risk")) == "high"
                 cats.setdefault(cat, []).append(dict(
                     id=nid, kind=k2, label=lab,
-                    sub=str(fr.get(SUBCOL.get(ot, ""), "") or "")[:38],
+                    sub=_startup_sub(ot, fr),
                     table=ot, col=lcol, val=raw,
-                    rel="declares", drill=drill, risk=risky))
+                    rel="declares", drill=drill, risk=risky,
+                    control=_control(ot, fr)))
     finally:
         pass
 
@@ -1025,8 +1120,8 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
             marks = ",".join("?" * len(pids))
             try:
                 for e in eventsdb.query(
-                        "SELECT process_pid AS p, COUNT(*) AS n FROM events "
-                        "WHERE process_pid IN (%s) GROUP BY process_pid" % marks,
+                        "SELECT process_pid AS p, SUM(COALESCE(event_count,1)) AS n "
+                        "FROM events WHERE process_pid IN (%s) GROUP BY process_pid" % marks,
                         tuple(pids)).get("rows", []):
                     ev_n[str(e["p"])] = e["n"]
             except Exception:
@@ -1178,27 +1273,43 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
             id=mid, kind=kind, label=label, sub=sub, table=table,
             col=col, val=val, **ex))
 
-    # the service (the systemd unit from cgroup) - "what really started it"
+    # the service (the systemd unit from cgroup) - "what really started it".
+    # PID REUSE GUARD: /proc/<pid> is read LIVE, but the pid comes from the
+    # snapshot and may since have been reused by an UNRELATED process (this is how
+    # ollama.service got attached to a stranger). Only trust the cgroup if the
+    # live comm still matches the snapshot's binary; otherwise the pid is a
+    # different process now and its unit must not be shown here.
     unit = ""
     try:
-        cg = open("/proc/%s/cgroup" % pid).read()
-        m = re.search(r"/([\w@.\-]+\.(service|scope|socket|timer))", cg)
-        if m:
-            unit = m.group(1)
+        live_comm = open("/proc/%s/comm" % pid).read().strip()
+        snap_comm = (me.get("command") or "").split()[0].rsplit("/", 1)[-1]
+        same = bool(live_comm) and bool(snap_comm) and (
+            live_comm == snap_comm[:len(live_comm)])   # comm is truncated to 15
+        if same:
+            cg = open("/proc/%s/cgroup" % pid).read()
+            # the LEAF unit is the real one that runs the process; the first match
+            # is the user manager (user@1000.service). Take the last, and never the
+            # user-manager wrapper.
+            units = [u for u in re.findall(
+                r"/([\w@.\-]+\.(?:service|scope|socket|timer))", cg)
+                if not u.startswith("user@")]
+            if units:
+                unit = units[-1]
     except OSError:
         unit = ""
     if unit:
-        udesc = ""
+        urow2 = []
         try:
             uc = _ro(db)
-            urow2 = _q(uc, "SELECT desc FROM services WHERE unit=? LIMIT 1", (unit,))
-            if urow2:
-                udesc = urow2[0].get("desc", "")
+            urow2 = _q(uc, "SELECT unit, enabled, health, desc FROM services "
+                           "WHERE unit=? LIMIT 1", (unit,))
         except Exception:
-            udesc = ""
+            urow2 = []
+        srow = urow2[0] if urow2 else {}
         push("startup", "services:" + unit, "service", unit,
-             udesc or "systemd unit", "services", "unit", unit,
-             rel="runs_unit", drill="state")
+             _startup_sub("services", srow) if srow else "systemd unit",
+             "services", "unit", unit, rel="runs_unit", drill="state",
+             control=_control("services", srow) if srow else "")
 
     # the user
     if user:
@@ -1290,21 +1401,13 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
              f_.rsplit("/", 1)[-1][:26], "given on the command line",
              "app_config", "path", f_, rel="declares", drill="state")
 
-    # THE USER'S OWN SERVICES - the services enabled for the logged-in user, tied
-    # to the origin. Kept as a collapsible block (the boot and the login itself are
-    # now the spine, above); the services answer "what this user's session starts".
-    if user:
-        try:
-            for sv in _q(con, "SELECT unit, desc FROM services "
-                              "WHERE scope = 'user' AND enabled = 'enabled' "
-                              "ORDER BY unit LIMIT 60"):
-                push("startup", "usvc:" + str(sv.get("unit") or ""), "service",
-                     str(sv.get("unit") or ""),
-                     str(sv.get("desc") or "") or "user service",
-                     "services", "unit", str(sv.get("unit") or ""),
-                     rel="user_service", drill="state")
-        except Exception:
-            pass
+    # NB: the block that used to list ALL of the user's enabled services here was
+    # REMOVED - it attached every user service (ollama, syncthing, ...) to EVERY
+    # process of that user, which read as "this app has an ollama unit" when it did
+    # not. A process shows only the unit that actually runs it (from its cgroup,
+    # above) plus services genuinely linked to it by package (the satellite loop
+    # below). "What this user's session starts" belongs on the USER anchor, not on
+    # every process.
 
     # THE WORKING-DIRECTORY NODE WAS REMOVED. It was shown directly under the
     # process, but its path could be wrong: when open_files had no fd='cwd' row it
@@ -1324,7 +1427,7 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
     if eventsdb is not None:
         try:
             hn = eventsdb.query(
-                "SELECT COUNT(*) n FROM events WHERE process_pid = ? "
+                "SELECT SUM(COALESCE(event_count,1)) n FROM events WHERE process_pid = ? "
                 "OR parent_pid = ?", (pid, pid)).get("rows", [{}])[0].get("n", 0)
         except Exception:
             hn = 0
@@ -1332,6 +1435,90 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
             push("activity", "hist:" + pid, "action", "Activity history",
                  "%d steps" % int(hn), "events", "process_pid", pid,
                  rel="did", drill="timeline", pid=pid, block_count=int(hn))
+
+        # WHAT IT DID, as SEPARATE blocks per kind (state <-> events). Each block
+        # holds the RECENT events of that kind - the actual address / path /
+        # command, not just a count - plus an "N total" node that opens the full
+        # slice in the timeline. Attributed to this process (process_pid) AND to it
+        # as a parent (parent_pid) - so "what it launched" is included.
+        # cat_id -> (icon, how to LABEL a member row from its columns)
+        EVBLOCK = {
+            "network":       ("netact",  "network-connect"),
+            "file":          ("fileact", "document-edit"),
+            "process":       ("cmdact",  "system-run"),
+            "authentication":("authact", "dialog-password"),
+            "iam":           ("authact", "dialog-password"),
+            "driver":        ("drvact",  "drive-harddisk"),
+            "package":       ("pkgact",  "package-x-generic"),
+            "session":       ("sessact", "system-users"),
+            "intrusion_detection": ("detact", "security-high"),
+        }
+
+        def _ev_label(cat, r):
+            if cat == "network":
+                ip = str(r.get("destination_ip") or "")
+                po = str(r.get("destination_port") or "")
+                return (ip + (":" + po if po else "")) or str(r.get("object_name") or "")
+            if cat == "file":
+                return str(r.get("file_name") or "") or \
+                    str(r.get("file_path") or "").rsplit("/", 1)[-1] or \
+                    str(r.get("object_name") or "")
+            if cat == "process":
+                cl = str(r.get("process_command_line") or "")
+                return (cl.split(" ")[0].rsplit("/", 1)[-1] if cl
+                        else str(r.get("process_name") or "")) or "process"
+            return (str(r.get("object_name") or "")
+                    or str(r.get("rule_name") or "")
+                    or str(r.get("user_name") or "")
+                    or str(r.get("message") or ""))
+
+        # totals per category (honour aggregates), for the "N total" header node
+        totals = {}
+        try:
+            for e in eventsdb.query(
+                    "SELECT event_category c, SUM(COALESCE(event_count,1)) n "
+                    "FROM events WHERE process_pid=? OR parent_pid=? "
+                    "GROUP BY c", (pid, pid)).get("rows", []):
+                totals[str(e["c"] or "")] = int(e["n"] or 0)
+        except Exception:
+            totals = {}
+        # recent events, bucketed into their blocks (cap the member nodes)
+        seen_ev = {}
+        try:
+            rows_ev = eventsdb.query(
+                "SELECT _id, event_category c, event_action a, ts, event_count, "
+                "file_name, file_path, destination_ip, destination_port, "
+                "process_command_line, process_name, user_name, object_name, "
+                "rule_name, message FROM events "
+                "WHERE process_pid=? OR parent_pid=? "
+                "ORDER BY ts DESC, _id DESC LIMIT 300", (pid, pid)).get("rows", [])
+        except Exception:
+            rows_ev = []
+        CAP = 12
+        for r in rows_ev:
+            c = str(r.get("c") or "")
+            cat, ic = EVBLOCK.get(c, ("otheract", "view-list-details"))
+            bucket = seen_ev.setdefault(cat, [])
+            if len(bucket) >= CAP:
+                continue
+            bucket.append(True)
+            lab = _ev_label(c, r)[:28] or (str(r.get("a") or "") or c)
+            n = int(r.get("event_count") or 1)
+            act = str(r.get("a") or "")
+            tt = str(r.get("ts") or "")
+            sub = (act + (" x%d" % n if n > 1 else "")
+                   + (" · " + tt[11:19] if len(tt) >= 19 else ""))
+            push(cat, "evn:%s:%s" % (pid, r.get("_id")), "action", lab, sub,
+                 "events", "event_action", act, rel="did", drill="events",
+                 pid=pid, evcat=c, iconName=ic)
+        # a header "N total ->" node per block that has more than we showed
+        for c, (cat, ic) in EVBLOCK.items():
+            tot = totals.get(c, 0)
+            if tot and cat in seen_ev and tot > len(seen_ev[cat]):
+                push(cat, "evall:%s:%s" % (pid, c), "action",
+                     "all %d %s events" % (tot, c), "open in timeline",
+                     "events", "event_category", c, rel="did", drill="ops",
+                     pid=pid, evcat=c, iconName="view-calendar-list")
 
     # ---- THE REMAINING SATELLITES FROM THE DISCOVERED MAP (config/vuln/persist/...) ----
     try:
@@ -1365,9 +1552,11 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
             # reads as "the process has a hole". In the graph we show only what is
             # unpatched; the full list stays in the vulnerabilities tab.
             where = ' AND status = \'open\'' if ot == "vulnerabilities" else ""
+            # never join on an empty value: an unrelated row with an empty link
+            # column (28 services have no package) must not be pulled in.
             try:
-                found = _q(con3, 'SELECT * FROM "%s" WHERE "%s"=?%s LIMIT 400'
-                           % (ot, oc, where), (v,))
+                found = _q(con3, 'SELECT * FROM "%s" WHERE "%s"=? AND "%s"<>\'\'%s '
+                           'LIMIT 400' % (ot, oc, oc, where), (v,))
             except Exception:
                 found = []
             for fr in found:
@@ -1375,9 +1564,9 @@ def around(db, eventsdb, pid: str, depth_up: int = 6,
                 lab = raw.rstrip("/").rsplit("/", 1)[-1][:26] or ot
                 nid = "%s:%s" % (ot, fr.get("_id") or raw or fr.get(oc))
                 risky = ot == "vulnerabilities" or str(fr.get("risk")) == "high"
-                sub = str(fr.get(SUBCOL.get(ot, ""), "") or "")[:38]
+                sub = _startup_sub(ot, fr)
                 push(cat, nid, k2, lab, sub, ot, lcol, raw,
-                     rel="declares", drill=drill, risk=risky)
+                     rel="declares", drill=drill, risk=risky, control=_control(ot, fr))
     finally:
         pass
 

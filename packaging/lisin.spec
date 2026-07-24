@@ -49,12 +49,22 @@ install -Dm644 %{_sourcedir}/lisin/lisin.desktop %{buildroot}%{_datadir}/applica
 # launching goes through the installed launcher (in the development tree Exec
 # points at a local path, and such a shortcut does not work on another machine)
 sed -i 's|^Exec=.*|Exec=%{_bindir}/lisin|' %{buildroot}%{_datadir}/applications/lisin.desktop
+# systemd USER service: always-on EDR in its own cgroup. Enable per user with
+# `systemctl --user enable --now lisin`. The package enables nothing itself.
+install -Dm644 %{_sourcedir}/lisin/packaging/lisin.service %{buildroot}%{_userunitdir}/lisin.service
+# eBPF collector (installed by hand as root via lisin-ebpf-setup; the wrapper and
+# collector script ship so they are available on the target)
+install -Dm755 %{_sourcedir}/lisin/packaging/lisin-ebpf-setup %{buildroot}%{_bindir}/lisin-ebpf-setup
+install -Dm755 %{_sourcedir}/lisin/packaging/lisin-ebpf-collector.sh %{buildroot}%{_datadir}/lisin/packaging/lisin-ebpf-collector.sh
+install -Dm755 %{_sourcedir}/lisin/packaging/lisin-ebpf-exec.bt %{buildroot}%{_datadir}/lisin/packaging/lisin-ebpf-exec.bt
 
 %files
 %{_datadir}/lisin
 %{_bindir}/lisin
 %{_bindir}/lisin-grant-access
+%{_bindir}/lisin-ebpf-setup
 %{_datadir}/applications/lisin.desktop
+%{_userunitdir}/lisin.service
 
 %post
 exit 0

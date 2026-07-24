@@ -111,10 +111,25 @@ nodes:
   ref: fedora/enrich/event_auth
   x: 2200
   y: 520
+- id: en_aggregate
+  kind: enrich
+  ref: fedora/enrich/aggregate_events
+  x: 2360
+  y: 360
 - id: en_proc_link
   kind: enrich
   ref: fedora/enrich/event_process_link
   x: 1640
+  y: 520
+- id: en_drop_self
+  kind: enrich
+  ref: fedora/enrich/drop_self
+  x: 1760
+  y: 520
+- id: en_identity
+  kind: enrich
+  ref: fedora/enrich/process_identity
+  x: 1880
   y: 520
 - id: co_auth_bruteforce
   kind: correlation
@@ -173,8 +188,14 @@ edges:
 - - en_context
   - en_auth
 - - en_auth
+  - en_aggregate
+- - en_aggregate
   - out_events
 - - en_proc_link
+  - en_drop_self
+- - en_drop_self
+  - en_identity
+- - en_identity
   - en_session
 - - out_events
   - co_auth_bruteforce

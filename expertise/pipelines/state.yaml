@@ -379,8 +379,8 @@ nodes:
 - id: enr_ports
   kind: enrich
   ref: fedora/enrich/port_process
-  x: 1000
-  y: 200
+  x: 680
+  y: 520
 - id: in_shell_history
   kind: input
   ref: fedora/inputs/shell_history

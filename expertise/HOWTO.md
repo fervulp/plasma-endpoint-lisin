@@ -167,7 +167,7 @@ code: |
       return rows
 ```
 
-A plugin may read the state database (`~/.local/share/lisin/state.db`,
+A plugin may read the state database (`~/.local/share/lisin/data.db`,
 read-only) — that is how `fedora/enrich/app_deps` works.
 
 ---

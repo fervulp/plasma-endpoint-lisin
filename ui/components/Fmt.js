@@ -55,3 +55,17 @@ function localShort(ts) {
     var s = local(ts)
     return s.length > 16 ? s.substring(0, 16) : s
 }
+
+// SIZE FORMATTING (KDE HIG: the unit is a word, separated by a space).
+// bytes(): the input is BYTES. mib(): the input is already MEGABYTES.
+function bytes(b) {
+    b = Number(b) || 0
+    if (b >= 1048576) return (b / 1048576).toFixed(1) + " MB"
+    if (b >= 1024) return (b / 1024).toFixed(0) + " KB"
+    return b + " B"
+}
+function mib(mb) {
+    var n = Number(mb) || 0
+    if (n <= 0) return ""
+    return n >= 1024 ? (n / 1024).toFixed(1) + " GB" : Math.round(n) + " MB"
+}

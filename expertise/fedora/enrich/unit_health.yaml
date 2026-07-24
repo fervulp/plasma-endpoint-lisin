@@ -12,7 +12,7 @@ code: |
       failed = set()
       try:
           con = sqlite3.connect("file:%s?mode=ro" % (Path.home() /
-                                ".local/share/lisin/state.db"), uri=True)
+                                ".local/share/lisin/data.db"), uri=True)
           for u, in con.execute("SELECT unit FROM failed_units"):
               failed.add(u)
           con.close()

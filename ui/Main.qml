@@ -32,22 +32,13 @@ Kirigami.ApplicationWindow {
         open("state")
     }
 
-    // A jump into "Events" with a ready WHERE condition. The counter n is needed
-    // for the same reason as in focusState: clicking the same value again would
-    // not change the property and the handler would not fire.
-    property var eventFocus: null
+    // A jump into the Events TAB (now part of Data) with a ready WHERE condition.
+    // Events is no longer a separate section - it is the first Data tab - so this
+    // reuses the state-focus mechanism with the "events" table and a raw WHERE.
     function focusEvents(where) {
-        eventFocus = { where: String(where),
-                       n: (eventFocus ? eventFocus.n + 1 : 1) }
-        open("events")
-    }
-
-    // A jump into a SPECIFIC chain: show what was happening around this state
-    // transition.
-    property var chainFocus: null
-    function focusChain(cid) {
-        chainFocus = { id: String(cid), n: (chainFocus ? chainFocus.n + 1 : 1) }
-        open("events")
+        stateFocus = { table: "events", raw: String(where),
+                       n: (stateFocus ? stateFocus.n + 1 : 1) }
+        open("state")
     }
 
     // SHOW AN ENTITY IN THE GRAPH. From an event (or anywhere) to the dashboard
@@ -61,11 +52,6 @@ Kirigami.ApplicationWindow {
                        n: (graphFocus ? graphFocus.n + 1 : 1) }
         open("dashboards")
     }
-    // kept for callers that jump straight to a process (the check that it is
-    // alive is done by the caller via livePids)
-    property var processFocus: null
-    function focusProcess(pid) { focusGraph("process", pid) }
-
     // A SECTION IS BUILT ON EVERY NAVIGATION, from its Component.
     //
     // Caching the created pages and pushing the same object again was faster on
@@ -86,7 +72,7 @@ Kirigami.ApplicationWindow {
     // which an investigation wants anyway.
     property var pageCache: ({})
     property var pageComps: ({
-        state: statePageComp, dashboards: dashboardPageComp, events: eventsPageComp,
+        state: statePageComp, dashboards: dashboardPageComp,
         sql: sqlPageComp, pipeline: pipelinePageComp, expertise: expertisePageComp,
         settings: settingsPageComp })
     function pageFor(name) {
@@ -153,7 +139,7 @@ Kirigami.ApplicationWindow {
         }
         actions: [
             Kirigami.Action {
-                text: "State"
+                text: "Data"
                 icon.name: "computer"
                 checked: root.section === "state"
                 onTriggered: root.open("state")
@@ -163,12 +149,6 @@ Kirigami.ApplicationWindow {
                 icon.name: "office-chart-bar"
                 checked: root.section === "dashboards"
                 onTriggered: root.open("dashboards")
-            },
-            Kirigami.Action {
-                text: "Events"
-                icon.name: "view-list-details"
-                checked: root.section === "events"
-                onTriggered: root.open("events")
             },
             Kirigami.Action {
                 text: "Pipelines"
@@ -196,8 +176,6 @@ Kirigami.ApplicationWindow {
 
     Component { id: statePageComp; StatePage {} }
     Component { id: dashboardPageComp; DashboardPage {} }
-
-    Component { id: eventsPageComp; EventsPage {} }
     Component { id: sqlPageComp; SqlPage {} }
     Component { id: pipelinePageComp; PipelinePage {} }
 

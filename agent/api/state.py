@@ -37,31 +37,21 @@ class StateApi:
 
         threading.Thread(target=go, daemon=True).start()
 
+
     @Slot(result="QVariant")
-    def livePids(self):
-        """The PIDs of processes that are STILL ALIVE (from the state snapshot).
-
-        It is needed so that an event can offer a jump into the process graph:
-        offering it for a long-dead process makes no sense. Computed once per page
-        of events, not once per event.
-
-        It reads the processes table DIRECTLY. It used to read db.snapshot(), but
-        snapshot() was optimised to return only per-table metadata (no rows), so
-        this map came back EMPTY and EVERY event reported "no process" - even when
-        the pid was clearly alive and findable by searching the state.
-        """
-        out = {}
-        try:
-            con = self.db._reader()
-            for r in con.execute(
-                    "SELECT pid, command FROM processes "
-                    "WHERE COALESCE(pid,'') <> ''"):
-                pid = str(r["pid"]).strip()
-                if pid:
-                    out[pid] = str(r["command"] or "")
-        except Exception:
-            pass
-        return out
+    def eventTaxonomy(self):
+        """The event taxonomy: ALL field names + the fields grouped by category.
+        Feeds the events tab - every taxonomy field is offered in the query bar's
+        SELECT (there are 107, not the 13 shown by default), and the Details
+        sidebar groups the fields by category so an analyst orients faster."""
+        from agent.core import taxonomy as tx
+        spec = tx.load()
+        return {
+            "names": tx.names(spec),
+            "groups": [{"group": g["group"],
+                        "fields": [f["name"] for f in g["fields"]]}
+                       for g in tx.groups(spec)],
+        }
 
     @Slot(str, str, str, int, int, result="QVariant")
     def tableRows(self, table, where, order, limit, offset):
@@ -75,34 +65,193 @@ class StateApi:
         the table.
         """
         try:
+            # EVENTS live in a separate database (append-only, retention) but are
+            # shown as just another Data tab, so route them to events.db here. The
+            # order defaults to newest-first inside recent() when none is given.
+            if str(table) == "events":
+                ev = self.pipe.events()
+                w = str(where or "").strip()
+                lim = int(limit) if int(limit) > 0 else 1000
+                res = ev.recent(limit=lim, offset=int(offset), where=w,
+                                order=self._events_order(str(order or "")))
+                return {"rows": res.get("rows", []),
+                        "total": ev.count(w), "error": ""}
             return self.db.table_rows(str(table), str(where), str(order),
                                       int(limit), int(offset))
         except Exception as e:
             return {"rows": [], "total": 0, "error": str(e)}
 
+    def _events_order(self, order):
+        """Validate a sort fragment against the taxonomy: only known fields and
+        ASC/DESC reach the SQL (an empty result -> recent() falls back to ts DESC)."""
+        from agent.core import taxonomy as tx
+        names = set(tx.names(tx.load())) | {"_id"}
+        out = []
+        for part in str(order or "").split(","):
+            toks = part.strip().split()
+            if toks and toks[0] in names:
+                d = toks[1].upper() if len(toks) > 1 and toks[1].upper() in (
+                    "ASC", "DESC") else "ASC"
+                out.append('"%s" %s' % (toks[0], d))
+        return ", ".join(out)
+
+    # -------- JOIN in the query builder (state tables only) --------
+    def _tab_cols(self):
+        return {t["name"]: list(t.get("columns") or [])
+                for t in self.db.snapshot().get("tabs", [])}
+
+    @Slot(str, result="QVariant")
+    def joinTables(self, base):
+        """State tables that can be joined to `base` (events.db is a separate
+        database, so it is excluded). Each carries its columns for the ON picker."""
+        cols = self._tab_cols()
+        return [{"name": n, "columns": [c for c in cs if not c.startswith("_")]}
+                for n, cs in sorted(cols.items())
+                if n not in (str(base), "events", "vulnerabilities")]
+
     @Slot(str, str, result="QVariant")
-    def stateRows(self, table, where):
-        """ROWS OF A STATE TABLE BY AN SQL CONDITION.
+    def joinSuggest(self, base, join):
+        """Suggest the ON pair for base<->join: first a DISCOVERED link (columns
+        whose values actually overlap), else a column of the same name in both."""
+        base, join = str(base), str(join)
+        cols = self._tab_cols()
+        # EVENTS (a separate database) joined to a state table: the link model is
+        # over state.db only, so use well-known event->state keys.
+        if base == "events":
+            from agent.core import taxonomy as tx
+            enames = set(tx.names(tx.load()))
+            hints = {"processes": ("process_pid", "pid"),
+                     "ports": ("destination_ip", "remote"),
+                     "users": ("user_name", "name"),
+                     "applications": ("package_name", "name"),
+                     "services": ("service_name", "unit"),
+                     "open_files": ("file_path", "path"),
+                     "scheduled": ("service_name", "name"),
+                     "unix_sockets": ("process_pid", "pid")}
+            h = hints.get(join)
+            if h and join in cols and h[0] in enames and h[1] in cols[join]:
+                return {"left": h[0], "right": h[1]}
+            return {"left": "", "right": ""}
+        if base not in cols or join not in cols:
+            return {"left": "", "right": ""}
+        try:
+            from agent.analysis import links
+            for l in links.model(self.db).get("links", []):
+                if l["from_table"] == base and l["to_table"] == join:
+                    return {"left": l["from_col"], "right": l["to_col"]}
+                if l["to_table"] == base and l["from_table"] == join:
+                    return {"left": l["to_col"], "right": l["from_col"]}
+        except Exception:
+            pass
+        common = [c for c in cols[base]
+                  if c in cols[join] and not c.startswith("_")]
+        # prefer meaningful keys over generic ones
+        for pref in ("package", "name", "unit", "pid", "user", "path", "package"):
+            if pref in common:
+                return {"left": pref, "right": pref}
+        return {"left": common[0], "right": common[0]} if common else {"left": "", "right": ""}
 
-        The condition used to be parsed by QML: it split the string on " AND " and
-        understood neither OR nor NOT nor MATCH (which turns into LIKE '%...%'), so
-        part of the condition silently did not work. Now the database itself
-        filters - one mechanism for both events and state.
+    @Slot(str, str, str, str, str, str, int, int, result="QVariant")
+    def tableJoinRows(self, base, join, left, right, where, order, limit, offset):
+        """ONE PAGE of `base` LEFT JOINed with `join` on base.left = join.right.
 
-        The table name is checked against the list of tables and the database is
-        opened read only (StateDB.query), so nothing foreign gets into the SQL.
+        The WHERE/ORDER/paging are applied to `base` in a SUBQUERY first, so an
+        unqualified column in the condition can never be ambiguous; the join then
+        just decorates each base row with the matching columns of `join` (prefixed
+        `join.col`). State tables only - both live in the same database.
         """
-        table = (table or "").strip()
-        names = {t["name"] for t in self.db.snapshot().get("tabs", [])}
-        if table not in names:
-            return {"rows": [], "error": "unknown table"}
-        sql = 'SELECT * FROM "%s"' % table
-        w = (where or "").strip()
+        base, join = str(base), str(join)
+        left, right = str(left), str(right)
+        if base == "events":
+            return self._events_join(join, left, right, where, order, limit, offset)
+        cols = self._tab_cols()
+        if base not in cols or join not in cols:
+            return {"rows": [], "columns": [], "total": 0, "error": "unknown table"}
+        if left not in cols[base] or right not in cols[join]:
+            return {"rows": [], "columns": [], "total": 0, "error": "unknown ON field"}
+        w = str(where or "").strip()
+        # validate the sort against base columns
+        oparts = []
+        for part in str(order or "").split(","):
+            toks = part.strip().split()
+            if toks and toks[0] in cols[base]:
+                d = toks[1].upper() if len(toks) > 1 and toks[1].upper() in (
+                    "ASC", "DESC") else "ASC"
+                oparts.append('"%s" %s' % (toks[0], d))
+        sub = 'SELECT * FROM "%s"' % base
         if w:
-            sql += " WHERE " + w
+            sub += " WHERE " + w
+        if oparts:
+            sub += " ORDER BY " + ", ".join(oparts)
+        lim = int(limit) if int(limit) > 0 else 1000
+        sub += " LIMIT %d OFFSET %d" % (lim, max(0, int(offset)))
+        jcols = [c for c in cols[join] if not c.startswith("_")]
+        jsel = ", ".join('j."%s" AS "%s.%s"' % (c, join, c) for c in jcols)
+        sql = 'SELECT b.*%s FROM (%s) b LEFT JOIN "%s" j ON b."%s" = j."%s"' % (
+            (", " + jsel) if jsel else "", sub, join, left, right)
         res = self.db.query(sql)
-        return {"rows": res.get("rows", []), "error": res.get("error", ""),
-                "truncated": bool(res.get("truncated"))}
+        # total = base rows matching the condition (paging is over base)
+        try:
+            cnt = self.db.query('SELECT COUNT(*) AS n FROM "%s"%s'
+                                % (base, (" WHERE " + w) if w else ""))
+            total = cnt.get("rows", [{}])[0].get("n", 0)
+        except Exception:
+            total = len(res.get("rows", []))
+        columns = [c for c in cols[base] if not c.startswith("_")] + \
+                  ["%s.%s" % (join, c) for c in jcols]
+        return {"rows": res.get("rows", []), "columns": columns,
+                "total": total, "error": res.get("error", "")}
+
+    # curated events columns shown in a join result (same idea as the Events tab)
+    _EVJOIN_COLS = ["ts", "event_module", "event_category", "event_action",
+                    "event_outcome", "process_name", "process_pid", "user_name",
+                    "destination_ip", "object_type", "object_name", "message"]
+
+    def _events_join(self, join, left, right, where, order, limit, offset):
+        """events LEFT JOINed with a STATE table. The subquery over events applies
+        WHERE/ORDER/paging, then the state table decorates each event. Events and
+        state live in ONE file (data.db) now, so this is a native join - no
+        cross-database ATTACH."""
+        from agent.core import taxonomy as tx
+        cols = self._tab_cols()
+        enames = set(tx.names(tx.load()))
+        if join not in cols:
+            return {"rows": [], "columns": [], "total": 0, "error": "unknown table"}
+        if left not in enames or right not in cols[join]:
+            return {"rows": [], "columns": [], "total": 0, "error": "unknown ON field"}
+        w = str(where or "").strip()
+        oparts = []
+        for part in str(order or "").split(","):
+            toks = part.strip().split()
+            if toks and toks[0] in enames:
+                d = toks[1].upper() if len(toks) > 1 and toks[1].upper() in (
+                    "ASC", "DESC") else "ASC"
+                oparts.append('"%s" %s' % (toks[0], d))
+        lim = int(limit) if int(limit) > 0 else 1000
+        sub = "SELECT * FROM events"
+        if w:
+            sub += " WHERE " + w
+        sub += " ORDER BY " + (", ".join(oparts) if oparts else "ts DESC")
+        sub += " LIMIT %d OFFSET %d" % (lim, max(0, int(offset)))
+        ecur = ["_id"] + [c for c in self._EVJOIN_COLS if c in enames]
+        jcols = [c for c in cols[join] if not c.startswith("_")]
+        bsel = ", ".join('b."%s"' % c for c in ecur)
+        jsel = ", ".join('j."%s" AS "%s.%s"' % (c, join, c) for c in jcols)
+        sql = ('SELECT %s%s FROM (%s) b LEFT JOIN "%s" j ON b."%s" = j."%s"'
+               % (bsel, (", " + jsel) if jsel else "", sub, join, left, right))
+        try:
+            # events and the state table are in ONE file now - a native join on
+            # the shared read connection, no ATTACH
+            con = self.db._reader()
+            rows = [dict(r) for r in con.execute(sql)]
+            tot = con.execute("SELECT COUNT(*) AS n FROM events%s"
+                              % ((" WHERE " + w) if w else "")).fetchone()["n"]
+        except Exception as e:
+            return {"rows": [], "columns": [], "total": 0, "error": str(e)}
+        columns = [c for c in ecur if c != "_id"] + \
+                  ["%s.%s" % (join, c) for c in jcols]
+        return {"rows": rows, "columns": columns, "total": tot, "error": ""}
+
 
     @Slot(str, str, str, result="QVariant")
     def stateGroups(self, table, fields, where):
@@ -113,11 +262,18 @@ class StateApi:
         nothing foreign gets into the SQL.
         """
         table = (table or "").strip()
-        snap = self.db.snapshot()
-        tab = next((t for t in snap.get("tabs", []) if t["name"] == table), None)
-        if tab is None:
-            return {"rows": [], "fields": [], "error": "unknown table"}
-        cols = set(tab.get("columns") or [])
+        # events live in events.db and are grouped there; their columns come from
+        # the taxonomy, not the state snapshot.
+        events = table == "events"
+        if events:
+            from agent.core import taxonomy as tx
+            cols = set(tx.names(tx.load()))
+        else:
+            snap = self.db.snapshot()
+            tab = next((t for t in snap.get("tabs", []) if t["name"] == table), None)
+            if tab is None:
+                return {"rows": [], "fields": [], "error": "unknown table"}
+            cols = set(tab.get("columns") or [])
         fs = [f.strip() for f in str(fields or "").split(",") if f.strip()]
         fs = [f for f in fs if f in cols]
         if not fs:
@@ -129,7 +285,7 @@ class StateApi:
         if w:
             sql += " WHERE " + w
         sql += " GROUP BY " + ", ".join(exprs) + " ORDER BY n DESC LIMIT 300"
-        res = self.db.query(sql)
+        res = self.pipe.events().query(sql) if events else self.db.query(sql)
         rows = []
         for r in res.get("rows", []):
             parts = [str(r.get(f"v{i}") or "") for i in range(len(fs))]
@@ -137,52 +293,8 @@ class StateApi:
                          "parts": parts, "n": r.get("n", 0)})
         return {"rows": rows, "fields": fs, "error": res.get("error", "")}
 
-    @Slot(str, result="QVariant")
-    def stateSearch(self, q):
-        """SEARCH ACROSS THE WHOLE STATE: which table contains a value.
-
-        An analyst usually does not search "in the process table" but simply for an
-        address, a file name or a user - and wants to know where it exists at all.
-        We walk every state table, look for the substring in any column and return
-        the table, the number of matches and a few examples.
-        """
-        q = (q or "").strip()
-        if len(q) < 2:
-            return {"query": q, "tables": [], "total": 0, "error": ""}
-        ql = q.lower()
-        out, total = [], 0
-        # THE STATE SNAPSHOT - the same one the interface sees: we search in
-        # exactly what is shown, without a separate path to the database.
-        snap = self.db.snapshot()
-        for tab in snap.get("tabs", []):
-            name = tab.get("name") or ""
-            cols = [c for c in (tab.get("columns") or []) if not c.startswith("_")]
-            hits = []
-            for r in tab.get("rows", []):
-                for c in cols:
-                    if ql in str(r.get(c) or "").lower():
-                        hits.append(r)
-                        break
-            if not hits:
-                continue
-            hit_cols = [c for c in cols
-                        if any(ql in str(r.get(c) or "").lower() for r in hits[:50])]
-            total += len(hits)
-            out.append({"table": name, "title": tab.get("title") or name,
-                        "icon": tab.get("icon") or "",
-                        "n": len(hits), "columns": hit_cols[:4],
-                        "sample": [{k: str(v) for k, v in r.items()
-                                    if not k.startswith("_")} for r in hits[:3]]})
-        out.sort(key=lambda d: -d["n"])
-        return {"query": q, "tables": out, "total": total, "error": ""}
 
     # -------- pipelines --------
-    @Slot(str, result="QVariant")
-    def processDetails(self, pid):
-        from agent.collect import procinfo
-        rows = next((t["rows"] for t in self.db.snapshot()["tabs"]
-                     if t["name"] == "processes"), [])
-        return procinfo.details(pid, rows)
 
     # -------- the "State" dashboard --------
     @Slot(str, result="QVariant")

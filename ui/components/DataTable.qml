@@ -4,39 +4,93 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "."
 
-// THE TEMPLATE TABLE for all sections of the application.
+// THE TEMPLATE TABLE for every section (principle 11/17).
 //
-// Principle 11: many elements of the same shape means a table. Every section
-// used to write its own: its own columns, its own header, its own sidebar - and
-// they drifted apart. Here is one implementation, in which:
-//   * ONE description of the columns is read by the header and the rows - the
-//     widths cannot drift;
-//   * a choice of visible columns and their order (the "Columns" button);
-//   * a pinned header, zebra striping, a fixed row height;
-//   * `reuseItems` - without it a long list stalls while recreating delegates;
-//   * a click on a row = selection and a signal outwards (the owner opens the
-//     sidebar);
-//   * hovering a cell gives "+"/"-" - add the value to the query.
+// One implementation of the table so the sections do not each grow their own
+// and drift apart. It carries everything "Events"/"State" need, gated by
+// optional properties so the simpler dashboard views pay for nothing:
+//   * ONE description of the columns, read by the header AND the rows;
+//   * optional CHECKBOX and ICON columns (via a column's `kind`), for the rich
+//     multi-select table in "Data";
+//   * multi-selection driven by the OWNER through `isSelected`, with modifier
+//     aware row clicks (Ctrl/Shift);
+//   * click-to-sort, resizable columns (optional), a column chooser;
+//   * a pinned header, zebra striping (the reference bg/altBg), vertical column
+//     separators, a fixed row height, `reuseItems`;
+//   * a click on a row = a signal outwards (the owner opens the sidebar);
+//   * hovering a cell gives "+"/"-" - add/exclude the value in the query;
+//   * a double click on a cell copies its value.
 //
-// The component knows nothing about where the rows came from: it may be an SQL
-// result or a list computed in Python.
+// The component knows nothing about where the rows came from: an SQL result or
+// a list computed in Python.
 Item {
     id: table
 
-    // [{ k, t, w, fill, right, mono }] - key, header, width in gridUnit
-    //
-    // HORIZONTAL SCROLL, LIKE STATE AND EVENTS. Views with many columns (the
-    // network panel has nine) do not fit the width; without a scroll the fill
-    // column collapsed to "/..." and the rest was squeezed. The header and the
-    // rows share one contentWidth and scroll together, so a dashboard table
-    // looks and behaves exactly like the State and Events tables.
+    // [{ k, t, w, fill, right, mono, kind }] - key, header, width in gridUnit.
+    // kind: "check" (a checkbox column), "icon" (a leading icon column), or
+    // absent/"text" for an ordinary value column.
     property var columns: []
     property var rows: []
     property var selected: null
     property int rowHeight: Kirigami.Units.gridUnit * 2.4
-    // the fixed part of the width; the fill column takes whatever is left of the
-    // viewport, and if the fixed part already exceeds it the table scrolls
+
+    // ---- optional rich-table hooks (null/off by default) ----
+    // multi-selection: if set, the row highlight uses isSelected(row) instead of
+    // `selected === row`, so the owner can keep a list of selected rows
+    property var isSelected: null
+    // checkbox column (kind:"check"): isChecked(row) -> bool; the header checkbox
+    // reflects headerCheckState and clicking it emits headerCheckClicked()
+    property var isChecked: null
+    property int headerCheckState: Qt.Unchecked
+    property bool showHeaderCheck: true
+    // icon column (kind:"icon"): iconFor(row) -> icon name; iconTip(row) -> text
+    property var iconFor: null
+    property var iconTip: null
+    // draggable column edges (the value column of kind text)
+    property bool resizable: false
+
+    // the keys of the hidden columns and the order - the state of the view
+    property var hidden: []
+    property var order: []
+    // an optional formatter: function(row, key) -> string
+    property var formatter: null
+    // an optional accent colour on the left: function(row) -> color | ""
+    property var accent: null
+
+    signal rowActivated(var row)
+    // a click carrying the row index and the keyboard modifiers, for Ctrl/Shift
+    // multi-selection managed by the owner
+    signal rowClicked(var row, int index, int modifiers)
+    // a right click on a row - the owner may open a context menu
+    signal rowRightClicked(var row, int index)
+    signal valueCopied(string value)
+    signal headerCheckClicked()
+    signal checkToggled(var row, int index)
+    signal columnResized(string key, real w)
+    // a click on the header: the owner decides how to apply the order (SQL or list)
+    signal sortRequested(string field, bool desc)
+    signal conditionRequested(string field, string op, string value)
+
+    // the current sorting - shown by an icon in the header
+    property string sortCol: ""
+    property bool sortDesc: false
+    // when the owner manages the sort itself (e.g. a three-click cycle with a
+    // reset, as in "Data"), sortBy only EMITS - the owner binds sortCol/sortDesc.
+    // Assigning them here as well would kill that binding (principle 15a).
+    property bool externalSort: false
+    function sortBy(k) {
+        if (externalSort) { table.sortRequested(k, sortDesc); return }
+        if (sortCol === k) sortDesc = !sortDesc
+        else { sortCol = k; sortDesc = false }
+        table.sortRequested(sortCol, sortDesc)
+    }
+
+    // ---- geometry: one source, so header/rows/separators cannot drift ----
     readonly property real gu: Kirigami.Units.gridUnit
+    function colW(cd) {
+        if (cd.fill === true) return fillW
+        return (cd.w || 6) * gu
+    }
     readonly property real fixedW: {
         var w = 0
         for (var i = 0; i < shownCols.length; i++)
@@ -53,29 +107,6 @@ Item {
                                            - shownCols.length * Kirigami.Units.smallSpacing)
     readonly property real contentW: hasFill ? Math.max(viewportW, fixedW + fillW)
                                              : Math.max(viewportW, fixedW)
-    function colW(cd) { return cd.fill === true ? fillW : (cd.w || 6) * gu }
-    // the keys of the hidden columns and the order - the state of the view
-    property var hidden: []
-    property var order: []
-    // an optional formatter: function(row, key) -> string
-    property var formatter: null
-    // an optional accent colour on the left: function(row) -> color | ""
-    property var accent: null
-
-    signal rowActivated(var row)
-    signal valueCopied(string value)
-    // a click on the header: the owner decides how to apply the order (SQL or list)
-    signal sortRequested(string field, bool desc)
-
-    // the current sorting - shown by an icon in the header
-    property string sortCol: ""
-    property bool sortDesc: false
-    function sortBy(k) {
-        if (sortCol === k) sortDesc = !sortDesc
-        else { sortCol = k; sortDesc = false }
-        table.sortRequested(sortCol, sortDesc)
-    }
-    signal conditionRequested(string field, string op, string value)
 
     readonly property var shownCols: {
         var byKey = {}, out = []
@@ -91,8 +122,7 @@ Item {
         // A FORMATTER HANDLES ONLY THE COLUMNS IT CARES ABOUT. Returning
         // undefined means "show the raw value" - otherwise every view would have
         // to repeat the default branch, and a formatter that forgot one column
-        // silently assigned undefined to a QString ("Unable to assign
-        // [undefined] to QString" on every cell of that column).
+        // silently assigned undefined to a QString.
         if (formatter) {
             var f = formatter(row, key)
             if (f !== undefined && f !== null) return String(f)
@@ -123,55 +153,105 @@ Item {
         seq.splice(i, 1); seq.splice(j, 0, k)
         order = seq
     }
+    function rowSelected(row) {
+        return table.isSelected ? table.isSelected(row) : (table.selected === row)
+    }
 
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
         // ---- header ----
-        Item {
+        Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: hdrRow.implicitHeight
+            Layout.preferredHeight: hdrProbe.implicitHeight + Kirigami.Units.smallSpacing * 2
+            color: Kirigami.Theme.alternateBackgroundColor
             clip: true
+            QQC2.Label { id: hdrProbe; visible: false; text: "Ag"; font.bold: true }
             Row {
                 id: hdrRow
-                x: -hflick.contentX          // scrolls in step with the rows
-                leftPadding: Kirigami.Units.smallSpacing
+                x: -hflick.contentX + Kirigami.Units.smallSpacing   // scrolls with the rows
+                height: parent.height
                 spacing: Kirigami.Units.smallSpacing
                 Repeater {
                     model: table.shownCols
                     delegate: Item {
+                        id: hcell
                         required property var modelData
                         width: table.colW(modelData)
-                        height: hdrLbl.implicitHeight
+                        height: hdrRow.height
+                        readonly property string kind: modelData.kind || "text"
+
+                        // checkbox column: a tristate "select the page" box
+                        QQC2.CheckBox {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: hcell.kind === "check" && table.showHeaderCheck
+                            tristate: true
+                            checkState: table.headerCheckState
+                            onClicked: table.headerCheckClicked()
+                        }
+                        // value column: label + sort direction
                         QQC2.Label {
                             id: hdrLbl
                             anchors.fill: parent
                             anchors.rightMargin: hdrSort.visible ? 20 : 0
-                            text: modelData.t
-                            opacity: 0.6
+                            visible: hcell.kind === "text"
+                            text: modelData.t || ""
+                            opacity: 0.7
                             font.bold: true
                             elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
                             horizontalAlignment: modelData.right === true
                                 ? Text.AlignRight : Text.AlignLeft
-                            font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
                         }
                         Kirigami.Icon {
                             id: hdrSort
                             anchors.right: parent.right
+                            anchors.rightMargin: 3
                             anchors.verticalCenter: parent.verticalCenter
                             width: Kirigami.Units.iconSizes.small
                             height: Kirigami.Units.iconSizes.small
-                            visible: table.sortCol === modelData.k
+                            visible: hcell.kind === "text" && table.sortCol === modelData.k
                             source: table.sortDesc ? "view-sort-descending"
                                                    : "view-sort-ascending"
                         }
-                        TapHandler { onTapped: table.sortBy(modelData.k) }
+                        MouseArea {   // a click on the label sorts
+                            anchors.fill: parent
+                            anchors.rightMargin: table.resizable ? 8 : 0
+                            enabled: hcell.kind === "text"
+                            onClicked: table.sortBy(modelData.k)
+                        }
+                        // the column resize handle (optional)
+                        MouseArea {
+                            visible: table.resizable && hcell.kind === "text"
+                            width: 8
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            cursorShape: Qt.SplitHCursor
+                            preventStealing: true
+                            property real sx
+                            property real sw
+                            onPressed: m => { sx = m.x; sw = table.colW(modelData) }
+                            onPositionChanged: m => {
+                                if (pressed)
+                                    table.columnResized(modelData.k,
+                                        Math.max(table.gu * 2, sw + (m.x - sx)))
+                            }
+                        }
+                        Kirigami.Separator {
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                        }
                     }
                 }
             }
+            Kirigami.Separator {
+                anchors.bottom: parent.bottom
+                width: parent.width
+            }
         }
-        Kirigami.Separator { Layout.fillWidth: true }
 
         // ---- rows ----
         Flickable {
@@ -194,93 +274,145 @@ Item {
                 height: hflick.height
                 model: table.rows
                 reuseItems: true
-                // new rows fade in rather than appearing abruptly; the animator
-                // runs on the render thread and does not touch scrolling cost
                 add: Transition {
                     OpacityAnimator { from: 0; to: 1; duration: Kirigami.Units.shortDuration }
-                }
-                displaced: Transition {
-                    NumberAnimation { property: "y"; duration: Kirigami.Units.shortDuration
-                                      easing.type: Easing.OutCubic }
                 }
                 cacheBuffer: Kirigami.Units.gridUnit * 40
                 QQC2.ScrollBar.vertical: QQC2.ScrollBar {}
 
-                delegate: QQC2.ItemDelegate {
+                delegate: Item {
                     id: row
                     required property var modelData
                     required property int index
                     width: table.contentW
                     height: table.rowHeight
-                    padding: 0
-                    leftPadding: Kirigami.Units.smallSpacing
-                    onClicked: { table.selected = modelData; table.rowActivated(modelData) }
-                    background: Rectangle {
-                        color: table.selected === row.modelData
+
+                    // background: the reference bg/altBg zebra + highlight + hover
+                    Rectangle {
+                        anchors.fill: parent
+                        color: table.rowSelected(row.modelData)
                                ? Qt.alpha(Kirigami.Theme.highlightColor, 0.20)
-                               : (row.hovered
-                                  ? Qt.alpha(Kirigami.Theme.textColor, 0.06)
-                                  : (row.index % 2
-                                     ? Qt.alpha(Kirigami.Theme.textColor, 0.03)
-                                     : "transparent"))
-                        // hover and selection fade instead of snapping; a colour
-                        // Behavior is cheap even on a full page of reused rows
+                               : rowMouse.containsMouse
+                                 ? Qt.alpha(Kirigami.Theme.textColor, 0.06)
+                                 : row.index % 2 === 0
+                                   ? Kirigami.Theme.backgroundColor
+                                   : Kirigami.Theme.alternateBackgroundColor
                         Behavior on color {
                             ColorAnimation { duration: Kirigami.Units.shortDuration }
                         }
+                        Kirigami.Separator {
+                            anchors.bottom: parent.bottom
+                            width: parent.width
+                            opacity: 0.35
+                        }
+                        // the severity/type accent stripe on the left
                         Rectangle {
                             anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
-                            width: 3
+                            width: 4
                             visible: table.accent && table.accent(row.modelData) !== ""
-                            color: table.accent ? table.accent(row.modelData) : "transparent"
+                            color: table.accent ? (table.accent(row.modelData) || "transparent")
+                                                : "transparent"
+                            opacity: 0.9
                         }
                     }
-                    contentItem: Row {
+
+                    // ONE MouseArea for the whole row: single click selects (with
+                    // modifiers), double click copies the cell under the cursor.
+                    // The small +/- hover buttons live above it and take their own
+                    // clicks. This is the single interaction model for every view.
+                    MouseArea {
+                        id: rowMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        function colAt(px) {
+                            var x = px + hflick.contentX - Kirigami.Units.smallSpacing
+                            for (var i = 0; i < table.shownCols.length; i++) {
+                                var w = table.colW(table.shownCols[i])
+                                if (x < w) return table.shownCols[i]
+                                x -= w + Kirigami.Units.smallSpacing
+                            }
+                            return null
+                        }
+                        onClicked: m => {
+                            if (m.button === Qt.RightButton) {
+                                table.selected = row.modelData
+                                table.rowRightClicked(row.modelData, row.index)
+                                return
+                            }
+                            table.selected = row.modelData
+                            table.rowClicked(row.modelData, row.index, m.modifiers)
+                            table.rowActivated(row.modelData)
+                        }
+                        onDoubleClicked: m => {
+                            var cd = colAt(m.x)
+                            if (cd && cd.kind !== "check" && cd.kind !== "icon")
+                                table.copyValue(table.cellText(row.modelData, cd.k))
+                        }
+                    }
+
+                    Row {
+                        anchors.fill: parent
+                        anchors.leftMargin: Kirigami.Units.smallSpacing
                         spacing: Kirigami.Units.smallSpacing
                         Repeater {
                             model: table.shownCols
                             delegate: Item {
+                                id: cell
                                 required property var modelData
                                 property var colDef: modelData
+                                readonly property string kind: modelData.kind || "text"
                                 width: table.colW(colDef)
                                 height: table.rowHeight
-                                property string val: table.cellText(row.modelData, colDef.k)
+                                property string val: kind === "text"
+                                    ? table.cellText(row.modelData, colDef.k) : ""
 
+                                // checkbox
+                                QQC2.CheckBox {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: cell.kind === "check"
+                                    checked: table.isChecked ? table.isChecked(row.modelData) : false
+                                    onClicked: table.checkToggled(row.modelData, row.index)
+                                }
+                                // leading type icon
+                                Kirigami.Icon {
+                                    anchors.centerIn: parent
+                                    visible: cell.kind === "icon"
+                                    width: Kirigami.Units.iconSizes.small
+                                    height: Kirigami.Units.iconSizes.small
+                                    source: (cell.kind === "icon" && table.iconFor)
+                                            ? table.iconFor(row.modelData) : ""
+                                    QQC2.ToolTip.text: (cell.kind === "icon" && table.iconTip)
+                                                       ? table.iconTip(row.modelData) : ""
+                                    QQC2.ToolTip.visible: iconHov.hovered
+                                                          && QQC2.ToolTip.text !== ""
+                                    HoverHandler { id: iconHov }
+                                }
+                                // value cell
                                 QQC2.Label {
                                     anchors.fill: parent
-                                    // AIR INSIDE A CELL: the text must not lie
-                                    // right against the column separator
                                     anchors.leftMargin: Kirigami.Units.smallSpacing
                                     anchors.rightMargin: cellHover.hovered
                                                          ? 34 : Kirigami.Units.smallSpacing
+                                    visible: cell.kind === "text"
                                     verticalAlignment: Text.AlignVCenter
                                     horizontalAlignment: colDef.right === true
                                         ? Text.AlignRight : Text.AlignLeft
-                                    text: parent.val
+                                    text: cell.val
                                     elide: Text.ElideRight
                                     opacity: text === "" ? 0 : 0.9
                                     font.family: colDef.mono === true
                                         ? "monospace" : Kirigami.Theme.defaultFont.family
-                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
                                 }
-                                HoverHandler { id: cellHover }
-                                // A click on a cell selects the row, a double click
-                                // copies the value (as in the event feed).
-                                TapHandler {
-                                    acceptedButtons: Qt.LeftButton
-                                    onSingleTapped: {
-                                        table.selected = row.modelData
-                                        table.rowActivated(row.modelData)
-                                    }
-                                    onDoubleTapped: table.copyValue(parent.val)
-                                }
-                                // The cell actions are created LAZILY: building them
-                                // for every cell at once means thousands of objects
-                                // and a noticeable stall on refresh.
+                                HoverHandler { id: cellHover; enabled: cell.kind === "text" }
+                                // the cell +/- actions are built LAZILY: creating
+                                // them for every cell means thousands of objects and
+                                // a stall on refresh.
                                 Loader {
                                     anchors.right: parent.right
                                     anchors.verticalCenter: parent.verticalCenter
-                                    active: cellHover.hovered && parent.val !== ""
+                                    active: cell.kind === "text" && cellHover.hovered
+                                            && cell.val !== ""
                                     visible: active
                                     sourceComponent: Row {
                                         spacing: 1
@@ -291,7 +423,7 @@ Item {
                                             QQC2.ToolTip.text: "Add to the query"
                                             QQC2.ToolTip.visible: hovered
                                             onClicked: table.conditionRequested(
-                                                colDef.k, "=", table.cellText(row.modelData, colDef.k))
+                                                colDef.k, "=", cell.val)
                                         }
                                         QQC2.ToolButton {
                                             implicitWidth: Kirigami.Units.gridUnit
@@ -300,11 +432,34 @@ Item {
                                             QQC2.ToolTip.text: "Exclude from the query"
                                             QQC2.ToolTip.visible: hovered
                                             onClicked: table.conditionRequested(
-                                                colDef.k, "<>", table.cellText(row.modelData, colDef.k))
+                                                colDef.k, "<>", cell.val)
                                         }
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // the vertical column separators for the whole table: one line per
+                // column boundary instead of one per cell (as in State/Events)
+                Item {
+                    anchors.fill: parent
+                    z: 2
+                    Repeater {
+                        model: table.shownCols
+                        Kirigami.Separator {
+                            required property int index
+                            x: {
+                                var w = Kirigami.Units.smallSpacing - hflick.contentX
+                                for (var i = 0; i <= index; i++)
+                                    w += table.colW(table.shownCols[i])
+                                          + Kirigami.Units.smallSpacing
+                                return w - Kirigami.Units.smallSpacing - 1
+                            }
+                            y: 0
+                            height: list.height
+                            opacity: 0.25
                         }
                     }
                 }
@@ -319,6 +474,8 @@ Item {
             model: table.columns
             delegate: QQC2.MenuItem {
                 required property var modelData
+                visible: (modelData.kind || "text") === "text"
+                height: visible ? implicitHeight : 0
                 text: modelData.t
                 checkable: true
                 checked: table.hidden.indexOf(modelData.k) < 0

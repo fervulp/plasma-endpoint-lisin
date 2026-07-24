@@ -20,7 +20,7 @@ code: |
       import os
       import sqlite3
       from pathlib import Path
-      db = str(Path.home() / ".local/share/lisin/state.db")
+      db = str(Path.home() / ".local/share/lisin/data.db")
       idx = {}
       try:
           con = sqlite3.connect("file:%s?mode=ro" % db, uri=True, timeout=5)

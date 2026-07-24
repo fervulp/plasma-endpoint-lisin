@@ -36,7 +36,7 @@ code: |
 
       procs = []
       try:
-          db = Path.home() / ".local/share/lisin/state.db"
+          db = Path.home() / ".local/share/lisin/data.db"
           con = sqlite3.connect("file:%s?mode=ro" % db, uri=True)
           procs = [(str(p), str(c or "")) for p, c in
                    con.execute("SELECT pid, command FROM processes "

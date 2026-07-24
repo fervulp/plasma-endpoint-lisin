@@ -1,0 +1,97 @@
+name: process_identity
+id: LS-E-41
+type: enrichment
+version: 1.0.0
+title: Stable process identity (entity_id) and lineage
+# A PID IS NOT AN IDENTITY - the kernel reuses it, so a process graph built on
+# pid alone merges unrelated executions and breaks lineage across time. Here we
+# give every event a STABLE per-execution id:
+#   process_entity_id = hash(boot_id, pid, start_time)
+# start_time is /proc/<pid>/stat field 22 (jiffies since boot) - unique per exec.
+# The same scheme ECS process.entity_id and Tracee use, so when that sensor is
+# adopted its id drops into the same field. This is the node key for the process
+# graph and what lets events be assembled into one execution historically.
+#
+# The same /proc/<pid>/stat read also gives the PARENT PID (field 4), so it
+# backfills parent_pid where the source (journal, netmon) did not carry it - the
+# lineage edge. Dead/historical processes are gone from /proc and stay without an
+# id, honestly (a real sensor captures the id at exec time, before the exit).
+code: |
+  import os, hashlib, time
+
+  _CLK = os.sysconf("SC_CLK_TCK") or 100
+
+  def _btime():
+      try:
+          for ln in open("/proc/stat"):
+              if ln.startswith("btime "):
+                  return int(ln.split()[1])
+      except Exception:
+          pass
+      return 0
+
+  def _boot_id():
+      try:
+          return open("/proc/sys/kernel/random/boot_id").read().strip().replace("-", "")
+      except Exception:
+          return ""
+
+  def _stat(pid):
+      # (ppid, starttime_jiffies). comm (field 2) can hold spaces/parens, so we
+      # split AFTER the last ')': then index 1 = ppid, index 19 = starttime.
+      try:
+          data = open("/proc/%s/stat" % pid).read()
+          after = data[data.rfind(")") + 1:].split()
+          return after[1], after[19]
+      except Exception:
+          return "", ""
+
+  def enrich(rows):
+      boot = _boot_id()
+      btime = _btime()
+      cache = {}
+
+      def info(pid):
+          if pid not in cache:
+              cache[pid] = _stat(pid)
+          return cache[pid]
+
+      def eid(pid, start):
+          if not (boot and pid and start):
+              return ""
+          return hashlib.sha1(
+              ("%s:%s:%s" % (boot, pid, start)).encode()).hexdigest()[:16]
+
+      def start_iso(start):
+          if not (btime and start):
+              return ""
+          try:
+              return time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                   time.gmtime(btime + int(start) / _CLK))
+          except Exception:
+              return ""
+
+      for r in rows:
+          pid = str(r.get("process_pid") or "").strip()
+          if pid.isdigit():
+              ppid, start = info(pid)
+              # backfill the parent (lineage) where the source did not carry it
+              if ppid and not str(r.get("parent_pid") or "").strip():
+                  r["parent_pid"] = ppid
+              if start:
+                  if not str(r.get("process_start") or "").strip():
+                      r["process_start"] = start_iso(start)
+                  if not str(r.get("process_entity_id") or "").strip():
+                      r["process_entity_id"] = eid(pid, start)
+          ppid = str(r.get("parent_pid") or "").strip()
+          if ppid.isdigit() and not str(r.get("parent_entity_id") or "").strip():
+              _pp, pstart = info(ppid)
+              if pstart:
+                  r["parent_entity_id"] = eid(ppid, pstart)
+      return rows
+
+tests:
+  - name: empty input
+    input: []
+    expect:
+      rows: 0

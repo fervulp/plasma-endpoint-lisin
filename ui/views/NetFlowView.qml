@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "../components/Fmt.js" as Fmt
 import "../components/QueryMatch.js" as QM
+import "../components/Sev.js" as Sev
 import "../components"
 import "../pages"
 import "."
@@ -43,9 +44,9 @@ Item {
     }
     function rowAccent(r) {
         if (!r) return ""
-        if (r.threat) return "#e74c3c"
-        if (r.rare) return "#e67e22"
-        return r.direction === "external" ? "#f1c40f" : ""
+        if (r.threat) return Sev.colorOf("high")
+        if (r.rare) return Sev.colorOf("medium")
+        return r.direction === "external" ? Sev.colorOf("low") : ""
     }
     function refresh() { view.d = backend.networkFlows() }
     Component.onCompleted: refresh()
@@ -233,27 +234,12 @@ Item {
                         Kirigami.Separator { Layout.fillWidth: true }
 
                         Repeater {
-                            model: view.sel ? Object.keys(view.sel) : []
-                            delegate: RowLayout {
+                            model: view.sel ? Object.keys(view.sel).filter(k => k !== "_id") : []
+                            // the shared field row - same look and local-time formatting
+                            delegate: DetailField {
                                 required property var modelData
-                                Layout.fillWidth: true
-                                visible: String(view.sel[modelData] || "") !== ""
-                                spacing: Kirigami.Units.smallSpacing
-                                QQC2.Label {
-                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 8
-                                    text: modelData
-                                    opacity: 0.6
-                                    elide: Text.ElideRight
-                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                }
-                                QQC2.Label {
-                                    Layout.fillWidth: true
-                                    text: (modelData === "last_seen" || modelData === "first_seen")
-                                          ? Fmt.local(view.sel[modelData])
-                                          : String(view.sel[modelData])
-                                    wrapMode: Text.WrapAnywhere
-                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                }
+                                label: modelData
+                                value: view.sel ? (view.sel[modelData] ?? "") : ""
                             }
                         }
 

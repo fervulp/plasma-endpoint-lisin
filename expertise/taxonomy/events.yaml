@@ -40,7 +40,13 @@ fields:
   type: text
   index: true
   group: event
-  desc: event | alert | metric | state
+  desc: event | alert | metric | state | aggregate
+- name: event_count
+  ecs: event.count
+  type: integer
+  index: false
+  group: event
+  desc: how many identical events this one stands for (1 unless event_kind=aggregate)
 - name: event_category
   ecs: event.category
   type: text
@@ -256,6 +262,28 @@ fields:
   type: text
   group: process
   desc: How the owning process was determined
+- name: process_start
+  ecs: process.start
+  type: text
+  index: false
+  group: process
+  desc: When the process started (ISO, UTC) - a stable join key across events
+- name: process_entity_id
+  ecs: process.entity_id
+  type: text
+  index: true
+  group: process
+  desc: >-
+    Stable per-execution id = hash(boot_id, pid, start_time). Survives PID reuse,
+    so it is the correct node key for the process graph and lets events be joined
+    to one execution historically. The same value Tracee/ECS process.entity_id
+    provides when that sensor is adopted.
+- name: parent_entity_id
+  ecs: process.parent.entity_id
+  type: text
+  index: true
+  group: process
+  desc: The parent's stable per-execution id - the lineage edge in the graph
 - name: change_table
   ecs: change.table
   type: text
@@ -557,6 +585,11 @@ fields:
   type: text
   group: related
   desc: All the hashes of the event
+- name: related_events
+  ecs: related.events
+  type: text
+  group: related
+  desc: For a detection (alert) - the event_ids of the events that triggered it
 - name: boot_id
   type: text
   group: host

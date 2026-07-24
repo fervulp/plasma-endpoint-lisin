@@ -1,4 +1,11 @@
-"""The state database: SQLite, one tab = one table.
+"""The Data database: SQLite, one tab = one table.
+
+ONE FILE for everything the "Data" section holds - the state snapshot tables AND
+the events table (EventsDB opens this same file). They used to be two databases
+(state.db + events.db); merging them means native joins between events and state
+(no cross-database ATTACH) and one file to compact. The load profiles still
+differ (state is upsert, events are append-only), but on a single laptop one
+WAL file serves both, and the writers run one after another on the pipeline tick.
 
 The tables are filled by the pipeline (agent/pipeline.py) through
 ensure_table/upsert: upsert by the rule's key, user columns are left alone,
@@ -16,7 +23,7 @@ from pathlib import Path
 
 from ..collect import state as coll
 
-DB_PATH = Path.home() / ".local/share/lisin/state.db"
+DB_PATH = Path.home() / ".local/share/lisin/data.db"
 
 
 def _san(name: str, prefix: str) -> str:

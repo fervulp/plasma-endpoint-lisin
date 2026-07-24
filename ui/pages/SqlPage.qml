@@ -251,26 +251,10 @@ Kirigami.Page {
                     spacing: Kirigami.Units.smallSpacing
                     Repeater {
                         model: page.selRow ? page.cols.filter(c => c !== "_id") : []
-                        delegate: ColumnLayout {
-                            spacing: 1
-                            Layout.fillWidth: true
-                            visible: String(page.selRow[modelData] ?? "") !== ""
-                            QQC2.Label {
-                                text: modelData
-                                opacity: 0.55
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            }
-                            QQC2.TextArea {
-                                Layout.fillWidth: true
-                                readOnly: true
-                                wrapMode: TextEdit.Wrap
-                                text: String(page.selRow[modelData] ?? "")
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                background: Rectangle {
-                                    color: Kirigami.Theme.alternateBackgroundColor
-                                    radius: 4
-                                }
-                            }
+                        // the shared field row - same look and local-time formatting
+                        delegate: DetailField {
+                            label: modelData
+                            value: page.selRow ? (page.selRow[modelData] ?? "") : ""
                         }
                     }
                 }

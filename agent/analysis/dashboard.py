@@ -64,9 +64,9 @@ def activity_history(eventsdb, pid):
     process_started event carries parent_pid = this pid for every COMMAND this
     process launched (its child's pid is process_pid), while process_pid = this
     pid gives the process's OWN actions (connections, file changes). Merging the
-    two and ordering by time is the history. The most recent 500 are kept and
-    reversed to ascending, so a long-running process shows its latest activity
-    rather than only its first (and says so if older activity was dropped).
+    two and ordering by time is the history. The most recent 500 are kept, NEWEST
+    FIRST (descending) so the latest activity is on top - the notifications a user
+    checks first (and it says so if older activity was dropped).
 
     Honest limit: procmon/journal are pollers, so a command that lived entirely
     between two polls is missed; kernel audit (execve) catches more.
@@ -86,7 +86,7 @@ def activity_history(eventsdb, pid):
     except Exception:
         hrows = []
     truncated = len(hrows) > 500
-    for e in reversed(hrows[:500]):              # back to ascending time
+    for e in hrows[:500]:                         # newest first (as the DB returns)
         act = e.get("event_action") or ""
         cat = e.get("event_category") or ""
         ppd = str(e.get("process_pid") or "")
@@ -137,7 +137,7 @@ def history_sections(eventsdb, pid):
         return {"sections": [], "error": "no recorded activity for this process"}
     verb = {"started": "started", "launched": "launched", "network": "→",
             "file": "changed", "auth": "auth", "event": ""}
-    groups = []            # [(day, [rows])] preserving chronological order
+    groups = []            # [(day, [rows])] newest day first, newest row first
     index = {}
     for h in hist:
         day = (h["ts"] or "")[:10] or "unknown"
@@ -649,7 +649,7 @@ def build(db, eventsdb=None, top=18):
             q = eventsdb.query(
                 'SELECT destination_ip AS ip, '
                 'MAX(destination_as_org) AS org, MAX(destination_geo_country) AS cc, '
-                'COUNT(*) AS n FROM events '
+                'SUM(COALESCE(event_count,1)) AS n FROM events '
                 "WHERE destination_ip IS NOT NULL AND destination_ip <> '' "
                 'GROUP BY destination_ip ORDER BY n DESC LIMIT 10')
             top_dest = [{"ip": r["ip"], "org": r["org"] or "",

@@ -16,7 +16,7 @@ code: "def enrich(rows):\n    \"\"\"Who created a connection - for events where 
   \ str(r.get(\"process_name\") or \"\").strip()]\n    if not need:\n        for r in rows:\n        \
   \    r.setdefault(\"process_source\", \"socket was live\")\n        return rows\n\n    exact, by_dest\
   \ = {}, {}\n    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % (\n            Path.home()\
-  \ / \".local/share/lisin/events.db\"), uri=True)\n        con.row_factory = sqlite3.Row\n        q =\
+  \ / \".local/share/lisin/data.db\"), uri=True)\n        con.row_factory = sqlite3.Row\n        q =\
   \ (\"SELECT source_ip, source_port, destination_ip, destination_port,\"\n             \" process_name,\
   \ process_pid FROM events \"\n             \"WHERE event_module='netmon' AND COALESCE(process_name,'')<>''\
   \ \"\n             \"ORDER BY _id DESC LIMIT 20000\")\n        for e in con.execute(q):\n          \
@@ -24,7 +24,7 @@ code: "def enrich(rows):\n    \"\"\"Who created a connection - for events where 
   ])\n            exact.setdefault(k, (e[\"process_name\"], e[\"process_pid\"]))\n            by_dest.setdefault(e[\"\
   destination_ip\"],\n                               (e[\"process_name\"], e[\"process_pid\"]))\n    \
   \    con.close()\n    except Exception:\n        pass\n\n    live = {}\n    try:\n        con = sqlite3.connect(\"\
-  file:%s?mode=ro\" % (\n            Path.home() / \".local/share/lisin/state.db\"), uri=True)\n     \
+  file:%s?mode=ro\" % (\n            Path.home() / \".local/share/lisin/data.db\"), uri=True)\n     \
   \   con.row_factory = sqlite3.Row\n        for e in con.execute(\"SELECT remote, process, owner_cmd\
   \ FROM ports \"\n                             \"WHERE COALESCE(process,'')<>''\"):\n            host\
   \ = str(e[\"remote\"] or \"\").rsplit(\":\", 1)[0]\n            if host:\n                live.setdefault(host,\

@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "../components"
 import "../components/QueryMatch.js" as QM
+import "../components/Sev.js" as Sev
 
 // WHAT IS WRONG AND WHAT TO DO ABOUT IT - not "how many of each".
 //
@@ -47,9 +48,8 @@ Item {
         function onStateReady(s) { if (view.visible) view.refresh(); else view._stale = true }
     }
 
-    function sevColor(s) {
-        return s === "high" ? "#e74c3c" : s === "medium" ? "#e67e22" : "#f1c40f"
-    }
+    // findings are scored high/medium/low - the canonical levels themselves
+    function sevColor(s) { return Sev.colorOf(s) }
     // the severity is an accent on the row, not an extra line of text: that is
     // what keeps every row the same height
     function rowAccent(r) { return r ? sevColor(r.severity) : "" }

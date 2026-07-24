@@ -69,7 +69,7 @@ def run_now(pipe, ref: str, sample: str = "") -> dict:
             cmd = ["bash", "-c", cmd]
         try:
             text = subprocess.run(cmd, capture_output=True, text=True,
-                                  timeout=60).stdout
+                                  errors="replace", timeout=60).stdout
         except Exception as e:
             return {"error": "input failed: %s" % e}
         src = "%s (%s)" % (inp["title"] or inp["ref"], inp["ref"])

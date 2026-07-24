@@ -74,7 +74,7 @@ def system_metrics(series: list) -> dict:
     except OSError:
         load = []
     home = Path.home()
-    db = home / ".local/share/lisin/state.db"
+    db = home / ".local/share/lisin/data.db"
     return {
         "series": list(series),
         "load": load,

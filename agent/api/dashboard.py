@@ -77,36 +77,9 @@ class DashboardApi:
             return {"sections": [], "error": str(e)}
 
     # -------- Process context: aggregating processes into entities --------
-    @Slot(result="QVariant")
-    def processEntities(self):
-        # collapses raw processes into ENTITIES (a vendor set of 6 processes ->
-        # one row) with aggregated context from ports/unix_sockets/persistence/
-        # config/applications. Open files are loaded lazily.
-        from agent.analysis import entities
-        try:
-            return entities.build(self.db)
-        except Exception as e:
-            return {"error": str(e)}
 
-    @Slot("QVariant", result="QVariant")
-    def entityFiles(self, pids):
-        # lazy loading of the open files of an entity when it is expanded
-        from agent.analysis import entities
-        try:
-            return entities.files_for([str(p) for p in pids])
-        except Exception:
-            return []
 
     # -------- events (the taxonomy + events.db) --------
-    @Slot(result="QVariant")
-    def programsInventory(self):
-        # classifying applications into PROGRAMS vs dependencies
-        # (3000 packages -> ~200 programs, the rest are dependencies under them)
-        from agent.analysis import entities
-        try:
-            return entities.programs(self.db)
-        except Exception as e:
-            return {"error": str(e)}
 
     @Slot(result="QVariant")
     def systemFindings(self):
@@ -351,26 +324,7 @@ class DashboardApi:
         except Exception as e:
             return {"items": [], "error": str(e)}
 
-    @Slot(str, str, str, result="QVariant")
-    def nodeDetail(self, table, col, val):
-        """Everything known about the object of a graph node: its own row + the
-        related tables (by the discovered link map) + its latest events."""
-        from agent.analysis import links
-        try:
-            return links.node_detail(self.db, self.pipe.events(),
-                                     str(table), str(col), str(val))
-        except Exception as e:
-            return {"sections": [], "error": str(e)}
 
-    @Slot(result="QVariant")
-    def linkModel(self):
-        """The map of links between tables - discovered by measuring the overlap of
-        column values, not hard-coded."""
-        from agent.analysis import links
-        try:
-            return _memo(self, "linkmodel", lambda: links.model(self.db))
-        except Exception as e:
-            return {"error": str(e), "nodes": [], "links": []}
     # -------- thematic investigation panels --------
     @Slot(result="QVariant")
     def fileActivity(self):
@@ -399,14 +353,6 @@ class DashboardApi:
         except Exception as e:
             return {"error": str(e), "flows": [], "dns": []}
 
-    @Slot(str, result="QVariant")
-    def flowDetail(self, ip):
-        """A click on a session: who talked, when, with what and where to look next."""
-        from agent.analysis import panels
-        try:
-            return panels.flow_detail(self.db, self.pipe.events(), str(ip))
-        except Exception as e:
-            return {"ip": ip, "error": str(e), "events": [], "processes": []}
 
     @Slot(str, result="QVariant")
     def whoisLookup(self, ip):

@@ -17,14 +17,7 @@ class ExpertiseApi:
     def pipelinesInfo(self):
         return self.pipe.pipelines_info()
 
-    @Slot(str, result="QVariant")
-    def pipelineGraph(self, name):
-        return self.pipe.graph(name)
 
-    @Slot(str, result="QVariant")
-    def pipelineFlows(self, name):
-        # the pipeline as a list of flows (a showcase instead of the graph)
-        return self.pipe.flows(name)
 
     @Slot(str, result="QVariant")
     def pipelineGraphDraft(self, name):
@@ -48,11 +41,6 @@ class ExpertiseApi:
             "has": bool(p),
         }
 
-    @Slot(str, str)
-    def savePipeline(self, name, graph_json):
-        g = json.loads(graph_json)
-        self.pipe.save_graph(name, g["nodes"], g["edges"])
-        self._emit_pipe()
 
     @Slot(str, str)
     def savePipelineDraft(self, name, graph_json):
@@ -97,10 +85,6 @@ class ExpertiseApi:
             self._emit_pipe()
         threading.Thread(target=go, daemon=True).start()
 
-    @Slot(str, bool)
-    def setInputEnabled(self, ref, enabled):
-        self.pipe.set_enabled(ref, enabled)
-        self._emit_pipe()
 
     # -------- helper --------
     @Slot(result="QVariant")
@@ -119,9 +103,6 @@ class ExpertiseApi:
     def expertiseCatalog(self, category):
         return self.pipe.expertise_catalog(category)
 
-    @Slot(str, result="QVariant")
-    def expertiseRefs(self, category):
-        return sorted(self.pipe.objects.get(category, {}).keys())
 
     @Slot(str, result=str)
     def deleteExpertiseDir(self, dirpath):
@@ -241,11 +222,3 @@ class ExpertiseApi:
         except Exception as e:
             return {"error": str(e), "tests": []}
 
-    @Slot(str, result="QVariant")
-    def ruleInput(self, ref):
-        """Which input is connected to the rule (for a hint in the UI)."""
-        from agent import ruletest
-        try:
-            return ruletest.input_for(self.pipe, ref)
-        except Exception:
-            return {}

@@ -20,7 +20,7 @@ code: |
       by_pid, by_name, by_sock = {}, {}, {}
       try:
           con = sqlite3.connect("file:%s?mode=ro" % (Path.home() /
-                                ".local/share/lisin/state.db"), uri=True)
+                                ".local/share/lisin/data.db"), uri=True)
           con.row_factory = sqlite3.Row
           try:
               for r in con.execute("SELECT pid, command, user, package FROM processes"):

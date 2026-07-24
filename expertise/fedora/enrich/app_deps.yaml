@@ -4,7 +4,7 @@ type: enrichment
 version: 1.0.1
 title: Application dependency links (deps / required_by)
 code: "def enrich(rows):\n    import sqlite3\n    from pathlib import Path\n    db = Path.home() / \"\
-  .local/share/lisin/state.db\"\n    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % db, uri=True)\n\
+  .local/share/lisin/data.db\"\n    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % db, uri=True)\n\
   \        con.row_factory = sqlite3.Row\n        inv = [dict(r) for r in con.execute(\n            'SELECT\
   \ name, app_id, depends, recommends FROM applications')]\n        con.close()\n    except Exception:\n\
   \        inv = []\n\n    # the rows of the current flow take part too (on the first run they are not\

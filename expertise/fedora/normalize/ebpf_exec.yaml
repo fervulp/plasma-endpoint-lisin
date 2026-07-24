@@ -144,6 +144,12 @@ code: |
           elif k == "F" and len(f) >= 6:
               ns, pid, uid, comm, op = f[1:6]
               path = "\t".join(f[6:]).strip()
+              # the collector clamps its in-kernel path filter to 16 bytes (BPF
+              # verifier limit), so it only skips the absolute pseudo-fs PREFIXES
+              # (/proc /sys /dev /run). '/.cache/' is a MID-path token a 16-byte
+              # head cannot reach - skip it here, where the full path is known.
+              if "/.cache/" in path:
+                  continue
               act, typ, sev = FILE_ACT.get(op, ("file_change", "change", 30))
               rows.append({
                   "ts": when(ns), "event_id": "ebpf:file:%s:%s" % (ns, pid),

@@ -13,7 +13,7 @@ code: |
       alive = {}
       try:
           con = sqlite3.connect("file:%s?mode=ro" % (Path.home() /
-                                ".local/share/lisin/state.db"), uri=True)
+                                ".local/share/lisin/data.db"), uri=True)
           for pid, cmd in con.execute("SELECT pid, command FROM processes"):
               alive[str(pid)] = cmd or ""
           con.close()

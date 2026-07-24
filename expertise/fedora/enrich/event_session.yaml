@@ -5,11 +5,11 @@ version: 1.0.0
 title: Session and startup around the event
 code: "import sqlite3\nfrom pathlib import Path\n\n_CACHE = {}\n\ndef _load():\n    boots, sessions =\
   \ [], []\n    try:\n        con = sqlite3.connect(\"file:%s?mode=ro\" % (Path.home() /\n           \
-  \                   \".local/share/lisin/state.db\"), uri=True)\n        try:\n            for bid,\
+  \                   \".local/share/lisin/data.db\"), uri=True)\n        try:\n            for bid,\
   \ st, en in con.execute(\n                    \"SELECT boot_id, started, ended FROM boot_sessions \"\
   \n                    \"WHERE kind = 'boot' AND started <> ''\"):\n                boots.append((st\
   \ or \"\", en or \"\", bid or \"\"))\n        except Exception:\n            pass\n        try:\n  \
-  \          for user, frm, start, end in con.execute(\n                    \"SELECT user, host, start,\
+  \          for user, frm, start, end in con.execute(\n                    \"SELECT user, \\\"from\\\", start,\
   \ until FROM logins\"):\n                if start:\n                    sessions.append((start, end\
   \ or \"\", user or \"\", frm or \"\"))\n        except Exception:\n            pass\n        con.close()\n\
   \    except Exception:\n        pass\n    boots.sort()\n    # THE CURRENT BOOT HAS NO END. journalctl\

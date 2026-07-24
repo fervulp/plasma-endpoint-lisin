@@ -20,14 +20,12 @@ from PySide6.QtCore import QObject, QUrl, Signal, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
-from agent.api import (DashboardApi, EventsApi, ExpertiseApi, StateApi,
-                       SystemApi)
+from agent.api import (DashboardApi, ExpertiseApi, StateApi, SystemApi)
 from agent.core.pipeline import StatePipeline
 from agent.core.statedb import StateDB
 
 
-class Backend(QObject, StateApi, EventsApi, DashboardApi, ExpertiseApi,
-              SystemApi):
+class Backend(QObject, StateApi, DashboardApi, ExpertiseApi, SystemApi):
     """The QML <-> agent bridge. The slots themselves live in agent/api/*."""
 
     stateReady = Signal("QVariant")

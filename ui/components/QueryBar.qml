@@ -42,6 +42,19 @@ Item {
     property bool builderMode: true      // click it together (default) or type it
     property string manualText: ""       // what was typed by hand
     property string placeholder: "SELECT * WHERE field = 'value'"
+    // JOIN (owner-driven): the owner supplies the joinable tables and holds the
+    // current join; the bar only shows the picker and emits the choices.
+    property var joinTables: []          // [{name, columns}]
+    property string joinTable: ""
+    property string joinLeft: ""
+    property string joinRight: ""
+    signal joinTableChosen(string t)
+    signal joinFieldsChosen(string l, string r)
+    function joinTableCols() {
+        for (var i = 0; i < joinTables.length; i++)
+            if (joinTables[i].name === joinTable) return joinTables[i].columns || []
+        return []
+    }
 
     signal applied(var spec, string sql)
 
@@ -489,6 +502,24 @@ Item {
         builderMode = true
         addClause("where")
         touch()
+    }
+    // QUICK TIME WINDOW: keep exactly ONE ago-condition on `field` (e.g. ts) and
+    // let buildSql render it like any other WHERE condition - so a time filter is
+    // a first-class part of the query, not a string glued on by the caller.
+    // agoMs<=0 removes it. Applies immediately (a quick picker, not the builder).
+    function setTimeWindow(field, agoMs, iso) {
+        var w = []
+        for (var i = 0; i < spec.where.length; i++)
+            if (!(spec.where[i].field === field && spec.where[i].ago))
+                w.push(spec.where[i])
+        if (agoMs > 0)
+            w.push({ field: field, op: ">=", value: String(iso),
+                     join: "AND", ago: agoMs })
+        spec.where = w
+        builderMode = true
+        if (w.length) addClause("where")
+        touch()
+        apply()
     }
     // which condition is being edited (-1 - none)
     property int editIndex: -1
@@ -1202,8 +1233,12 @@ Item {
 
                     Kirigami.SearchField {
                         id: quickField
-                        // a compact field: the query bar must not be as wide as the
-                        // whole screen for the sake of one word
+                        // RESPONSIVE: the field shares the slack with the spacer, so
+                        // it grows on a wide window (capped) and SHRINKS when the app
+                        // gets narrow, down to a still-usable minimum - instead of
+                        // pushing the toolbar buttons off the edge.
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: Kirigami.Units.gridUnit * 7
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 18
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 24
                         visible: bar.builderMode      // not needed in SQL mode
@@ -1281,6 +1316,88 @@ Item {
                             bar.moreKind = "order"; morePopup.open()
                         }
                     }
+                    // ---- THE JOIN ----
+                    QQC2.ToolButton {
+                        icon.name: "network-connect"
+                        visible: bar.joinTables.length > 0
+                        text: bar.joinTable !== "" ? bar.joinTable : ""
+                        display: bar.joinTable !== "" ? QQC2.AbstractButton.TextBesideIcon
+                                                      : QQC2.AbstractButton.IconOnly
+                        highlighted: bar.joinTable !== ""
+                        QQC2.ToolTip.text: bar.joinTable !== ""
+                            ? ("Joined with " + bar.joinTable + " on " + bar.joinLeft
+                               + " = " + bar.joinRight)
+                            : "Join another table"
+                        QQC2.ToolTip.visible: hovered
+                        onClicked: joinPopup.open()
+                        QQC2.Popup {
+                            id: joinPopup
+                            y: parent.height
+                            padding: Kirigami.Units.smallSpacing
+                            closePolicy: QQC2.Popup.CloseOnEscape | QQC2.Popup.CloseOnPressOutside
+                            contentItem: ColumnLayout {
+                                spacing: Kirigami.Units.smallSpacing
+                                RowLayout {
+                                    QQC2.Label { text: "Join table:"; opacity: 0.7 }
+                                    QQC2.ComboBox {
+                                        Layout.preferredWidth: Kirigami.Units.gridUnit * 11
+                                        model: [""].concat(bar.joinTables.map(
+                                            function (t) { return t.name }))
+                                        displayText: currentText === "" ? "(no join)" : currentText
+                                        currentIndex: Math.max(0, model.indexOf(bar.joinTable))
+                                        onActivated: bar.joinTableChosen(currentText)
+                                    }
+                                    QQC2.ToolButton {
+                                        visible: bar.joinTable !== ""
+                                        icon.name: "edit-clear"
+                                        onClicked: { bar.joinTableChosen(""); joinPopup.close() }
+                                    }
+                                }
+                                RowLayout {
+                                    visible: bar.joinTable !== ""
+                                    QQC2.Label { text: "on"; opacity: 0.7 }
+                                    QQC2.ComboBox {
+                                        Layout.preferredWidth: Kirigami.Units.gridUnit * 9
+                                        model: bar.allFieldNames
+                                        currentIndex: Math.max(0, model.indexOf(bar.joinLeft))
+                                        onActivated: bar.joinFieldsChosen(currentText, bar.joinRight)
+                                    }
+                                    QQC2.Label { text: "=" }
+                                    QQC2.ComboBox {
+                                        Layout.preferredWidth: Kirigami.Units.gridUnit * 9
+                                        model: bar.joinTableCols()
+                                        currentIndex: Math.max(0, model.indexOf(bar.joinRight))
+                                        onActivated: bar.joinFieldsChosen(bar.joinLeft, currentText)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // ---- UNIQUE (DISTINCT) + a calculated field, direct buttons
+                    // on the LEFT with the other functions (no "…" menu) ----
+                    QQC2.ToolButton {
+                        icon.name: "edit-duplicate"
+                        text: bar.spec.distinct ? "Unique" : ""
+                        display: bar.spec.distinct ? QQC2.AbstractButton.TextBesideIcon
+                                                   : QQC2.AbstractButton.IconOnly
+                        checkable: true
+                        checked: bar.spec.distinct
+                        highlighted: bar.spec.distinct
+                        QQC2.ToolTip.text: "Unique rows (DISTINCT)"
+                        QQC2.ToolTip.visible: hovered
+                        onClicked: {
+                            bar.spec.distinct = checked
+                            if (checked) bar.addClause("distinct")
+                            else bar.dropClause("distinct")
+                            bar.touch()
+                        }
+                    }
+                    QQC2.ToolButton {
+                        icon.name: "accessories-calculator"
+                        QQC2.ToolTip.text: "Calculated field"
+                        QQC2.ToolTip.visible: hovered
+                        onClicked: { bar.addClause("calc"); bar.editingCalc = true }
+                    }
                     // ---- THE BUTTON GROUPS ARE SEPARATED: the parts of the query
                     // on the left, working with queries (save, history) in the
                     // middle, running and the mode on the right ----
@@ -1333,43 +1450,6 @@ Item {
                         }
                     }
 
-                    // ---- THE REST: DISTINCT, a calculated field ----
-                    QQC2.ToolButton {
-                        icon.name: "overflow-menu"
-                        QQC2.ToolTip.text: "More parts of the query"
-                        QQC2.ToolTip.visible: hovered
-                        onClicked: partMenu.open()
-                        QQC2.Menu {
-                            id: partMenu
-                            QQC2.MenuItem {
-                                text: bar.spec.distinct ? "Unique rows — on" : "Unique rows"
-                                icon.name: "edit-duplicate"
-                                checkable: true
-                                checked: bar.spec.distinct
-                                onTriggered: {
-                                    bar.spec.distinct = checked
-                                    if (checked) bar.addClause("distinct")
-                                    else bar.dropClause("distinct")
-                                    bar.touch()
-                                }
-                            }
-                            QQC2.MenuItem {
-                                text: "Calculated field…"
-                                icon.name: "accessories-calculator"
-                                onTriggered: { bar.addClause("calc"); bar.editingCalc = true }
-                            }
-                            QQC2.MenuSeparator {}
-                            QQC2.MenuItem {
-                                text: "Show the query as SQL"
-                                icon.name: "code-context"
-                                onTriggered: {
-                                    bar.manualText = bar.fullSql()
-                                    bar.builderMode = false
-                                    bar.apply()
-                                }
-                            }
-                        }
-                    }
                 }
 
                 // the calculated field input - only while one is being added

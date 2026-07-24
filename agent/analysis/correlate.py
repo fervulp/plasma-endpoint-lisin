@@ -80,6 +80,18 @@ def run(eventsdb, rules: dict, now=None) -> dict:
             # the window is part of the id - one hit is not duplicated every run
             bucket = int(now.timestamp()) // window
             gid = "|".join(str(ctx.get(g, "")) for g in group_by) or "-"
+            # WHICH EVENTS CAUSED IT: fetch their event_ids so the alert can show
+            # the events that triggered it (same group, same window).
+            gwhere = ""
+            for g in group_by:
+                gv = str(row.get(g) or "").replace("'", "''")
+                gwhere += " AND \"%s\" = '%s'" % (g, gv)
+            idres = eventsdb.query(
+                f"SELECT event_id FROM events WHERE ({where}) AND ts >= '{since}' "
+                f"AND COALESCE(event_kind,'') <> 'alert'{gwhere} "
+                f"ORDER BY ts DESC LIMIT 100")
+            trigger_ids = [str(r.get("event_id") or "")
+                           for r in idres.get("rows", []) if r.get("event_id")]
             sev = {"low": 30, "medium": 55, "high": 75,
                    "critical": 90}.get(str(rule.get("severity", "medium")).lower(), 55)
             alerts.append({
@@ -103,6 +115,7 @@ def run(eventsdb, rules: dict, now=None) -> dict:
                 "subject_name": ctx.get("subject_name", "") or "correlation",
                 "object_type": "event",
                 "object_name": gid,
+                "related_events": " ".join(trigger_ids),
                 "message": _fmt(rule.get("message")
                                 or "%s: %d events in %d s" % (
                                     rule.get("title", ref), n, window), ctx),

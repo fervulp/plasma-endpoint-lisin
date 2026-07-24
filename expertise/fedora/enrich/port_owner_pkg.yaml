@@ -12,7 +12,7 @@ code: |
       procs = {}
       try:
           con = sqlite3.connect("file:%s?mode=ro" % (Path.home() /
-                                ".local/share/lisin/state.db"), uri=True)
+                                ".local/share/lisin/data.db"), uri=True)
           con.row_factory = sqlite3.Row
           for r in con.execute("SELECT pid, package, purpose FROM processes"):
               procs[str(r["pid"])] = (r["package"] or "", r["purpose"] or "")

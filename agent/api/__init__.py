@@ -5,9 +5,8 @@ The module names here deliberately repeat the names of the analysis modules
 relative to this package.
 """
 from .dashboard import DashboardApi
-from .events import EventsApi
 from .expertise import ExpertiseApi
 from .state import StateApi
 from .system import SystemApi
 
-__all__ = ["StateApi", "EventsApi", "DashboardApi", "ExpertiseApi", "SystemApi"]
+__all__ = ["StateApi", "DashboardApi", "ExpertiseApi", "SystemApi"]

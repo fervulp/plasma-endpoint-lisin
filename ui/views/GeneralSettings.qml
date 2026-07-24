@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import org.kde.kirigamiaddons.formcard as FormCard
 import "../components"
+import "../components/Fmt.js" as Fmt
 import "../pages"
 import "."
 
@@ -113,6 +114,107 @@ FormCard.FormCardPage {
                 resCard.u = backend.resourceUsage()
                 resCard.m = backend.systemMetrics()
             }
+        }
+    }
+
+    FormCard.FormHeader {
+        title: "Storage"
+    }
+    FormCard.FormCard {
+        id: storeCard
+        property var db: backend.dbSizes()
+
+        // RETENTION: two limits, whichever bites first (row ceiling AND size cap)
+        FormCard.AbstractFormDelegate {
+            background: null
+            contentItem: RowLayout {
+                spacing: Kirigami.Units.smallSpacing
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    QQC2.Label { text: "Events kept (row ceiling)" }
+                    QQC2.Label {
+                        text: "The newest N events are kept; older ones are pruned. " +
+                              "At about 1.2 KB per event, 1 GB holds roughly 1 million."
+                        opacity: 0.6
+                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                    }
+                }
+                QQC2.SpinBox {
+                    from: 1000
+                    to: 20000000
+                    stepSize: 100000
+                    editable: true
+                    value: storeCard.db.retention || 2000000
+                    onValueModified: backend.setSetting("events_retention", String(value))
+                }
+            }
+        }
+        FormCard.FormDelegateSeparator {}
+        FormCard.AbstractFormDelegate {
+            background: null
+            contentItem: RowLayout {
+                spacing: Kirigami.Units.smallSpacing
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    QQC2.Label { text: "Size cap (MB)" }
+                    QQC2.Label {
+                        text: "The events data never grows past this. Whichever limit " +
+                              "is reached first — rows or size — trims the oldest events."
+                        opacity: 0.6
+                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                    }
+                }
+                QQC2.SpinBox {
+                    from: 16
+                    to: 20480
+                    stepSize: 256
+                    editable: true
+                    value: storeCard.db.max_mb || 1024
+                    onValueModified: backend.setSetting("events_max_mb", String(value))
+                }
+            }
+        }
+        FormCard.FormDelegateSeparator {}
+
+        // normalization coverage + arrival rate
+        FormCard.FormTextDelegate {
+            text: "Events feed"
+            description: (storeCard.db.events || 0) + " stored · "
+                         + (storeCard.db.normalized_pct || 0) + "% fully normalized · "
+                         + (storeCard.db.unmapped || 0) + " with unmapped fields · ~"
+                         + (storeCard.db.per_hour || 0) + " events per hour"
+        }
+        FormCard.FormDelegateSeparator {}
+
+        // the database files
+        Repeater {
+            model: storeCard.db.databases || []
+            FormCard.FormTextDelegate {
+                text: modelData.name + " database"
+                description: Fmt.bytes(modelData.bytes)
+            }
+        }
+        FormCard.FormDelegateSeparator {}
+
+        // what our tables weigh (largest first)
+        Repeater {
+            model: storeCard.db.tables || []
+            FormCard.FormTextDelegate {
+                text: modelData.name
+                description: Fmt.bytes(modelData.bytes)
+                             + " · " + modelData.rows + " rows · " + modelData.db
+            }
+        }
+        FormCard.FormButtonDelegate {
+            text: "Refresh"
+            icon.name: "view-refresh"
+            onClicked: storeCard.db = backend.dbSizes()
         }
     }
 

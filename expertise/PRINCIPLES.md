@@ -370,6 +370,40 @@ examples is visible to everyone and stays in the git history forever —
 
 Sign of a violation: a line in the code that is true only on this machine.
 
+## 19. Every fourth request, walk this file
+
+Checking before a single change is not enough — drift accumulates silently
+between changes. On every fourth request, BEFORE starting the work, read this
+file from top to bottom and confirm the recent work still holds against it:
+a hand-written list that crept back in, a value written in two places, a
+section that grew its own table, a dead file nobody removed. State what the
+pass found, or that it found nothing — the same as any other verification.
+
+The point is not ceremony. Between audits the code quietly grows a second copy
+of something, an orphan slot, a rule with a name in it — and only a deliberate
+sweep catches it while it is still cheap to fix.
+
+## 20. Remove what a change replaced — keep the codebase tidy
+
+When a feature is replaced, its old parts are DELETED in the same change, not
+left dormant "in case". A base carrying dead files, unused slots, orphan QML,
+commented-out blocks, abandoned expertise objects and duplicated helpers rots:
+the next reader cannot tell what is alive, and a duplicate drifts from its
+twin. This is an agent on ONE laptop — it must stay light.
+
+- After replacing something, delete what it superseded and prove by grep that
+  nothing references it (no import, no `ref:`, no slot call, no `Qt.resolvedUrl`).
+- A duplicate is a defect on its own: two functions that do the same thing, two
+  writes of the same value, two tables with the same columns. Collapse them.
+- Dead is dead: a slot no QML calls, a QML file no `Loader` points at, an
+  expertise object in no pipeline, a `property` nobody reads. Remove it, do not
+  comment it out — git remembers.
+- After the sweep, name the number: "removed 3 files, 214 lines, 5 dead slots",
+  not "cleaned up a bit". Then run the five verification steps: deleting the
+  wrong thing must be caught, not discovered later.
+
+Sign of a violation: a file, slot or rule that only the search tool ever visits.
+
 
 ---
 
@@ -392,3 +426,6 @@ Sign of a violation: a line in the code that is true only on this machine.
       by the database, fields only from that table, long lists behind "…"?
 - [ ] Is there NOTHING personal in the commit: home paths, names, real addresses, keys?
       Verified by grep, not from memory?
+- [ ] Did this change DELETE what it replaced (no dead file, slot, QML or rule left behind)?
+- [ ] Is this the fourth request? Then this whole file was re-read first, and the pass
+      result stated.

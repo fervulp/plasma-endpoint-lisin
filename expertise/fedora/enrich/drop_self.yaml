@@ -1,0 +1,57 @@
+name: drop_self
+id: LS-E-40
+type: enrichment
+version: 1.0.0
+title: Drop LiSin's own events (do not collect or save them)
+# WE DO NOT RECORD OUR OWN ACTIVITY. LiSin runs as the lisin.service cgroup, and
+# collecting state runs helper commands (ss, ps, rpm, journalctl, curl for the
+# feeds) that would otherwise show up as events - the agent watching itself. The
+# eBPF collector already skips our cgroup in the kernel, but the pollers (netmon,
+# journal, audit) still catch our short-lived helpers. Here we drop every event
+# whose process, OR its parent, belongs to OUR cgroup - identified at run time
+# from /proc/self/cgroup (we ARE that cgroup), never a hard-coded name. An
+# enrichment may return fewer rows than it got, so a dropped event is simply not
+# in the result - not collected, not saved.
+code: |
+  import os
+
+  def _self_pids():
+      pids = set()
+      try:
+          # our own cgroup path (cgroup v2: "0::/.../lisin.service")
+          line = open("/proc/self/cgroup").read().strip()
+          rel = line.rsplit(":", 1)[-1] if ":" in line else line
+          base = "/sys/fs/cgroup" + rel
+          for root, _dirs, files in os.walk(base):
+              if "cgroup.procs" in files:
+                  try:
+                      for p in open(os.path.join(root, "cgroup.procs")):
+                          p = p.strip()
+                          if p:
+                              pids.add(p)
+                  except OSError:
+                      pass
+      except Exception:
+          pass
+      return pids
+
+  def enrich(rows):
+      ours = _self_pids()
+      out = []
+      for r in rows:
+          pid = str(r.get("process_pid") or "").strip()
+          ppid = str(r.get("parent_pid") or "").strip()
+          cmd = (str(r.get("process_command_line") or "") + " "
+                 + str(r.get("process_executable") or "") + " "
+                 + str(r.get("process_name") or ""))
+          if (pid and pid in ours) or (ppid and ppid in ours) \
+                  or ("lisin_app.py" in cmd) or ("lisin-ebpf" in cmd):
+              continue                      # ours - not collected, not saved
+          out.append(r)
+      return out
+
+tests:
+  - name: an unrelated event is kept, ours is dropped by command
+    input: []
+    expect:
+      rows: 0

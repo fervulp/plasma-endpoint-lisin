@@ -23,11 +23,22 @@ fi
 echo "    $(bpftrace --version 2>/dev/null | head -1)"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-BT="$HERE/lisin-ebpf-exec.bt"
-[ -f "$BT" ] || { echo "collector script not found next to this one: $BT"; exit 1; }
+# dev: the .bt/wrapper sit next to this script (packaging/); rpm: this script is
+# in /usr/bin and they ship under /usr/share/lisin/packaging.
+find_asset() {
+    for d in "$HERE" /usr/share/lisin/packaging; do
+        [ -f "$d/$1" ] && { echo "$d/$1"; return 0; }
+    done
+    return 1
+}
+BT="$(find_asset lisin-ebpf-exec.bt)" || { echo "collector script not found (packaging/lisin-ebpf-exec.bt)"; exit 1; }
+WRAP="$(find_asset lisin-ebpf-collector.sh)" || { echo "collector wrapper not found (packaging/lisin-ebpf-collector.sh)"; exit 1; }
 
 echo "==> collector -> /usr/local/lib/lisin/lisin-ebpf-exec.bt"
 install -D -m 0755 "$BT" /usr/local/lib/lisin/lisin-ebpf-exec.bt
+echo "==> wrapper   -> /usr/local/lib/lisin/lisin-ebpf-collector.sh"
+install -D -m 0755 "$WRAP" /usr/local/lib/lisin/lisin-ebpf-collector.sh
+UID_N="$(id -u "$USER_NAME")"
 
 HOME_DIR="$(getent passwd "$USER_NAME" | cut -d: -f6)"
 [ -n "$HOME_DIR" ] || { echo "cannot resolve the home of $USER_NAME"; exit 1; }
@@ -46,8 +57,14 @@ After=network.target
 Type=simple
 # a bigger perf ring buffer -> fewer dropped events under exec/openat/connect bursts
 Environment=BPFTRACE_PERF_RB_PAGES=256
-# -B line: flush each event promptly; append: survive restarts and logrotate
-ExecStart=/usr/bin/stdbuf -oL -eL /usr/bin/bpftrace -q -B line /usr/local/lib/lisin/lisin-ebpf-exec.bt
+# truncate the spool on every (re)start so stale lines from an earlier build
+# (or repeated load-error text from a crash loop) never accumulate
+ExecStartPre=/usr/bin/truncate -s0 $SPOOL
+# the wrapper resolves LiSin's own cgroup id (lisin.scope for uid $UID_N) and
+# passes it to bpftrace as \$1, so the collector skips the agent's own subprocess
+# tree in the kernel. -B line + stdbuf -oL (inside the wrapper): flush each event
+# promptly to the redirected stdout (bpftrace block-buffers to a file otherwise).
+ExecStart=/usr/local/lib/lisin/lisin-ebpf-collector.sh $UID_N /usr/local/lib/lisin/lisin-ebpf-exec.bt
 StandardOutput=append:$SPOOL
 Restart=on-failure
 RestartSec=3
@@ -76,6 +93,12 @@ sleep 2
 echo "==> status"
 systemctl --no-pager --lines=6 status lisin-ebpf || true
 echo
-echo "DONE. Watch events arrive (run something in another terminal):"
-echo "    tail -f $SPOOL"
-echo "Then in Pipelines you can switch off 'proc_events' to avoid duplicate starts."
+echo "DONE."
+echo "IMPORTANT - self-noise skip depends on LiSin running in its own cgroup:"
+echo "  1. Launch LiSin via packaging/lisin.sh (it wraps the app in lisin.scope)."
+echo "  2. THEN restart the collector so it resolves the scope's cgroup id:"
+echo "         sudo systemctl restart lisin-ebpf"
+echo "     (re-run this after any LiSin restart - the cgroup id changes)."
+echo "Verify the skip is active:"
+echo "     systemctl status lisin-ebpf | grep 'skipping self cgroup'"
+echo "Watch events arrive:  tail -f $SPOOL"

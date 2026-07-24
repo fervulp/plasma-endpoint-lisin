@@ -48,8 +48,12 @@ def _plugin(code: str, fname: str):
     if fn is None:
         # EXPERTISE - so that a plugin can read REFERENCE DATA from
         # expertise/reference/*.yaml (human names of ports, processes and so on)
-        # without hard-coding the paths.
-        ns = {"re": re, "json": json, "EXPERTISE": EXPERTISE}
+        # without hard-coding the paths. STATE_DB - the one data.db file (state +
+        # events), so an enrichment reads the collected state without hard-coding
+        # the path (which broke every enrichment when the file was renamed).
+        from .statedb import DB_PATH as _DBP
+        ns = {"re": re, "json": json, "EXPERTISE": EXPERTISE,
+              "STATE_DB": str(_DBP)}
         try:
             exec(compile(code, "<plugin>", "exec"), ns)
         except Exception as e:
@@ -322,8 +326,11 @@ class StatePipeline:
             # spell out an argv array); a list is supported as well
             if isinstance(cmd, str):
                 cmd = ["bash", "-c", cmd]
-            text = subprocess.run(cmd, capture_output=True,
-                                  text=True, timeout=60).stdout
+            # errors="replace": a command's stdout is not guaranteed valid UTF-8
+            # (a file path or argv may hold arbitrary bytes, and `tail -c N` can
+            # cut a multibyte char) - a bad byte must not kill the whole input.
+            text = subprocess.run(cmd, capture_output=True, text=True,
+                                  errors="replace", timeout=60).stdout
             # the last execution of the input: its stdout
             self.peek[(pipe, node_id)] = {"out_text": text[:20000]}
             st["rows"] = self._walk(pl, nodes, node_id, pipe,

@@ -16,11 +16,12 @@ code: |
   import sqlite3
   from pathlib import Path
 
-  _DB = str(Path.home() / ".local/share/lisin/state.db")
+  _DB = str(Path.home() / ".local/share/lisin/data.db")
 
   def _load():
       by_pid, cwd = {}, {}
       host_ip, host_os = "", ""
+      cur_boot_id, cur_boot_at = "", ""
       try:
           con = sqlite3.connect("file:%s?mode=ro" % _DB, uri=True)
           con.row_factory = sqlite3.Row
@@ -58,16 +59,29 @@ code: |
                       break
           except sqlite3.Error:
               pass
+          try:
+              # THE CURRENT BOOT - so every live event is stamped with which
+              # power-on it belongs to and WHEN the machine came up. All events
+              # collected now are from this boot; historical journal records keep
+              # the boot_id their normalizer read from the record itself.
+              row = con.execute(
+                  "SELECT boot_id, started FROM boot_sessions WHERE current='yes' "
+                  "AND COALESCE(boot_id,'') <> '' LIMIT 1").fetchone()
+              if row:
+                  cur_boot_id = str(row["boot_id"] or "")
+                  cur_boot_at = str(row["started"] or "")
+          except sqlite3.Error:
+              pass
           con.close()
       except Exception:
           pass
-      return by_pid, cwd, host_ip, host_os
+      return by_pid, cwd, host_ip, host_os, cur_boot_id, cur_boot_at
 
   def _base(cmd):
       return cmd.split(" ")[0].rsplit("/", 1)[-1]
 
   def enrich(rows):
-      by_pid, cwd, host_ip, host_os = _load()
+      by_pid, cwd, host_ip, host_os, cur_boot_id, cur_boot_at = _load()
       # a service event carries its resulting STATE, derived from the action -
       # it was empty although service_start/service_stop events exist in their
       # thousands (a normalized field, filled here to avoid a fragile edit of the
@@ -81,6 +95,12 @@ code: |
               r["host_ip"] = host_ip
           if host_os and not str(r.get("host_os") or "").strip():
               r["host_os"] = host_os
+          # WHICH POWER-ON this event belongs to, and when the machine came up -
+          # so events can be assembled historically per boot
+          if cur_boot_id and not str(r.get("boot_id") or "").strip():
+              r["boot_id"] = cur_boot_id
+          if cur_boot_at and not str(r.get("boot_at") or "").strip():
+              r["boot_at"] = cur_boot_at
           st = state_of.get(str(r.get("event_action") or ""))
           if st and not str(r.get("service_state") or "").strip():
               r["service_state"] = st

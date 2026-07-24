@@ -26,7 +26,7 @@ code: |
       import os
       import sqlite3
       from pathlib import Path
-      db = str(Path.home() / ".local/share/lisin/state.db")
+      db = str(Path.home() / ".local/share/lisin/data.db")
       try:
           sig = os.path.getmtime(db)
       except OSError:

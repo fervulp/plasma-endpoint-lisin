@@ -5,6 +5,7 @@ import org.kde.kirigami as Kirigami
 import "../components"
 import "../components/Fmt.js" as Fmt
 import "../components/QueryMatch.js" as QM
+import "../components/Sev.js" as Sev
 
 // FILE ACTIVITY: what was created, changed, deleted - and by whom.
 //
@@ -54,11 +55,7 @@ Item {
                  : (row.who_source ? "" : "not recorded")
         return undefined
     }
-    function rowAccent(r) {
-        if (!r) return ""
-        var s = Number(r.event_severity || 0)
-        return s >= 70 ? "#e74c3c" : s >= 45 ? "#e67e22" : s >= 25 ? "#f1c40f" : ""
-    }
+    function rowAccent(r) { return r ? Sev.byScore(r.event_severity) : "" }
 
     readonly property var rows: d.events || []
     readonly property var shown: {
@@ -169,26 +166,12 @@ Item {
                     width: scroller.availableWidth
                     spacing: 2
                     Repeater {
-                        model: view.sel ? Object.keys(view.sel) : []
-                        delegate: RowLayout {
+                        model: view.sel ? Object.keys(view.sel).filter(k => k !== "_id") : []
+                        // the shared field row - same look and local-time formatting
+                        delegate: DetailField {
                             required property var modelData
-                            Layout.fillWidth: true
-                            visible: String(view.sel[modelData] || "") !== ""
-                            spacing: Kirigami.Units.smallSpacing
-                            QQC2.Label {
-                                Layout.preferredWidth: Kirigami.Units.gridUnit * 9
-                                text: modelData
-                                opacity: 0.6
-                                elide: Text.ElideRight
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            }
-                            QQC2.Label {
-                                Layout.fillWidth: true
-                                text: modelData === "ts" ? Fmt.local(view.sel.ts)
-                                                         : String(view.sel[modelData])
-                                wrapMode: Text.WrapAnywhere
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            }
+                            label: modelData
+                            value: view.sel ? (view.sel[modelData] ?? "") : ""
                         }
                     }
                     QQC2.Button {

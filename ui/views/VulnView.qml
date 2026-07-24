@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "../components"
+import "../components/Sev.js" as Sev
 import "../pages"
 import "."
 
@@ -129,8 +130,8 @@ Item {
     // the colour comes from the CVSS SCORE - it is comparable between advisories,
     // unlike the wording of severity, which every vendor interprets its own way
     function cvssColor(r) {
-        return r === "Critical" ? "#c0392b" : r === "High" ? "#e74c3c"
-             : r === "Medium" ? "#e67e22" : r === "Low" ? "#f1c40f"
+        return r === "Critical" ? Sev.colorOf("critical") : r === "High" ? Sev.colorOf("high")
+             : r === "Medium" ? Sev.colorOf("medium") : r === "Low" ? Sev.colorOf("low")
              : Kirigami.Theme.disabledTextColor
     }
 
@@ -160,9 +161,9 @@ Item {
     }
     function sevColor(r) {
         if (r.cvss_rating) return view.cvssColor(r.cvss_rating)
-        return r.severity === "Critical" ? "#c0392b"
-             : r.severity === "Important" ? "#e74c3c"
-             : r.severity === "Moderate" ? "#e67e22" : "#f1c40f"
+        return Sev.colorOf(r.severity === "Critical" ? "critical"
+             : r.severity === "Important" ? "high"
+             : r.severity === "Moderate" ? "medium" : "low")
     }
     function cell(r, k) {
         if (k === "cvss") return r.cvss_score || ""
@@ -427,23 +428,12 @@ Item {
                 }
                 Repeater {
                     model: view.sel ? view.detailRows(view.sel) : []
-                    delegate: RowLayout {
+                    // the shared field row - same look as the "Data" Details panel
+                    delegate: DetailField {
                         required property var modelData
-                        Layout.fillWidth: true
-                        spacing: Kirigami.Units.smallSpacing
-                        visible: String(modelData.v).trim() !== ""
-                        QQC2.Label {
-                            text: modelData.k
-                            opacity: 0.6
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 10
-                            font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        }
-                        QQC2.Label {
-                            Layout.fillWidth: true
-                            text: String(modelData.v)
-                            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-                            font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        }
+                        label: modelData.k
+                        value: modelData.v
+                        mono: modelData.k === "CVSS vector" || modelData.k === "CVE"
                     }
                 }
             }

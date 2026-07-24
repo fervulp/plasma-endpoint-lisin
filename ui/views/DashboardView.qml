@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "../components/Fmt.js" as Fmt
+import "../components/Sev.js" as Sev
 import "../components"
 import "../pages"
 import "."
@@ -78,7 +79,16 @@ Item {
         view.sideNode = n
         // EVERYTHING about the object of a node: for an event all of its fields by
         // taxonomy, for a config/service/package its own row + the related ones
-        view.sideInfo = backend.nodeInfo(n)
+        var info = backend.nodeInfo(n)
+        // CAN I TURN IT OFF? surface the plain-language control hint for a
+        // service/schedule node at the top (disable vs mask vs already off).
+        if (n && n.control && info) {
+            var secs = (info.sections || []).slice()
+            secs.unshift({ title: "How to turn it off",
+                           rows: [{ k: "action", v: String(n.control) }] })
+            info = { sections: secs, error: info.error || "" }
+        }
+        view.sideInfo = info
         // CLICKING A PROCESS NODE refreshes the full process panel for THAT
         // process - How it started, the package, and the ACTIVITY HISTORY - so
         // its activity is shown in the sidebar without having to re-anchor. It
@@ -114,6 +124,12 @@ Item {
         else if (action === "events") {
             var w = view.eventsWhere(n)
             if (w !== "") root.focusEvents(w)
+        } else if (action === "ops") {
+            // a File/Network/... operations node -> that slice of the timeline
+            var pp = []
+            if (n.pid) pp.push("process_pid='" + n.pid + "'")
+            if (n.evcat) pp.push("event_category='" + n.evcat + "'")
+            if (pp.length) root.focusEvents(pp.join(" AND "))
         } else if (action === "whois") {
             var wi = backend.whoisLookup(n.val)
             view.sideNode = n
@@ -125,11 +141,13 @@ Item {
     }
     function openFullGraph() { fullGraph.open() }
     function eventsWhere(n) {
-        // on an event node val is the ACTION, while the pid is a separate field
-        if (n.category === "events") {
+        // event activity nodes (netact/fileact/cmdact...): filter by pid + the
+        // event category (and the action if present) so the block opens its slice.
+        if (n.table === "events" || n.category === "events") {
             var parts = []
             if (n.pid) parts.push("process_pid='" + n.pid + "'")
-            if (n.val) parts.push("event_action='" + n.val + "'")
+            if (n.evcat) parts.push("event_category='" + n.evcat + "'")
+            else if (n.val) parts.push("event_action='" + n.val + "'")
             return parts.join(" AND ")
         }
         if (n.table === "processes") return "process_pid='" + n.val + "'"
@@ -172,17 +190,12 @@ Item {
     // filtering → the list is flat, so tree indent must not be applied
     readonly property bool filtering: procFilter.text.trim() !== ""
 
-    function fmtMB(v) {
-        var n = Number(v) || 0
-        if (n <= 0) return ""
-        return n >= 1024 ? (n / 1024).toFixed(1) + " GB" : Math.round(n) + " MB"
-    }
     function cellText(p, k) {
         if (k === "pid") return String(p.pid)
         if (k === "user") return p.user || ""
-        if (k === "rss") return view.fmtMB(p.rss)
+        if (k === "rss") return Fmt.mib(p.rss)
         if (k === "subtree") return (p.subtree || 0) > (p.rss || 0)
-                                    ? view.fmtMB(p.subtree) : ""
+                                    ? Fmt.mib(p.subtree) : ""
         if (k === "cpu") return (p.cpu || 0) > 0 ? p.cpu + "%" : ""
         if (k === "elapsed") return p.elapsed || ""
         if (k === "files") return (p.files || 0) > 0 ? String(p.files) : ""
@@ -312,52 +325,6 @@ Item {
             Layout.leftMargin: Kirigami.Units.largeSpacing
             spacing: 1
             visible: isec.shown
-        }
-    }
-
-    // a key-value pair on one line
-    component KV: RowLayout {
-        property string k
-        property string v
-        visible: v !== ""
-        Layout.fillWidth: true
-        spacing: Kirigami.Units.smallSpacing
-        QQC2.Label {
-            text: k; opacity: 0.6
-            font.pointSize: Kirigami.Theme.smallFont.pointSize
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 6
-        }
-        QQC2.Label {
-            text: v; Layout.fillWidth: true
-            elide: Text.ElideMiddle
-            font.pointSize: Kirigami.Theme.smallFont.pointSize
-        }
-    }
-    // a mini section with a list of monospaced lines
-    component Mini: ColumnLayout {
-        property string heading
-        property var lines: []
-        Layout.fillWidth: true
-        Layout.preferredWidth: 1
-        Layout.alignment: Qt.AlignTop
-        spacing: 1
-        visible: lines.length > 0
-        QQC2.Label {
-            text: heading + "  (" + lines.length + ")"
-            font.bold: true
-            font.pointSize: Kirigami.Theme.smallFont.pointSize
-            opacity: 0.8
-        }
-        Repeater {
-            model: parent.lines
-            QQC2.Label {
-                Layout.fillWidth: true
-                text: modelData
-                elide: Text.ElideRight
-                font.family: "monospace"
-                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                opacity: 0.85
-            }
         }
     }
 
@@ -650,7 +617,11 @@ Item {
                             Layout.rightMargin: Kirigami.Units.smallSpacing
                             spacing: Kirigami.Units.smallSpacing
                             QQC2.Label {
+                                // keep the header's name region from collapsing
+                                // below the row's, so the numeric headers stay
+                                // aligned with their columns when space is tight
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: Kirigami.Units.gridUnit * 10
                                 text: "Process"
                                 opacity: 0.6
                                 font.bold: true
@@ -732,8 +703,8 @@ Item {
                                         anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
                                         width: 3
                                         visible: procRow.modelData.risk > 0
-                                        color: procRow.modelData.risk >= 5 ? "#e74c3c"
-                                             : procRow.modelData.risk >= 3 ? "#e67e22" : "#f1c40f"
+                                        color: Sev.colorOf(procRow.modelData.risk >= 5 ? "high"
+                                             : procRow.modelData.risk >= 3 ? "medium" : "low")
                                     }
                                 }
 
@@ -744,9 +715,12 @@ Item {
                                     // list is flat, so the indent is dropped — it
                                     // used to stay and pushed the row sideways.
                                     Item {
+                                        // depth shown gently: 0.6 gridUnit per level,
+                                        // capped, so a deep tree does not push the
+                                        // process name off the row.
                                         Layout.preferredWidth: view.filtering ? 0
                                             : Math.min(procRow.modelData.depth, 8)
-                                              * Kirigami.Units.gridUnit
+                                              * Kirigami.Units.gridUnit * 0.6
                                     }
                                     // Fixed-width slot: the chevron and its empty
                                     // placeholder are the SAME width, so rows with
@@ -771,7 +745,12 @@ Item {
                                         Layout.preferredHeight: Kirigami.Units.iconSizes.small
                                     }
                                     QQC2.Label {
+                                        // the MOST important column: never let it
+                                        // shrink away. It has a minimum width, so
+                                        // when space is tight the numeric columns
+                                        // give way (they can shrink), not the name.
                                         Layout.fillWidth: true
+                                        Layout.minimumWidth: Kirigami.Units.gridUnit * 8
                                         text: procRow.modelData.name
                                         elide: Text.ElideRight
                                         font.pointSize: Kirigami.Theme.smallFont.pointSize

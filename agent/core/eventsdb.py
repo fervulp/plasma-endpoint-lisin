@@ -1,9 +1,8 @@
-"""The EVENT database: a separate SQLite (events.db), schema from the taxonomy.
-
-Why separate from state.db: state is a snapshot of "now" (upsert, hundreds of
-rows), events are a stream (append-only, hundreds of thousands of rows,
-retention). Different load profiles and their own WAL, so that the volume of
-events does not get in the way of the state.
+"""The events table, schema from the taxonomy - it lives in the SAME file as the
+state (data.db, see StateDB). It used to be a separate events.db; merging the two
+gives native events<->state joins and one file to VACUUM. EventsDB keeps its own
+class because its needs differ from a state table: an append-only schema built
+from the taxonomy, INSERT OR IGNORE dedup, and retention.
 
 Deduplication: UNIQUE on the taxonomy key (event_id = the journal cursor) +
 INSERT OR IGNORE. That is why an input may collect with an OVERLAPPING window
@@ -16,9 +15,13 @@ import time
 from pathlib import Path
 
 from . import taxonomy as tx
+from .statedb import DB_PATH          # one file for state AND events (data.db)
 
-DB_PATH = Path.home() / ".local/share/lisin/events.db"
-MAX_ROWS = 300_000          # retention: keep the last N events
+# retention: keep the newest events up to EITHER a row ceiling OR a size budget,
+# whichever bites first - so the store never exceeds the size the user allowed,
+# but also holds as many events as fit. Both are configurable in Settings.
+MAX_ROWS = 2_000_000        # row ceiling
+MAX_MB = 1024               # size budget for the events data (MB)
 
 
 class EventsDB:
@@ -139,12 +142,11 @@ class EventsDB:
                            "not_normalized": (have + " · " + mark) if have else mark}
                 if not row.get("ingested"):
                     row = {**row, "ingested": now}
-                # RAW IS NOT ALWAYS STORED: if a rule parsed the record
-                # completely (not_normalized is empty), the original is pure
-                # duplication of the columns already extracted. On a real database
-                # that is 42% of the file. We keep raw where it is actually needed:
-                # when something was NOT parsed (it shows what to improve in the rule).
-                if row.get("raw") and not str(row.get("not_normalized") or ""):
+                # RAW IS NOT STORED. The original text only duplicates the columns
+                # already extracted; what a rule did NOT parse is still recorded by
+                # NAME in not_normalized (tiny), so a rule that missed a field stays
+                # visible without keeping the whole original blob for every event.
+                if row.get("raw"):
                     row = {**row, "raw": ""}
                 vals = [self._val(row.get(k)) for k in cols]
                 cur = c.execute(
@@ -164,15 +166,73 @@ class EventsDB:
         import json
         return json.dumps(v, ensure_ascii=False)
 
-    def prune(self, max_rows: int = MAX_ROWS):
-        """Retention: keep the last max_rows events."""
+    def prune(self, max_rows: int = None, max_mb: int = None):
+        """Retention: keep the NEWEST events up to a row ceiling AND a size budget.
+
+        Two limits, whichever bites first: the user asked to hold as many events
+        as possible (millions) but never let the store exceed a size (~1 GB). The
+        row cap is exact; the size cap estimates bytes-per-event from the live page
+        usage and trims the oldest until the live event data fits the budget. Then
+        VACUUM gives the freed pages back to the filesystem.
+        """
+        try:
+            from agent.core import config
+            if max_rows is None:
+                max_rows = int(config.get("events_retention", MAX_ROWS))
+            if max_mb is None:
+                max_mb = int(config.get("events_max_mb", MAX_MB))
+        except Exception:
+            max_rows = max_rows or MAX_ROWS
+            max_mb = max_mb or MAX_MB
+        max_rows = max(1000, int(max_rows))
+        max_mb = max(16, int(max_mb))
         with self._con() as c:
             n = c.execute(f'SELECT COUNT(*) AS n FROM "{self.table}"'
                           ).fetchone()["n"]
+            # 1) the row ceiling (exact)
             if n > max_rows:
                 c.execute(f'DELETE FROM "{self.table}" WHERE _id IN ('
                           f'SELECT _id FROM "{self.table}" ORDER BY _id ASC '
                           f'LIMIT {int(n - max_rows)})')
+                n = max_rows
+            # 2) the size budget: how many events actually fit in max_mb, from the
+            # live page usage of the table + its indexes (dbstat, not the file size,
+            # so the freelist left by earlier deletes does not skew the estimate)
+            budget = max_mb * 1024 * 1024
+            try:
+                weight = c.execute(
+                    "SELECT SUM(pgsize) AS b FROM dbstat WHERE name=? "
+                    "OR name LIKE 'ix_' || ? || '_%' OR name LIKE 'ux_' || ? || '_%'",
+                    (self.table, self.table, self.table)).fetchone()["b"] or 0
+            except Exception:
+                weight = 0
+            if weight > budget and n > 1000:
+                per = weight / max(n, 1)                 # bytes per event, live
+                keep = max(1000, int(budget / max(per, 1)))
+                if keep < n:
+                    c.execute(f'DELETE FROM "{self.table}" WHERE _id IN ('
+                              f'SELECT _id FROM "{self.table}" ORDER BY _id ASC '
+                              f'LIMIT {int(n - keep)})')
+        self._reclaim()
+
+    def _reclaim(self, min_dead_mb: int = 50):
+        """Give back the space the retention DELETEs leave behind. A DELETE only
+        moves pages to the freelist; without VACUUM the file never shrinks - it
+        had grown to 355 MB of which 244 MB was dead freelist. VACUUM rewrites the
+        file, so it runs only when there is enough dead space to be worth it (the
+        threshold means one big compaction, then nothing until it builds up again).
+        VACUUM cannot run inside a transaction, hence a fresh autocommit connection.
+        """
+        try:
+            con = sqlite3.connect(self.path, timeout=30)
+            con.isolation_level = None
+            free = con.execute("PRAGMA freelist_count").fetchone()[0]
+            pgsz = con.execute("PRAGMA page_size").fetchone()[0]
+            if free * pgsz > min_dead_mb * 1024 * 1024:
+                con.execute("VACUUM")
+            con.close()
+        except Exception:
+            pass
 
     # -------- reading --------
     def recent(self, limit: int = 200, offset: int = 0,
@@ -183,7 +243,10 @@ class EventsDB:
         sql = f'SELECT * FROM "{self.table}"'
         if where:
             sql += f" WHERE {where}"
-        sql += f" ORDER BY {order}" if order else " ORDER BY _id DESC"
+        # newest by EVENT TIME first (ts is sortable ISO-8601 UTC); _id breaks
+        # ties and keeps pagination stable. eBPF converts nsecs->ts and appends in
+        # batches, so insertion order (_id) is not the same as time order.
+        sql += f" ORDER BY {order}" if order else " ORDER BY ts DESC, _id DESC"
         sql += f" LIMIT {limit} OFFSET {max(0, int(offset))}"
         c = self._reader()
         rows = [dict(r) for r in c.execute(sql, params)]

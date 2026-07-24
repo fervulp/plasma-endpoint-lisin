@@ -4,6 +4,7 @@ import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "../components"
 import "../components/QueryMatch.js" as QM
+import "../components/Sev.js" as Sev
 import "../components/Fmt.js" as Fmt
 
 // PRIVILEGE ESCALATION: both the EVENTS (who did what through sudo, failed
@@ -73,8 +74,8 @@ Item {
     }
     function rowAccent(r) {
         if (!r) return ""
-        if (r.risk === "high" || r.event_outcome === "failure") return "#e74c3c"
-        if (r.nopasswd === "yes" || r.privilege === "admin") return "#e67e22"
+        if (r.risk === "high" || r.event_outcome === "failure") return Sev.colorOf("high")
+        if (r.nopasswd === "yes" || r.privilege === "admin") return Sev.colorOf("medium")
         return ""
     }
 
@@ -185,25 +186,12 @@ Item {
                     width: scroller.availableWidth
                     spacing: 2
                     Repeater {
-                        model: view.sel ? Object.keys(view.sel) : []
-                        delegate: RowLayout {
+                        model: view.sel ? Object.keys(view.sel).filter(k => k !== "_id") : []
+                        // the shared field row - same look and local-time formatting
+                        delegate: DetailField {
                             required property var modelData
-                            Layout.fillWidth: true
-                            visible: String(view.sel[modelData] || "") !== ""
-                            spacing: Kirigami.Units.smallSpacing
-                            QQC2.Label {
-                                Layout.preferredWidth: Kirigami.Units.gridUnit * 8
-                                text: modelData
-                                opacity: 0.6
-                                elide: Text.ElideRight
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            }
-                            QQC2.Label {
-                                Layout.fillWidth: true
-                                text: String(view.sel[modelData])
-                                wrapMode: Text.WrapAnywhere
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            }
+                            label: modelData
+                            value: view.sel ? (view.sel[modelData] ?? "") : ""
                         }
                     }
                     QQC2.Button {

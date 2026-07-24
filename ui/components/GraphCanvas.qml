@@ -579,6 +579,14 @@ Item {
                             }
                             QQC2.ToolButton {
                                 width: 22; height: 22
+                                icon.name: "view-calendar-list"
+                                visible: modelData.drill === "ops"
+                                QQC2.ToolTip.text: "Open this activity in the timeline"
+                                QQC2.ToolTip.visible: hovered
+                                onClicked: canvasRoot.drillRequested("ops", modelData)
+                            }
+                            QQC2.ToolButton {
+                                width: 22; height: 22
                                 icon.name: "view-list-details"
                                 visible: (modelData.table || "") !== ""
                                 QQC2.ToolTip.text: "Show in State"

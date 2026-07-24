@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls as QQC2
 import org.kde.kirigami as Kirigami
 import "../components/Fmt.js" as Fmt
+import "../components/Sev.js" as Sev
 import "../components"
 import "../views"
 import "."
@@ -10,16 +11,69 @@ import "."
 // System state: read-only tables view. Table/field/record management
 // lives in the SQL tab. Right sidebars (details, columns) are full height.
 Kirigami.Page {
+    // no page title: the section is "Data" in the drawer; a header just wastes space
     id: page
-    title: "State"
+    title: ""
     padding: 0
 
     property var s: root.sysState
     // Vulnerabilities live in a separate tab of the "Dashboards" section: that is
     // not an inventory of the system but a list of tasks, "what to patch".
+    // EVENTS is just another Data tab now (no separate menu). It lives in
+    // events.db, so the backend routes tableRows("events", ...) there; here it is
+    // a synthetic tab with a curated column set (the full field set is in the
+    // Details sidebar and via SQL). colcfg is an empty object so all its columns
+    // show by default.
+    property int eventsTotal: 0        // all events in events.db (for the tab count)
+    function refreshEventsTotal() {
+        var r = backend.tableRows("events", "", "", 1, 0)
+        page.eventsTotal = r.total || 0
+    }
+    readonly property var eventsTab: ({
+        name: "events", title: "Events", icon: "view-list-details",
+        builtin: true, count: page.eventsTotal, collected_at: "",
+        // hidden-by-default (still available in the Columns picker)
+        colcfg: ({ hidden: ["user_name", "event_module", "process_pid",
+                            "subject_name"] }),
+        columns: ["ts", "event_module", "event_category", "event_action",
+                  "event_outcome", "subject_name", "process_name", "process_pid",
+                  "user_name", "destination_ip", "object_type", "object_name",
+                  "message"]
+    })
+    // THE EVENT TAXONOMY: all 107 field names + the fields grouped by category.
+    // Loaded once (the taxonomy is static). Used for the events tab: every field
+    // is offered in the query bar SELECT, and the Details sidebar groups by category.
+    readonly property var eventTax: backend.eventTaxonomy()
+    readonly property bool onEvents: cur && cur.name === "events"
+    // the fields the Details sidebar shows, in SECTIONS: for events, grouped by
+    // taxonomy category; for any other table, one unnamed section of its columns
+    property var detailSections: {
+        if (!lastSel || !cur) return []
+        if (onEvents && eventTax.groups && eventTax.groups.length)
+            return eventTax.groups
+        return [{ group: "", fields: cur.columns }]
+    }
+    // priority of the state tables (Events is always first, then Processes, then
+    // the rest by how central they are to an investigation).
+    readonly property var tabPrio: ({
+        processes: 1, ports: 2, applications: 3, services: 4, scheduled: 5,
+        persistence: 6, open_files: 7, app_config: 8, config_files: 9,
+        privesc: 10, suid_binaries: 11, users: 12, network: 13, dns: 14,
+        unix_sockets: 15, net_config: 16, browser_extensions: 17,
+        browser_history: 18, shell_history: 19, logins: 20, kernel_modules: 21,
+        mounts: 22, security: 23, firewall: 24, unpackaged_config: 25
+    })
     property var tabsModel: {
-        var t = s ? s.tabs : []
-        return t.filter(function (x) { return x.name !== "vulnerabilities" })
+        var t = (s ? s.tabs : []).filter(function (x) {
+            return x.name !== "vulnerabilities"
+        })
+        var arr = t.slice()
+        arr.sort(function (a, b) {
+            var pa = page.tabPrio[a.name] || 99, pb = page.tabPrio[b.name] || 99
+            return pa !== pb ? pa - pb
+                             : String(a.title || a.name).localeCompare(String(b.title || b.name))
+        })
+        return [page.eventsTab].concat(arr)
     }
     property int tabIndex: 0
     // THE ROWS OF THE CURRENT TABLE, fetched by name. The snapshot used to carry
@@ -30,16 +84,51 @@ Kirigami.Page {
     property var curRows: []          // ONE page, as the database returned it
     property int curTotal: 0          // how many rows the condition matches in total
     property string rowsError: ""
+    // JOIN state: when joinTable is set, the current table is LEFT JOINed with it
+    // on joinLeft = joinRight and the joined columns appear (prefixed) after it.
+    property string joinTable: ""
+    property string joinLeft: ""
+    property string joinRight: ""
+    property var joinCols: []         // columns the join query returned (base + join.*)
     function loadRows() {
         if (!cur) { curRows = []; curTotal = 0; rowsError = ""; return }
         var where = page.whereSql()
         var order = sortCol !== "" ? (sortCol + (sortAsc ? " ASC" : " DESC")) : ""
-        var r = backend.tableRows(cur.name, where, order,
-                                  pageLimit > 0 ? pageLimit : 0,
-                                  pageLimit > 0 ? pageIndex * pageLimit : 0)
+        var lim = pageLimit > 0 ? pageLimit : 0
+        var off = pageLimit > 0 ? pageIndex * pageLimit : 0
+        var r
+        if (page.joinTable !== "" && page.joinLeft !== "" && page.joinRight !== "") {
+            r = backend.tableJoinRows(cur.name, page.joinTable, page.joinLeft,
+                                      page.joinRight, where, order, lim, off)
+            page.joinCols = r.columns || []
+        } else {
+            r = backend.tableRows(cur.name, where, order, lim, off)
+            page.joinCols = []
+        }
         curRows = r.rows || []
         curTotal = r.total || 0
         rowsError = r.error || ""
+    }
+    property var joinTablesList: []   // tables that can be joined to the current one
+    function fetchJoinTables() {
+        // works for events too: it joins state tables (cross-database)
+        joinTablesList = cur ? (backend.joinTables(cur.name) || []) : []
+    }
+    function setJoinTable(t) {
+        joinTable = String(t || "")
+        if (joinTable === "") { joinLeft = ""; joinRight = "" }
+        else {
+            var s = backend.joinSuggest(cur.name, joinTable)   // suggest the ON pair
+            joinLeft = s.left || ""; joinRight = s.right || ""
+        }
+        pageIndex = 0
+        loadRows()
+    }
+    function joinTableColumns() {
+        for (var i = 0; i < joinTablesList.length; i++)
+            if (joinTablesList[i].name === joinTable)
+                return joinTablesList[i].columns || []
+        return []
     }
     // filtering the list of tables by name
     property string tabFilter: ""
@@ -58,19 +147,57 @@ Kirigami.Page {
     property var cur: tabIndex >= 0 && tabIndex < tabsModel.length
                       ? tabsModel[tabIndex] : null
 
-    property var listCols: cur ? cur.columns : []
+    // the columns to render: the join result's columns when a join is active,
+    // otherwise the current table's own columns
+    property var listCols: (joinTable !== "" && joinCols.length)
+                           ? joinCols : (cur ? cur.columns : [])
     property var colOrder: {
         if (!cur) return listCols
         const cfg = cur.colcfg
-        const base = cfg && cfg.order ? cfg.order.filter(c => listCols.includes(c)) : []
-        for (const c of listCols) if (!base.includes(c)) base.push(c)
-        return base
+        if (cfg && cfg.order && cfg.order.length) {      // a saved order wins
+            const base = cfg.order.filter(c => listCols.includes(c))
+            for (const c of listCols) if (!base.includes(c)) base.push(c)
+            return base
+        }
+        return page.interestOrder(listCols)              // else: analyst-first
+    }
+    // ANALYST-FIRST default column order for every Data tab: what a row IS
+    // (name/command) and WHY it matters (risk/exposure/action/network) come first;
+    // long/technical columns go last. Only the DEFAULT - a user-saved order (and
+    // per-table tuned defaults like processes) still wins above.
+    readonly property var interestKeys: [
+        "ts", "name", "command", "title", "unit", "action", "outcome",
+        "risk", "exposure", "severity", "threat", "status", "nopasswd", "cvss",
+        "category", "module", "destination", "remote", "source", "address",
+        "ip", "port", "proto", "user", "owner", "subject", "object",
+        "path", "file", "exe", "package", "vector", "changed", "enabled",
+        "purpose", "message", "pid", "kind", "version"]
+    readonly property var lateKeys: ["content", "description", "code", "vrl", "raw"]
+    function colScore(c) {
+        var lc = String(c).toLowerCase()
+        if (lc.charAt(0) === "_") return 2000
+        for (var i = 0; i < lateKeys.length; i++)
+            if (lc.indexOf(lateKeys[i]) >= 0) return 1000 + i
+        for (var j = 0; j < interestKeys.length; j++)
+            if (lc.indexOf(interestKeys[j]) >= 0) return j
+        return 500
+    }
+    function interestOrder(cols) {
+        // decorate-sort-undecorate keeps it stable for equal scores (columns of
+        // the same rank keep their natural order)
+        var dec = cols.map(function (c, i) { return [page.colScore(c), i, c] })
+        dec.sort(function (a, b) { return a[0] - b[0] || a[1] - b[1] })
+        return dec.map(function (x) { return x[2] })
     }
     readonly property var longCols: ["content", "description", "code"]
     // "key" is NOT masked: no private material is stored in the database (for
     // private keys the value is empty), and public keys are open by definition -
     // we show their content directly. Only real secrets are masked.
     readonly property var sensitiveCols: ["secret", "private", "token", "password"]
+    // Events are append-only (events.db), not an editable state table: the row
+    // editor and cell writes are disabled for that tab (setCell would target a
+    // non-existent state table). Details/filtering/sorting still work.
+    readonly property bool curEditable: !(cur && cur.name === "events")
     // WHICH COLUMNS ARE SHOWN BY DEFAULT: all of them except the long ones
     // (content, description, vrl) and the secret ones.
     //
@@ -105,6 +232,9 @@ Kirigami.Page {
         if (typeof qbar !== "undefined") qbar.clearAll()
         liveWidths = ({}); selRows = []; selAnchor = -1; pageIndex = 0
         sortCol = ""; sortAsc = true; lastSel = null; selName = ""
+        allSelected = false
+        joinTable = ""; joinLeft = ""; joinRight = ""; joinCols = []
+        fetchJoinTables()
     }
     // The same tab, fresh data: we re-point the selection and the details row at
     // the NEW row objects by _id (so that they show the current values).
@@ -133,13 +263,22 @@ Kirigami.Page {
         for (var i = 0; i < tabsModel.length; i++) {
             if (tabsModel[i].name === f.table) { tabIndex = i; break }
         }
+        // a raw WHERE (a jump into the Events tab from a dashboard/graph): a raw
+        // condition already has operators, so applyQuery passes it straight to the
+        // events query. An empty raw just opens the tab.
+        if (f.raw !== undefined) {
+            page.applyQuery(String(f.raw || ""))
+            return
+        }
         if (typeof qbar !== "undefined") {
             qbar.clearAll()
             qbar.addCondition(f.col, "=", String(f.val))
             qbar.apply()
         }
     }
-    Component.onCompleted: { page.loadRows(); applyFocus() }
+    Component.onCompleted: {
+        page.loadRows(); page.refreshEventsTotal(); page.fetchJoinTables(); applyFocus()
+    }
 
     // FRESH DATA WITHOUT THRASHING. The snapshot arrives while the pipeline
     // collects (once a second at most), and re-reading the table on every one of
@@ -149,7 +288,7 @@ Kirigami.Page {
     Timer {
         id: rowsTimer
         interval: 400
-        onTriggered: page.loadRows()
+        onTriggered: { page.loadRows(); page.refreshEventsTotal() }
     }
     Connections {
         target: root
@@ -157,10 +296,15 @@ Kirigami.Page {
     }
 
     function colWidth(c) { return liveWidths[c] || savedWidths[c] || 160 }
-    property int tableWidth: {
-        let w = Math.round(Kirigami.Units.gridUnit * 2)   // the checkbox column
-        for (const c of visibleCols) w += colWidth(c)
-        return w
+    // ONE row height for BOTH tables (the group panel and the DataTable), so
+    // grouped rows are exactly as tall as the rows on the right. The probe is a
+    // hidden ItemDelegate built like a table row - default padding + a default
+    // font Label - so its implicitHeight IS the table's natural row height.
+    readonly property real rowHeight: _rowProbe.implicitHeight
+    QQC2.ItemDelegate {
+        id: _rowProbe
+        visible: false
+        contentItem: QQC2.Label { text: "Ag" }
     }
     function setColWidth(c, w) {
         const o = Object.assign({}, liveWidths)
@@ -198,11 +342,6 @@ Kirigami.Page {
         function onCollectingChanged() { page.collecting = backend.isCollecting() }
     }
 
-    // ---- search across all state tables ----
-    property bool searchAll: false
-    property var globalHits: ({ tables: [], total: 0 })
-    // for verification by rendering
-    function setSearchText(t) { search.text = t }
     function setQuick(t) { qbar.quickText = t; qbar.apply() }
     // for verification by rendering
     function setGroupBy(fs) {
@@ -213,17 +352,6 @@ Kirigami.Page {
         page.groupVal = String(row.value || "")
         page.groupParts = row.parts || []
         page.applyQuery(page.queryText)
-    }
-
-    function runGlobalSearch() {
-        globalHits = backend.stateSearch(search.text)
-    }
-    // a click on a found table: open it and keep the same text as the filter
-    function openHit(hit) {
-        for (var i = 0; i < tabsModel.length; i++)
-            if (tabsModel[i].name === hit.table) { tabIndex = i; break }
-        page.searchAll = false
-        page.pageIndex = 0
     }
 
     // sort + filters + pagination
@@ -271,22 +399,51 @@ Kirigami.Page {
     // look at whichever exist: severity/cvss_rating (vulnerabilities), risk
     // (privesc), exposure (sockets), status (kernel_params).
     function accentOf(r) { return String(page.rowAccent(r)) }
-    function rowAccent(r) {
+    // CELL TEXT: an ISO-8601 timestamp is shown as readable LOCAL time (not the
+    // raw "…T12:03:57Z"); everything else as-is. Applies to every table, so any
+    // time column reads nicely.
+    function cellDisplay(r, k) {
+        var v = r[k]
+        if (v === undefined || v === null) return ""
+        var s = String(v)
+        if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(s)) return Fmt.local(s)
+        return s
+    }
+    // the severity accent: the ONE shared mapping (Sev.js), so a row in "Data"
+    // gets the same colour for the same severity as every dashboard table
+    function rowAccent(r) { return Sev.stateAccent(r) }
+
+    // THE TYPE OF AN EVENT AT A GLANCE (icon): network / file / process /
+    // correlation (a detection is an alert) / aggregate / raw. Only used on the
+    // Events tab; other tables have no event_category.
+    readonly property var eventIcons: ({
+        network: "network-connect",
+        file: "document-edit-symbolic",       // monochrome file-ops icon
+        process: "system-run", authentication: "dialog-password",
+        iam: "dialog-password", driver: "drive-harddisk",
+        package: "package-x-generic", session: "system-users",
+        configuration: "document-properties", intrusion_detection: "security-high"
+    })
+    function eventIcon(r) {
         if (!r) return ""
-        var sev = String(r.severity || r.cvss_rating || "").toLowerCase()
-        if (sev.indexOf("critical") >= 0) return Kirigami.Theme.negativeTextColor
-        if (sev.indexOf("important") >= 0 || sev.indexOf("high") >= 0)
-            return Kirigami.Theme.neutralTextColor
-        var risk = String(r.risk || "").toLowerCase()
-        if (risk === "high") return Kirigami.Theme.negativeTextColor
-        if (risk === "medium") return Kirigami.Theme.neutralTextColor
-        var exp = String(r.exposure || "")
-        if (exp.indexOf("OPEN") >= 0) return Kirigami.Theme.negativeTextColor
-        if (exp.indexOf("filtered") >= 0) return Kirigami.Theme.neutralTextColor
-        var st = String(r.status || "").toLowerCase()
-        if (st === "open" || st === "differs") return Kirigami.Theme.neutralTextColor
-        if (String(r.deleted || "") === "yes") return Kirigami.Theme.negativeTextColor
-        return ""
+        // a detection (correlation) always reads as an alert
+        if (String(r.event_kind || "") === "alert") return "security-high"
+        // THE ICON IS DRIVEN BY event_category: an eBPF exec has category=process,
+        // so it gets the process icon (not a "raw" one).
+        var c = String(r.event_category || "")
+        if (c && page.eventIcons[c]) return page.eventIcons[c]
+        if (String(r.event_kind || "") === "aggregate") return "gnumeric-object-list"
+        if (String(r.raw || "") !== "" || String(r.not_normalized || "") !== "")
+            return "text-x-generic"
+        return "view-list-details"
+    }
+    function eventIconTip(r) {
+        if (!r) return ""
+        var k = String(r.event_kind || "")
+        if (k === "alert") return "Detection (correlation)"
+        if (k === "aggregate") return "Aggregate of " + (r.event_count || "?") + " events"
+        return String(r.event_category || "event")
+              + (String(r.raw || "") !== "" ? " · has raw" : "")
     }
 
     // ---- GROUPING (as in "Events") ----
@@ -301,6 +458,8 @@ Kirigami.Page {
         groupRows = r.rows || []
     }
     // the condition without the group - the groups themselves are counted by it
+    // (time filtering is done by adding a `ts` condition in the query bar - the
+    // QueryBar already understands ts and "last N days")
     function baseWhere() {
         if (queryText === "") return ""
         return hasOperator(queryText) ? queryText : freeText(queryText)
@@ -345,9 +504,37 @@ Kirigami.Page {
         if (g) w = w ? "(" + w + ") AND " + g : g
         return w
     }
+    // COPY: table cells are plain Labels (not selectable), so copying went through
+    // nothing. A hidden TextEdit is the portable clipboard bridge (no Clipboard
+    // type in plain QtQuick). copyText copies a value; copyRow copies the visible
+    // columns of a row as tab-separated text.
+    function copyText(s) {
+        clipHelper.text = String(s === null || s === undefined ? "" : s)
+        clipHelper.selectAll()
+        clipHelper.copy()
+        clipHelper.deselect()
+    }
+    function copyRow(r) {
+        var parts = []
+        for (var i = 0; i < page.visibleCols.length; i++)
+            parts.push(String(r[page.visibleCols[i]] === undefined
+                              ? "" : r[page.visibleCols[i]]))
+        copyText(parts.join("\t"))
+    }
+    TextEdit { id: clipHelper; visible: false }
+    property var menuRow: null
+    QQC2.Menu {
+        id: rowMenu
+        QQC2.MenuItem {
+            text: "Copy row"
+            icon.name: "edit-copy"
+            onTriggered: if (page.menuRow) page.copyRow(page.menuRow)
+        }
+    }
     function applyQuery(sql) {
         queryText = (sql || "").trim()
         pageIndex = 0
+        allSelected = false            // the matching set changed
         reloadGroups()
         page.loadRows()
         queryError = page.rowsError
@@ -364,14 +551,22 @@ Kirigami.Page {
     property var pagedRows: curRows
 
     property var selRows: []           // the selected rows (_id objects)
+    // "Select all" selects EVERY matching record across ALL pages, not just the
+    // loaded page. We keep a flag (not 36k row objects - that would kill the
+    // per-row isSel check); actions read allSelected + the current filter.
+    property bool allSelected: false
     property var lastSel: null         // the last clicked one - for the details sidebar
     property int selAnchor: -1         // the index for a shift range
     property string selName: ""        // the tab the selection belongs to
     function isSel(r) {
+        if (allSelected) return true
         return r._id !== undefined && selRows.some(x => x._id === r._id)
     }
+    // how many are selected, honouring the all-pages flag
+    property int selCount: allSelected ? curTotal : selRows.length
     function clickRow(r, index, mods) {
     selName = cur ? cur.name : ""    // the selection belongs to this tab
+    page.allSelected = false          // a specific click leaves all-pages mode
         if (mods & Qt.ShiftModifier && selAnchor >= 0) {
             const a = Math.min(selAnchor, index), b = Math.max(selAnchor, index)
             selRows = pagedRows.slice(a, b + 1)
@@ -391,6 +586,33 @@ Kirigami.Page {
             detailsPanel.open = false
         }
     }
+    // the tristate "select the whole page" header checkbox, and its toggle
+    property int headerCheckState: allSelected ? Qt.Checked
+        : selRows.length === 0 ? Qt.Unchecked
+        : (pagedRows.length && pagedRows.every(r => isSel(r)))
+          ? Qt.Checked : Qt.PartiallyChecked
+    function togglePageSelect() {
+        if (allSelected || pagedRows.every(r => isSel(r))) {
+            allSelected = false; selRows = []
+        } else {
+            selRows = pagedRows.slice()
+        }
+    }
+    // THE COLUMN DESCRIPTORS for the shared DataTable: a checkbox column, an
+    // event-type icon column (Events tab only), then the visible data columns
+    // with their widths (colWidth is in pixels, the template wants gridUnits).
+    property var dtColumns: {
+        var out = [{ k: "_check", kind: "check", w: 2 }]
+        if (cur && cur.name === "events")
+            out.push({ k: "_icon", kind: "icon", w: 1.6 })
+        var cols = visibleCols
+        for (var i = 0; i < cols.length; i++)
+            out.push({ k: cols[i], t: cols[i],
+                       w: colWidth(cols[i]) / Kirigami.Units.gridUnit })
+        return out
+    }
+    // resizing fires continuously while dragging; persist once it settles
+    Timer { id: persistTimer; interval: 400; onTriggered: page.persistWidths() }
 
 
     // -------- bottom toolbar --------
@@ -437,12 +659,39 @@ Kirigami.Page {
                 text: page.s ? "Updated: " + page.s.collected_at : "Collecting…"
             }
             Item { Layout.fillWidth: true }
+            // HOW MANY ROWS ARE SELECTED — shown at the bottom, next to the page
+            // controls, so the count sits with the pagination it belongs to.
+            QQC2.Label {
+                visible: page.selCount > 0
+                opacity: 0.7
+                text: page.allSelected
+                      ? "Selected: all " + page.curTotal + " rows"
+                      : "Selected: " + page.selRows.length +
+                        (page.selRows.length === 1 ? " row" : " rows")
+            }
+            // SELECT ALL — every matching record across ALL pages. Toggles with
+            // Clear.
+            QQC2.ToolButton {
+                visible: page.curTotal > 0
+                readonly property bool anySel: page.allSelected || page.selRows.length > 0
+                icon.name: anySel ? "edit-clear" : "edit-select-all-layers"
+                text: anySel ? "Clear" : "Select all (" + page.curTotal + ")"
+                onClicked: {
+                    page.selRows = []
+                    page.allSelected = !anySel
+                }
+            }
             QQC2.Label {
                 opacity: 0.7
+                // "1–50 of <matching>"; on Events, when a filter narrows the set,
+                // also show the grand total so the effect is obvious.
                 text: page.curTotal === 0 ? "0 rows"
                       : (page.pageIndex * page.pageLimit + 1) + "–" +
                         Math.min((page.pageIndex + 1) * page.pageLimit, page.curTotal) +
-                        " of " + page.curTotal
+                        " of " + page.curTotal +
+                        (page.cur && page.cur.name === "events"
+                         && page.curTotal < page.eventsTotal
+                         ? " · " + page.eventsTotal + " total" : "")
             }
             QQC2.ToolButton {
                 icon.name: "go-previous"
@@ -577,12 +826,28 @@ Kirigami.Page {
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.smallSpacing
                 Layout.rightMargin: Kirigami.Units.smallSpacing
-                fields: page.cur
-                    ? page.cur.columns.filter(c => !c.startsWith("_"))
-                                      .map(function (c) { return { name: c } })
-                    : []
+                // the fields offered in the pickers = THIS table's columns (and the
+                // joined table's columns once a JOIN is made). For EVENTS it is the
+                // WHOLE taxonomy (107 fields), not just the 13 shown by default -
+                // any field can be added to SELECT / a condition.
+                fields: (page.onEvents && page.joinTable === ""
+                         && page.eventTax.names && page.eventTax.names.length
+                         ? page.eventTax.names
+                         : page.listCols.filter(c => !c.startsWith("_")))
+                                     .map(function (c) { return { name: c } })
                 defaultSelect: page.visibleCols
                 placeholder: "type SQL, or plain text to search this table"
+                // JOIN button lives in the bar; the page owns the state + backend.
+                // Events joins a state table across databases (ATTACH).
+                joinTables: page.joinTablesList
+                joinTable: page.joinTable
+                joinLeft: page.joinLeft
+                joinRight: page.joinRight
+                onJoinTableChosen: function (t) { page.setJoinTable(t) }
+                onJoinFieldsChosen: function (l, r) {
+                    page.joinLeft = l; page.joinRight = r
+                    page.pageIndex = 0; page.loadRows()
+                }
                 onApplied: function (spec, sql) {
                     page.applySelectCols(spec.select)
                     var g = spec.groupBy.slice()
@@ -595,154 +860,12 @@ Kirigami.Page {
                 }
             }
 
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.margins: Kirigami.Units.smallSpacing
-                spacing: Kirigami.Units.smallSpacing
-                // THE "filter this table" FIELD WAS REMOVED: this table is searched
-                // by the query bar above. What is left here is only what it cannot
-                // do - a search ACROSS ALL state tables at once.
-                Kirigami.SearchField {
-                    id: search
-                    visible: page.searchAll
-                    Layout.fillWidth: true
-                    placeholderText: "search across all state tables…"
-                    onTextChanged: {
-                        page.pageIndex = 0
-                        if (page.searchAll) page.runGlobalSearch()
-                    }
-                }
-                Item { Layout.fillWidth: true; visible: !page.searchAll }
-                // SEARCH ACROSS THE WHOLE STATE: an analyst looks for an address or
-                // a name without knowing which table holds it. The switch changes
-                // the scope of the search: this table or all of them at once.
-                QQC2.ToolButton {
-                    icon.name: "edit-find"
-                    display: QQC2.AbstractButton.IconOnly
-                    checkable: true
-                    checked: page.searchAll
-                    QQC2.ToolTip.text: "Search across every state table"
-                    QQC2.ToolTip.visible: hovered
-                    onClicked: {
-                        page.searchAll = checked
-                        if (checked) page.runGlobalSearch()
-                    }
-                }
-            }
+            // (JOIN now lives as a button IN the query bar toolbar above, next to
+            // Group by / Sort - see the QueryBar join* bindings)
 
-            // ---- the results of the search across all tables ----
-            QQC2.ScrollView {
-                visible: page.searchAll && search.text.length > 1
-                Layout.fillWidth: true
-                Layout.preferredHeight: Math.min(page.height * 0.5,
-                                                 Kirigami.Units.gridUnit * 18)
-                clip: true
-                ListView {
-                    model: page.globalHits.tables || []
-                    reuseItems: true
-                    delegate: QQC2.ItemDelegate {
-                        required property var modelData
-                        required property int index
-                        width: ListView.view.width
-                        height: Kirigami.Units.gridUnit * 3
-                        onClicked: page.openHit(modelData)
-                        background: Rectangle {
-                            color: index % 2 ? Qt.alpha(Kirigami.Theme.textColor, 0.03)
-                                             : "transparent"
-                        }
-                        contentItem: RowLayout {
-                            spacing: Kirigami.Units.smallSpacing
-                            Kirigami.Icon {
-                                source: modelData.icon || "view-list-details"
-                                Layout.preferredWidth: Kirigami.Units.iconSizes.small
-                                Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                            }
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 0
-                                QQC2.Label {
-                                    text: modelData.title
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                }
-                                QQC2.Label {
-                                    text: (modelData.columns || []).join(", ")
-                                    opacity: 0.6
-                                    elide: Text.ElideRight
-                                    Layout.fillWidth: true
-                                    font.family: "monospace"
-                                    font.pointSize: Kirigami.Theme.smallFont.pointSize - 1
-                                }
-                            }
-                            QQC2.Label {
-                                text: modelData.n
-                                opacity: 0.75
-                                horizontalAlignment: Text.AlignRight
-                                Layout.preferredWidth: Kirigami.Units.gridUnit * 3
-                            }
-                        }
-                    }
-                }
-            }
-
-            // selection helpers
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.leftMargin: Kirigami.Units.smallSpacing
-                Layout.rightMargin: Kirigami.Units.smallSpacing
-                spacing: Kirigami.Units.smallSpacing
-                visible: page.filteredRows.length > 0
-                QQC2.ToolButton {
-                    text: "Select page"
-                    icon.name: "edit-select-all"
-                    onClicked: page.selRows = page.pagedRows.slice()
-                }
-                QQC2.ToolButton {
-                    text: "Select all (" + page.filteredRows.length + ")"
-                    icon.name: "edit-select-all-layers"
-                    onClicked: page.selRows = page.filteredRows.slice()
-                }
-                QQC2.ToolButton {
-                    text: "Clear"
-                    icon.name: "edit-clear"
-                    visible: page.selRows.length > 0
-                    onClicked: page.selRows = []
-                }
-                Item { Layout.fillWidth: true }
-            }
-
-            // selected row actions
-            RowLayout {
-                visible: page.selRows.length > 0
-                Layout.fillWidth: true
-                Layout.margins: Kirigami.Units.smallSpacing
-                spacing: Kirigami.Units.smallSpacing
-                QQC2.Label {
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                    opacity: 0.7
-                    text: page.selRows.length === 1
-                          ? "Selected: " + page.visibleCols.slice(0, 3)
-                                .map(c => page.selRows[0][c]).filter(v => v).join(" · ")
-                          : "Selected: " + page.selRows.length + " rows " +
-                            "(Ctrl/Shift+click to extend)"
-                }
-                QQC2.Button {
-                    text: "Explore"
-                    icon.name: "view-list-tree"
-                    visible: page.cur && page.cur.name === "processes" &&
-                             page.selRows.length === 1
-                    onClicked: root.pageStack.layers.push(
-                        Qt.resolvedUrl("ProcessPage.qml"),
-                        { pid: String(page.selRows[0].pid) })
-                }
-                QQC2.Button {
-                    text: "Edit"
-                    icon.name: "document-edit"
-                    visible: page.selRows.length === 1
-                    onClicked: editDialog.openFor(page.selRows[0])
-                }
-            }
+            // (Select page / Select all / Clear and the "Selected: N rows" count
+            // moved out of here into the bottom bar, next to the page controls -
+            // the space goes to the table)
 
             // ---- groups on the left + the table on the right (as in "Events") ----
             RowLayout {
@@ -766,31 +889,41 @@ Kirigami.Page {
                                                 + Kirigami.Units.smallSpacing * 2
                         color: Kirigami.Theme.alternateBackgroundColor
                         QQC2.Label { id: gProbe; visible: false; text: "Ag"; font.bold: true }
-                        Row {
-                            anchors.left: parent.left
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            Item { width: Kirigami.Units.smallSpacing; height: 1 }
+                        // value column(s) fill the width, count sits right after -
+                        // no empty gap, borders between columns, like the main table
+                        RowLayout {
+                            anchors.fill: parent
+                            spacing: 0
                             Repeater {
                                 model: page.groupBy
-                                delegate: QQC2.Label {
+                                delegate: Item {
                                     required property var modelData
-                                    width: Kirigami.Units.gridUnit * 8
-                                    height: parent.height
-                                    verticalAlignment: Text.AlignVCenter
-                                    leftPadding: Kirigami.Units.smallSpacing
-                                    text: modelData
-                                    font.bold: true
-                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    QQC2.Label {
+                                        anchors.fill: parent
+                                        verticalAlignment: Text.AlignVCenter
+                                        leftPadding: Kirigami.Units.smallSpacing
+                                        text: modelData
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+                                    Kirigami.Separator {
+                                        anchors { right: parent.right; top: parent.top
+                                                  bottom: parent.bottom }
+                                        opacity: 0.25
+                                    }
                                 }
                             }
-                        }
-                        QQC2.Label {
-                            anchors.right: parent.right
-                            anchors.rightMargin: Kirigami.Units.largeSpacing
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "count"
-                            font.bold: true
+                            QQC2.Label {
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 5
+                                Layout.fillHeight: true
+                                horizontalAlignment: Text.AlignRight
+                                verticalAlignment: Text.AlignVCenter
+                                rightPadding: Kirigami.Units.largeSpacing
+                                text: "count"
+                                font.bold: true
+                            }
                         }
                         Kirigami.Separator {
                             anchors.bottom: parent.bottom
@@ -810,7 +943,7 @@ Kirigami.Page {
                                 required property var modelData
                                 required property int index
                                 width: ListView.view.width
-                                height: Kirigami.Units.gridUnit * 2.3
+                                height: page.rowHeight
                                 padding: 0
                                 highlighted: page.groupPicked
                                              && page.groupVal === String(modelData.value || "")
@@ -829,11 +962,19 @@ Kirigami.Page {
                                 // THE SAME COLOURS AS THE TABLE: otherwise two
                                 // tables side by side look like different programs
                                 background: Rectangle {
+                                    // EXACTLY the table's row colours (highlight /
+                                    // hover / zebra) + the same fade, so the two
+                                    // tables side by side read as one program
                                     color: gRow.highlighted
                                            ? Qt.alpha(Kirigami.Theme.highlightColor, 0.20)
-                                           : (gRow.index % 2 === 0
-                                              ? Kirigami.Theme.backgroundColor
-                                              : Kirigami.Theme.alternateBackgroundColor)
+                                           : gRow.hovered
+                                             ? Qt.alpha(Kirigami.Theme.textColor, 0.05)
+                                             : gRow.index % 2 === 0
+                                               ? Kirigami.Theme.backgroundColor
+                                               : Kirigami.Theme.alternateBackgroundColor
+                                    Behavior on color {
+                                        ColorAnimation { duration: Kirigami.Units.shortDuration }
+                                    }
                                     Kirigami.Separator {
                                         anchors.bottom: parent.bottom
                                         width: parent.width
@@ -852,26 +993,35 @@ Kirigami.Page {
                                     Repeater {
                                         model: modelData.parts
                                                ? modelData.parts : [String(modelData.value)]
-                                        delegate: QQC2.Label {
+                                        delegate: Item {
                                             required property var modelData
-                                            Layout.preferredWidth: Kirigami.Units.gridUnit * 8
-                                            leftPadding: Kirigami.Units.smallSpacing
-                                            rightPadding: Kirigami.Units.largeSpacing
-                                            text: String(modelData) === "" ? "(empty)"
-                                                                          : String(modelData)
-                                            opacity: String(modelData) === "" ? 0.5 : 1
-                                            elide: Text.ElideRight
-                                            font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            QQC2.Label {
+                                                anchors.fill: parent
+                                                verticalAlignment: Text.AlignVCenter
+                                                leftPadding: Kirigami.Units.smallSpacing
+                                                rightPadding: Kirigami.Units.largeSpacing
+                                                text: String(modelData) === "" ? "(empty)"
+                                                                              : String(modelData)
+                                                opacity: String(modelData) === "" ? 0.5 : 1
+                                                elide: Text.ElideRight
+                                            }
+                                            Kirigami.Separator {
+                                                anchors { right: parent.right; top: parent.top
+                                                          bottom: parent.bottom }
+                                                opacity: 0.25
+                                            }
                                         }
                                     }
-                                    Item { Layout.fillWidth: true }
                                     QQC2.Label {
                                         text: modelData.n
                                         opacity: 0.75
                                         horizontalAlignment: Text.AlignRight
+                                        verticalAlignment: Text.AlignVCenter
                                         rightPadding: Kirigami.Units.largeSpacing
                                         Layout.preferredWidth: Kirigami.Units.gridUnit * 5
-                                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                        Layout.fillHeight: true
                                     }
                                 }
                             }
@@ -884,207 +1034,51 @@ Kirigami.Page {
                 Layout.fillHeight: true
             }
 
-            // table
-            Flickable {
-                id: hflick
+            // table (the shared DataTable template - principle 15/17)
+            Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                contentWidth: Math.max(width, page.tableWidth)
-                flickableDirection: Flickable.HorizontalFlick
-                clip: true
-                QQC2.ScrollBar.horizontal: QQC2.ScrollBar {}
-
-                ListView {
-                    id: tableView
-                    width: hflick.contentWidth
-                    height: hflick.height
-                    model: page.pagedRows
-                    // delegate recycling: rows are rebuilt on every
-                    // refresh, and without reuse the view stutters
-                    reuseItems: true
-                    add: Transition {
-                        OpacityAnimator { from: 0; to: 1; duration: Kirigami.Units.shortDuration }
+                DataTable {
+                    id: dtable
+                    anchors.fill: parent
+                    rowHeight: page.rowHeight
+                    resizable: true
+                    externalSort: true          // Data owns the 3-click sort
+                    columns: page.dtColumns
+                    rows: page.pagedRows
+                    formatter: page.cellDisplay
+                    accent: page.rowAccent
+                    isSelected: page.isSel
+                    isChecked: page.isSel
+                    iconFor: page.eventIcon
+                    iconTip: page.eventIconTip
+                    headerCheckState: page.headerCheckState
+                    sortCol: page.sortCol
+                    sortDesc: !page.sortAsc
+                    onSortRequested: function (field, desc) { page.toggleSort(field) }
+                    onConditionRequested: function (field, op, value) {
+                        qbar.addCondition(field, op, value)
                     }
-                    clip: true
-                    headerPositioning: ListView.OverlayHeader
-                    QQC2.ScrollBar.vertical: QQC2.ScrollBar {}
-
-                    header: Rectangle {
-                        z: 3
-                        width: tableView.width
-                        height: hcolumn.implicitHeight + Kirigami.Units.smallSpacing * 2
-                        color: Kirigami.Theme.alternateBackgroundColor
-                        Column {
-                        id: hcolumn
-                        anchors.verticalCenter: parent.verticalCenter
-                        Row {
-                            id: headerRow
-                            QQC2.CheckBox {   // select the whole page
-                                width: Kirigami.Units.gridUnit * 2
-                                tristate: true
-                                checkState: page.selRows.length === 0 ? Qt.Unchecked
-                                            : page.pagedRows.every(r => page.isSel(r))
-                                              ? Qt.Checked : Qt.PartiallyChecked
-                                onClicked: {
-                                    if (page.pagedRows.every(r => page.isSel(r)))
-                                        page.selRows = []
-                                    else
-                                        page.selRows = page.pagedRows.slice()
-                                }
-                            }
-                            Repeater {
-                                model: page.visibleCols
-                                Item {
-                                    width: page.colWidth(modelData)
-                                    height: hlbl.implicitHeight
-                                    property string col: modelData
-                                    QQC2.Label {
-                                        id: hlbl
-                                        anchors.fill: parent
-                                        anchors.rightMargin: 10
-                                        leftPadding: Kirigami.Units.smallSpacing
-                                        text: col + (page.sortCol === col
-                                                     ? (page.sortAsc ? "  ↑" : "  ↓") : "")
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                    }
-                                    MouseArea {   // a click sorts
-                                        anchors.fill: parent
-                                        anchors.rightMargin: 14
-                                        onClicked: page.toggleSort(col)
-                                    }
-                                    MouseArea {
-                                        width: 12
-                                        anchors.right: parent.right
-                                        anchors.top: parent.top
-                                        anchors.bottom: parent.bottom
-                                        cursorShape: Qt.SplitHCursor
-                                        preventStealing: true
-                                        property real sx
-                                        property real sw
-                                        onPressed: m => { sx = m.x; sw = page.colWidth(col) }
-                                        onPositionChanged: m => {
-                                            if (pressed) page.setColWidth(col, sw + (m.x - sx))
-                                        }
-                                        onReleased: page.persistWidths()
-                                    }
-                                    Kirigami.Separator {
-                                        anchors.right: parent.right
-                                        anchors.top: parent.top
-                                        anchors.bottom: parent.bottom
-                                    }
-                                }
-                            }
-                        }
-                        // THE PER-COLUMN FILTER ROW WAS REMOVED: the selection is
-                        // set by the query bar (principle 17: one mechanism)
-
-                        }
-                        Kirigami.Separator {
-                            anchors.bottom: parent.bottom
-                            width: parent.width
-                        }
+                    onRowClicked: function (row, index, mods) {
+                        page.clickRow(row, index, mods)
                     }
-
-                    delegate: QQC2.ItemDelegate {
-                        id: rowDel
-                        property var rowData: modelData
-                        width: tableView.width
-                        highlighted: page.isSel(rowData)
-                        // zebra: white/grey + a bottom border on the row
-                        background: Rectangle {
-                            color: rowDel.highlighted
-                                   ? Qt.alpha(Kirigami.Theme.highlightColor, 0.20)
-                                   : rowDel.hovered
-                                     ? Qt.alpha(Kirigami.Theme.textColor, 0.05)
-                                     : index % 2 === 0
-                                       ? Kirigami.Theme.backgroundColor
-                                       : Kirigami.Theme.alternateBackgroundColor
-                            // selection and hover fade in (cheap colour Behavior)
-                            Behavior on color {
-                                ColorAnimation { duration: Kirigami.Units.shortDuration }
-                            }
-                            Kirigami.Separator {
-                                anchors.bottom: parent.bottom
-                                width: parent.width
-                                opacity: 0.35
-                            }
-                            // THE SEVERITY STRIPE ON THE LEFT, as in the event feed:
-                            // what matters is visible without reading the columns
-                            Rectangle {
-                                anchors { left: parent.left; top: parent.top
-                                          bottom: parent.bottom }
-                                width: 4
-                                visible: page.rowAccent(rowDel.rowData) !== ""
-                                color: page.rowAccent(rowDel.rowData) || "transparent"
-                                opacity: 0.9
-                            }
-                        }
-                        property int rowIndex: index
-                        MouseArea {
-                            anchors.fill: parent
-                            acceptedButtons: Qt.LeftButton
-                            onClicked: m => page.clickRow(rowDel.rowData,
-                                                          rowDel.rowIndex,
-                                                          m.modifiers)
-                            onDoubleClicked: editDialog.openFor(rowDel.rowData)
-                        }
-                        contentItem: Row {
-                            QQC2.CheckBox {
-                                width: Kirigami.Units.gridUnit * 2
-                                anchors.verticalCenter: parent.verticalCenter
-                                checked: page.isSel(rowDel.rowData)
-                                onClicked: page.clickRow(rowDel.rowData,
-                                                         rowDel.rowIndex,
-                                                         Qt.ControlModifier)
-                            }
-                            // ONE OBJECT PER CELL. There used to be three - a
-                            // wrapper Item, a Label and a Separator - so a page
-                            // of 50 rows by 19 columns created about 2850 items
-                            // and every page change froze for 0.4 s. The column
-                            // separators are now drawn once for the whole table
-                            // (see the overlay below the list), not per cell.
-                            Repeater {
-                                model: page.visibleCols
-                                QQC2.Label {
-                                    width: page.colWidth(modelData)
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: String(rowDel.rowData[modelData] ?? "")
-                                    elide: Text.ElideRight
-                                    leftPadding: Kirigami.Units.smallSpacing
-                                    rightPadding: Kirigami.Units.smallSpacing
-                                }
-                            }
-                        }
+                    onCheckToggled: function (row, index) {
+                        page.clickRow(row, index, Qt.ControlModifier)
                     }
-
-                    // the column separators for the whole table: one line per
-                    // column instead of one per cell
-                    Item {
-                        anchors.fill: parent
-                        z: 2
-                        Repeater {
-                            model: page.visibleCols
-                            Kirigami.Separator {
-                                required property int index
-                                x: {
-                                    var w = Kirigami.Units.gridUnit * 2
-                                    for (var i = 0; i <= index; i++)
-                                        w += page.colWidth(page.visibleCols[i])
-                                    return w - 1
-                                }
-                                y: 0
-                                height: tableView.height
-                                opacity: 0.25
-                            }
-                        }
+                    onHeaderCheckClicked: page.togglePageSelect()
+                    onColumnResized: function (key, w) {
+                        page.setColWidth(key, w); persistTimer.restart()
                     }
-
-                    Kirigami.PlaceholderMessage {
-                        anchors.centerIn: parent
-                        visible: tableView.count === 0
-                        text: "Empty"
+                    onRowRightClicked: function (row, index) {
+                        page.clickRow(row, index, 0)
+                        page.menuRow = row
+                        rowMenu.popup()
                     }
+                }
+                Kirigami.PlaceholderMessage {
+                    anchors.centerIn: parent
+                    visible: page.pagedRows.length === 0
+                    text: "Empty"
                 }
             }
             }
@@ -1106,44 +1100,56 @@ Kirigami.Page {
                 ColumnLayout {
                     width: detailsPanel.panelWidth - Kirigami.Units.largeSpacing * 2
                     spacing: Kirigami.Units.smallSpacing
-                    Repeater {
-                        model: page.lastSel && page.cur ? page.cur.columns : []
-                        delegate: ColumnLayout {
-                            spacing: 1
-                            Layout.fillWidth: true
-                            visible: String(page.lastSel[modelData] ?? "") !== ""
-                            property bool sensitive: page.sensitiveCols.includes(modelData)
-                            property bool revealed: false
-                            RowLayout {
-                                Layout.fillWidth: true
-                                QQC2.Label {
-                                    text: modelData
-                                    opacity: 0.55
-                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                    Layout.fillWidth: true
-                                }
-                                QQC2.ToolButton {   // the eye for secret fields
-                                    visible: parent.parent.sensitive
-                                    icon.name: parent.parent.revealed ? "view-hidden" : "view-visible"
-                                    implicitHeight: Kirigami.Units.gridUnit * 1.4
-                                    implicitWidth: Kirigami.Units.gridUnit * 1.4
-                                    onClicked: parent.parent.revealed = !parent.parent.revealed
-                                }
+                    // A DETECTION (alert): jump to the events that triggered it.
+                    QQC2.Button {
+                        Layout.fillWidth: true
+                        icon.name: "view-list-details"
+                        text: "Show the events that triggered this"
+                        visible: page.lastSel
+                                 && String(page.lastSel.event_kind || "") === "alert"
+                                 && String(page.lastSel.related_events || "") !== ""
+                        onClicked: {
+                            var ids = String(page.lastSel.related_events || "").trim()
+                                        .split(/\s+/).filter(function (x) { return x !== "" })
+                            if (ids.length) {
+                                var inl = ids.map(function (id) {
+                                    return "'" + id.replace(/'/g, "''") + "'" }).join(",")
+                                root.focusEvents("event_id IN (" + inl + ")")
                             }
-                            QQC2.TextArea {
+                        }
+                    }
+                    // FIELDS BY CATEGORY (events): each taxonomy group is a titled
+                    // section, so an analyst orients faster than in one long list.
+                    // Other tables have no taxonomy, so they show one plain section.
+                    Repeater {
+                        model: page.detailSections
+                        delegate: ColumnLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: 1
+                            // only the non-empty fields of this group
+                            readonly property var nonEmpty: (modelData.fields || [])
+                                .filter(function (f) {
+                                    return page.lastSel
+                                        && String(page.lastSel[f] ?? "") !== "" })
+                            visible: nonEmpty.length > 0
+                            // the category header (events only - the plain section
+                            // for a state table has an empty group name)
+                            QQC2.Label {
+                                visible: String(modelData.group || "") !== ""
+                                text: modelData.group
+                                font.bold: true
+                                opacity: 0.7
+                                Layout.topMargin: Kirigami.Units.smallSpacing
                                 Layout.fillWidth: true
-                                readOnly: true
-                                wrapMode: TextEdit.Wrap
-                                text: (parent.sensitive && !parent.revealed)
-                                      ? "•••••••••  (click the eye to reveal)"
-                                      : String(page.lastSel[modelData] ?? "")
-                                font.family: (page.longCols.includes(modelData)
-                                              || parent.sensitive)
-                                             ? "monospace" : Kirigami.Theme.defaultFont.family
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                background: Rectangle {
-                                    color: Kirigami.Theme.alternateBackgroundColor
-                                    radius: 4
+                            }
+                            Repeater {
+                                model: parent.nonEmpty
+                                delegate: DetailField {
+                                    label: modelData
+                                    value: page.lastSel ? (page.lastSel[modelData] ?? "") : ""
+                                    mono: page.longCols.includes(modelData)
+                                    sensitive: page.sensitiveCols.includes(modelData)
                                 }
                             }
                         }
