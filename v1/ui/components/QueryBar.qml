@@ -1249,7 +1249,9 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     // align the builder search with the left / SQL search bars
-                    Layout.topMargin: Kirigami.Units.smallSpacing
+                    // (2px higher: the field is vertically centred in a row made
+                    // taller by the buttons, so it sat a touch low)
+                    Layout.topMargin: Kirigami.Units.smallSpacing - 2
                     spacing: Kirigami.Units.smallSpacing
 
                     Kirigami.SearchField {
