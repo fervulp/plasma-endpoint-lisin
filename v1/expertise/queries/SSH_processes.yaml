@@ -1,0 +1,6 @@
+type: query
+name: SSH_processes
+title: SSH processes
+version: 1.0.0
+description: find ssh-related processes
+sql: SELECT * FROM processes WHERE name LIKE '%ssh%'

@@ -56,6 +56,10 @@ Kirigami.Page {
     // taxonomy category; for any other table, one unnamed section of its columns
     // the field-search term for the Details sidebar
     property string detailFilter: ""
+    // the "…" SQL menu: picker items (history / saved), and the picked saved query
+    property var pickItems: []
+    property string pickMode: ""
+    property var selectedQuery: null
     property var detailSections: {
         if (!lastSel || !cur) return []
         if (onEvents && eventTax.groups && eventTax.groups.length)
@@ -792,6 +796,26 @@ Kirigami.Page {
                         page.groupPicked = false
                     }
                     page.applyQuery(sql)
+                    // remember a hand-typed SQL so it appears in the "…" history
+                    if (!qbar.builderMode && qbar.manualText.trim() !== "")
+                        backend.rememberSql(qbar.manualText)
+                }
+                onSaveToExpertise: function (sql) {
+                    saveQueryDialog.sql = sql
+                    saveQueryTitle.text = ""
+                    saveQueryDesc.text = ""
+                    saveQueryError.text = ""
+                    saveQueryDialog.open()
+                }
+                onHistoryRequested: {
+                    page.pickMode = "history"
+                    page.pickItems = backend.sqlHistory()
+                    pickQueryDialog.open()
+                }
+                onUseExpertiseRequested: {
+                    page.pickMode = "saved"
+                    page.pickItems = backend.savedQueries()
+                    pickQueryDialog.open()
                 }
             }
 
@@ -1239,6 +1263,146 @@ Kirigami.Page {
                     }
                 }
                 }
+            }
+        }
+
+        // -------- the picked saved query (right sidebar) --------
+        SidePanel {
+            id: querySidebar
+            title: "Query"
+            iconName: "code-context"
+            panelWidth: Kirigami.Units.gridUnit * 22
+            onCloseRequested: open = false
+            QQC2.ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                ColumnLayout {
+                    width: querySidebar.panelWidth - Kirigami.Units.largeSpacing * 2
+                    spacing: Kirigami.Units.smallSpacing
+                    Kirigami.Heading {
+                        level: 3
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        text: page.selectedQuery ? page.selectedQuery.title : ""
+                    }
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        opacity: 0.7
+                        visible: !!(page.selectedQuery && page.selectedQuery.description)
+                        text: page.selectedQuery ? page.selectedQuery.description : ""
+                    }
+                    Kirigami.Separator { Layout.fillWidth: true }
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WrapAnywhere
+                        font.family: "monospace"
+                        text: page.selectedQuery ? page.selectedQuery.sql : ""
+                    }
+                    QQC2.Button {
+                        Layout.fillWidth: true
+                        icon.name: "media-playback-start"
+                        text: "Run this query"
+                        onClicked: if (page.selectedQuery) qbar.setSql(page.selectedQuery.sql)
+                    }
+                }
+            }
+        }
+    }
+
+    // -------- save the current SQL to expertise --------
+    Kirigami.Dialog {
+        id: saveQueryDialog
+        property string sql: ""
+        title: "Save query to expertise"
+        standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
+        padding: Kirigami.Units.largeSpacing
+        preferredWidth: Kirigami.Units.gridUnit * 24
+        onAccepted: {
+            var err = backend.saveQuery(saveQueryTitle.text, saveQueryDialog.sql,
+                                        saveQueryDesc.text)
+            if (err) { saveQueryError.text = err; open() }
+        }
+        ColumnLayout {
+            spacing: Kirigami.Units.smallSpacing
+            QQC2.Label { text: "Title"; opacity: 0.7 }
+            QQC2.TextField {
+                id: saveQueryTitle
+                Layout.fillWidth: true
+                placeholderText: "a name for this query"
+            }
+            QQC2.Label { text: "Description"; opacity: 0.7 }
+            QQC2.TextField {
+                id: saveQueryDesc
+                Layout.fillWidth: true
+                placeholderText: "what it finds (optional)"
+            }
+            QQC2.Label { text: "SQL"; opacity: 0.7 }
+            QQC2.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WrapAnywhere
+                font.family: "monospace"
+                opacity: 0.8
+                text: saveQueryDialog.sql
+            }
+            QQC2.Label {
+                id: saveQueryError
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                color: Kirigami.Theme.negativeTextColor
+                visible: text !== ""
+            }
+        }
+    }
+
+    // -------- pick a query: SQL history or saved queries --------
+    Kirigami.Dialog {
+        id: pickQueryDialog
+        title: page.pickMode === "history" ? "SQL history" : "Saved queries"
+        standardButtons: Kirigami.Dialog.Cancel
+        preferredWidth: Kirigami.Units.gridUnit * 30
+        preferredHeight: Kirigami.Units.gridUnit * 22
+        ListView {
+            clip: true
+            model: page.pickItems
+            delegate: QQC2.ItemDelegate {
+                width: ListView.view.width
+                contentItem: ColumnLayout {
+                    spacing: 0
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        font.bold: page.pickMode === "saved"
+                        text: page.pickMode === "history" ? modelData
+                                                          : (modelData.title || "")
+                    }
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        visible: page.pickMode === "saved"
+                        elide: Text.ElideRight
+                        opacity: 0.6
+                        font.family: "monospace"
+                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        text: page.pickMode === "saved" ? (modelData.sql || "") : ""
+                    }
+                }
+                onClicked: {
+                    if (page.pickMode === "history") {
+                        qbar.setSql(modelData)
+                    } else {
+                        qbar.setSql(modelData.sql)
+                        page.selectedQuery = modelData
+                        querySidebar.open = true
+                    }
+                    pickQueryDialog.close()
+                }
+            }
+            QQC2.Label {
+                anchors.centerIn: parent
+                visible: page.pickItems.length === 0
+                opacity: 0.6
+                text: page.pickMode === "history" ? "No history yet"
+                                                  : "No saved queries yet"
             }
         }
     }

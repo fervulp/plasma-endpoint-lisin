@@ -57,6 +57,17 @@ Item {
     }
 
     signal applied(var spec, string sql)
+    // the "…" menu — the owner shows the popups / dialog / sidebar
+    signal saveToExpertise(string sql)
+    signal historyRequested()
+    signal useExpertiseRequested()
+
+    // set the query from outside (a picked history item or saved query)
+    function setSql(sql) {
+        manualText = String(sql || "")
+        builderMode = false
+        apply()
+    }
 
     // there are unsaved edits - Run is highlighted
     property bool dirty: false
@@ -1443,15 +1454,38 @@ Item {
                         QQC2.ToolTip.visible: hovered
                         onClicked: bar.apply()
                     }
-                    QQC2.Button {
-                        text: "SQL"
-                        icon.name: "code-context"
-                        QQC2.ToolTip.text: "Type the query by hand instead"
+                    QQC2.ToolButton {
+                        icon.name: "overflow-menu"
+                        QQC2.ToolTip.text: "SQL: write by hand, history, save/use from expertise"
                         QQC2.ToolTip.visible: hovered
-                        onClicked: {
-                            bar.manualText = bar.fullSql()
-                            bar.builderMode = false
-                            bar.apply()
+                        onClicked: sqlMenu.popup()
+                        QQC2.Menu {
+                            id: sqlMenu
+                            QQC2.MenuItem {
+                                text: "Write SQL"
+                                icon.name: "code-context"
+                                onTriggered: {
+                                    bar.manualText = bar.fullSql()
+                                    bar.builderMode = false
+                                    bar.apply()
+                                }
+                            }
+                            QQC2.MenuItem {
+                                text: "SQL history…"
+                                icon.name: "view-history"
+                                onTriggered: bar.historyRequested()
+                            }
+                            QQC2.MenuSeparator {}
+                            QQC2.MenuItem {
+                                text: "Save to expertise…"
+                                icon.name: "document-save"
+                                onTriggered: bar.saveToExpertise(bar.fullSql())
+                            }
+                            QQC2.MenuItem {
+                                text: "Use from expertise…"
+                                icon.name: "document-open"
+                                onTriggered: bar.useExpertiseRequested()
+                            }
                         }
                     }
 

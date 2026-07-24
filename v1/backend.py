@@ -15,16 +15,27 @@ be wired to DuckDB incrementally.
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import platform
 import re
 import threading
 import time
+from pathlib import Path
 
+import yaml
 from PySide6.QtCore import QObject, Signal, Slot
 
 from core import pipeline, views
 from core.store import Store
+
+_SQL_HISTORY = Path(os.path.expanduser("~/.local/share/lisin")) / "sql_history.json"
+_QUERIES_DIR = Path(__file__).resolve().parent / "expertise" / "queries"
+
+
+def _san_name(name: str) -> str:
+    s = re.sub(r"[^0-9A-Za-z_Ѐ-ӿ-]+", "_", str(name).strip()).strip("_")
+    return s or "query"
 
 _FORBID = re.compile(
     r"\b(attach|detach|copy|install|load|pragma|insert|update|delete|drop|"
@@ -230,3 +241,68 @@ class Backend(QObject):
     @Slot(str, "QVariant")
     def setTabColumns(self, table, colcfg):
         pass  # column layout persistence: to be wired to settings later
+
+    # ---------- SQL history (persisted JSON) ----------
+    def _load_history(self):
+        try:
+            return json.loads(_SQL_HISTORY.read_text())
+        except Exception:
+            return []
+
+    @Slot(result="QVariant")
+    def sqlHistory(self):
+        return self._load_history()[:30]
+
+    @Slot(str)
+    def rememberSql(self, sql):
+        sql = (sql or "").strip()
+        if not sql:
+            return
+        hist = [x for x in self._load_history() if x != sql]
+        hist.insert(0, sql)
+        try:
+            _SQL_HISTORY.parent.mkdir(parents=True, exist_ok=True)
+            _SQL_HISTORY.write_text(json.dumps(hist[:200]))
+        except Exception:
+            pass
+
+    # ---------- saved queries (expertise/queries/*.yaml) ----------
+    @Slot(result="QVariant")
+    def savedQueries(self):
+        out = []
+        if _QUERIES_DIR.is_dir():
+            for f in sorted(_QUERIES_DIR.glob("*.yaml")):
+                try:
+                    d = yaml.safe_load(f.read_text()) or {}
+                except Exception:
+                    continue
+                out.append({
+                    "name": d.get("name", f.stem),
+                    "title": d.get("title", d.get("name", f.stem)),
+                    "description": d.get("description", ""),
+                    "sql": d.get("sql", ""),
+                })
+        return out
+
+    @Slot(str, str, str, result=str)
+    def saveQuery(self, title, sql, description):
+        sql = (sql or "").strip()
+        if not sql:
+            return "empty query"
+        name = _san_name(title or "query")
+        spec = {
+            "type": "query",
+            "name": name,
+            "title": (title or name).strip(),
+            "version": "1.0.0",
+            "description": (description or "").strip(),
+            "sql": sql,
+        }
+        try:
+            _QUERIES_DIR.mkdir(parents=True, exist_ok=True)
+            (_QUERIES_DIR / f"{name}.yaml").write_text(
+                yaml.safe_dump(spec, allow_unicode=True, sort_keys=False)
+            )
+            return ""
+        except Exception as e:  # noqa: BLE001
+            return str(e)
