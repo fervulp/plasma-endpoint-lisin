@@ -10,6 +10,9 @@ Kirigami.ApplicationWindow {
     width: 1100
     height: 720
 
+    // no top header bar / separator — the cards float directly on the canvas
+    pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.None
+
     property var sysState: null
     property string section: ""
 
@@ -114,6 +117,8 @@ Kirigami.ApplicationWindow {
         // a grey sidebar (Window palette)
         Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
+        // plain background (the default one draws the edge separator) — no border
+        background: Rectangle { color: Kirigami.Theme.backgroundColor }
 
         // a subtle, icon-only collapse arrow — raised off the very bottom so it
         // sits about the level of the tabs card's 'updated' line
@@ -121,7 +126,7 @@ Kirigami.ApplicationWindow {
             implicitHeight: collapseBtn.implicitHeight + Kirigami.Units.largeSpacing
             QQC2.ToolButton {
                 id: collapseBtn
-                anchors.left: parent.left
+                anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: Kirigami.Units.largeSpacing
                 flat: true

@@ -600,15 +600,16 @@ Kirigami.Page {
             detailsPanel.open = false
         }
     }
-    // the tristate "select the whole page" header checkbox, and its toggle
+    // a tristate select-all: empty -> current page (half) -> all pages (full)
     property int headerCheckState: allSelected ? Qt.Checked
-        : selRows.length === 0 ? Qt.Unchecked
-        : (pagedRows.length && pagedRows.every(r => isSel(r)))
-          ? Qt.Checked : Qt.PartiallyChecked
+        : selRows.length > 0 ? Qt.PartiallyChecked
+        : Qt.Unchecked
     function togglePageSelect() {
-        if (allSelected || pagedRows.every(r => isSel(r))) {
+        if (allSelected) {                    // full -> off
             allSelected = false; selRows = []
-        } else {
+        } else if (selRows.length > 0) {      // half (page) -> full (all pages)
+            allSelected = true; selRows = []
+        } else {                              // off -> current page (half)
             selRows = pagedRows.slice()
         }
     }
@@ -1049,7 +1050,7 @@ Kirigami.Page {
                         id: pagePopup
                         y: -height - Kirigami.Units.smallSpacing
                         x: parent.width - width
-                        padding: Kirigami.Units.smallSpacing
+                        padding: Kirigami.Units.largeSpacing
                         ColumnLayout {
                             spacing: Kirigami.Units.smallSpacing
                             QQC2.Label {
@@ -1058,7 +1059,7 @@ Kirigami.Page {
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize
                             }
                             Flow {
-                                Layout.preferredWidth: Kirigami.Units.gridUnit * 9
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 7
                                 spacing: 2
                                 Repeater {
                                     model: [50, 100, 200, 500, 1000, 0]

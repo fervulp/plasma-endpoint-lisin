@@ -157,6 +157,24 @@ Item {
         return table.isSelected ? table.isSelected(row) : (table.selected === row)
     }
 
+    // A VERTICAL SCROLLBAR FIXED AT THE RIGHT EDGE. The rows live in a
+    // content-wide ListView inside a horizontal Flickable, so a scrollbar
+    // attached to the list rides along with the horizontal scroll and ends up
+    // among the values. This one is anchored to the table edge instead.
+    QQC2.ScrollBar {
+        id: vbar
+        orientation: Qt.Vertical
+        anchors.right: parent.right
+        y: hflick.y
+        height: hflick.height
+        z: 20
+        policy: list.visibleArea.heightRatio < 1
+                ? QQC2.ScrollBar.AlwaysOn : QQC2.ScrollBar.AlwaysOff
+        size: list.visibleArea.heightRatio
+        position: list.visibleArea.yPosition
+        onPositionChanged: if (pressed) list.contentY = position * list.contentHeight
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -278,7 +296,8 @@ Item {
                     OpacityAnimator { from: 0; to: 1; duration: Kirigami.Units.shortDuration }
                 }
                 cacheBuffer: Kirigami.Units.gridUnit * 40
-                QQC2.ScrollBar.vertical: QQC2.ScrollBar {}
+                // vertical scrollbar is a fixed bar at the table's right edge
+                // (see vbar) — not one that rides along the horizontal scroll
 
                 delegate: Item {
                     id: row

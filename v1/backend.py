@@ -176,12 +176,14 @@ class Backend(QObject):
                 if limit and int(limit) > 0:
                     sql += f" LIMIT {int(limit)} OFFSET {int(offset)}"
                 cols, rows, _tr = self.store.query(sql, max_rows=1000)
-                return {
-                    "rows": [dict(zip(cols, r)) for r in rows],
-                    "total": total,
-                    "columns": cols,
-                    "error": "",
-                }
+                # every row needs a stable id: the UI keys selection on _id
+                base = int(offset) if (limit and int(limit) > 0) else 0
+                objs = []
+                for i, r in enumerate(rows):
+                    o = dict(zip(cols, r))
+                    o["_id"] = str(base + i)
+                    objs.append(o)
+                return {"rows": objs, "total": total, "columns": cols, "error": ""}
             except Exception as e:  # noqa: BLE001
                 return {"rows": [], "total": 0, "columns": [], "error": str(e)}
 
