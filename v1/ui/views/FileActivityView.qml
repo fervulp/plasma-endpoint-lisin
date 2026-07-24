@@ -1,0 +1,188 @@
+import QtQuick
+import QtQuick.Layouts
+import QtQuick.Controls as QQC2
+import org.kde.kirigami as Kirigami
+import "../components"
+import "../components/Fmt.js" as Fmt
+import "../components/QueryMatch.js" as QM
+import "../components/Sev.js" as Sev
+
+// FILE ACTIVITY: what was created, changed, deleted - and by whom.
+//
+// Built on the shared templates (principle 17): one query bar, one table, one
+// side panel. The facets on the left were replaced by the query bar: a facet is
+// just a condition, and having two ways to select the same thing means two
+// places to get it wrong. A click on a cell still narrows the list - it writes
+// the condition into the same bar, where it is visible and editable.
+Item {
+    id: view
+    property var d: ({ events: [], by_action: [], by_dir: [], by_package: [], total: 0 })
+    property var sel: null
+    property string query: ""
+    property var qconds: []
+    property string qquick: ""
+
+    readonly property var cols: [
+        { k: "ts", t: "Time", w: 10, mono: true },
+        { k: "event_action", t: "Action", w: 9 },
+        { k: "file_path", t: "File", w: 20, fill: true, mono: true },
+        { k: "package_name", t: "Package", w: 9 },
+        { k: "changed_by", t: "Changed by", w: 9 },
+        { k: "file_mode", t: "Mode", w: 4, mono: true },
+        { k: "file_owner", t: "Owner", w: 6 }
+    ]
+    property var hiddenCols: []
+
+    property bool _stale: false
+    onVisibleChanged: if (view.visible && view._stale) { view._stale = false; view.refresh() }
+    function refresh() { view.d = backend.fileActivity() }
+    Component.onCompleted: refresh()
+    Connections {
+        target: backend
+        // REFRESH ONLY WHEN SHOWN. The page is kept alive; a hidden one
+        // still receives every tick, and recomputing a dashboard the user is not
+        // looking at burns CPU and stalls the animation of the page they ARE
+        // opening. We mark it stale and catch up when it becomes visible.
+        function onStateReady(s) { if (view.visible) view.refresh(); else view._stale = true }
+    }
+
+    function fmt(row, key) {
+        if (key === "ts") return Fmt.local(row.ts)
+        // WHO, AND HOW WE KNOW. rpm -Va records the divergence but not the
+        // author of the change - then we say so instead of guessing.
+        if (key === "changed_by")
+            return row.changed_by ? row.changed_by
+                 : (row.who_source ? "" : "not recorded")
+        return undefined
+    }
+    function rowAccent(r) { return r ? Sev.byScore(r.event_severity) : "" }
+
+    readonly property var rows: d.events || []
+    readonly property var shown: {
+        var _ = [view.qconds, view.qquick, view.rows]
+        if (!view.qquick && (!view.qconds || !view.qconds.length)) return view.rows
+        var out = []
+        for (var i = 0; i < view.rows.length; i++)
+            if (QM.rowMatches(view.rows[i], view.qconds, view.qquick, view.cols))
+                out.push(view.rows[i])
+        return out
+    }
+
+    RowLayout {
+        anchors.fill: parent
+        spacing: 0
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: Kirigami.Units.smallSpacing
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.margins: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.largeSpacing
+                Kirigami.Heading { level: 3; text: "File activity" }
+                // the most frequent actions as shortcuts - each writes a
+                // condition into the query bar, nothing is filtered locally
+                Repeater {
+                    model: (view.d.by_action || []).slice(0, 5)
+                    QQC2.ToolButton {
+                        required property var modelData
+                        text: modelData.value + "  " + modelData.n
+                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        onClicked: qbar.addCondition("event_action", "=", modelData.value)
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                QQC2.Label {
+                    text: view.shown.length + " of " + view.rows.length
+                    opacity: 0.6
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                }
+                QQC2.ToolButton { icon.name: "view-refresh"; onClicked: view.refresh() }
+            }
+
+            QueryBar {
+                id: qbar
+                Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.smallSpacing
+                Layout.rightMargin: Kirigami.Units.smallSpacing
+                fields: view.cols.map(function (c) { return { name: c.k } })
+                defaultSelect: view.cols.map(function (c) { return c.k })
+                placeholder: "file_path LIKE '%sudoers%'   ·   or just type text to search"
+                onApplied: function (spec, sql) {
+                    var hide = []
+                    if (spec.select.length)
+                        for (var i = 0; i < view.cols.length; i++)
+                            if (spec.select.indexOf(view.cols[i].k) < 0)
+                                hide.push(view.cols[i].k)
+                    view.hiddenCols = hide
+                    view.qquick = qbar.builderMode ? qbar.quickText : ""
+                    view.qconds = qbar.builderMode ? (spec.where || [])
+                                                   : QM.parseWhere(qbar.manualWhere())
+                }
+            }
+            Kirigami.Separator { Layout.fillWidth: true }
+
+            DataTable {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                columns: view.cols
+                rows: view.shown
+                hidden: view.hiddenCols
+                accent: view.rowAccent
+                formatter: view.fmt
+                onRowActivated: function (row) { view.sel = row }
+                onConditionRequested: function (field, op, value) {
+                    qbar.addCondition(field, op, value)
+                }
+            }
+
+            Kirigami.PlaceholderMessage {
+                Layout.fillWidth: true
+                Layout.margins: Kirigami.Units.largeSpacing
+                visible: view.rows.length === 0
+                icon.name: "folder"
+                text: "No file events yet"
+                explanation: "Integrity checks compare packaged files with the package " +
+                             "reference; the author of a change needs kernel audit rules."
+            }
+        }
+
+        SidePanel {
+            id: side
+            Layout.fillHeight: true
+            open: view.sel !== null
+            title: view.sel ? (view.sel.file_name || view.sel.file_path || "") : ""
+            iconName: "document-edit"
+            onCloseRequested: view.sel = null
+
+            QQC2.ScrollView {
+                id: scroller
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                ColumnLayout {
+                    width: scroller.availableWidth
+                    spacing: 2
+                    Repeater {
+                        model: view.sel ? Object.keys(view.sel).filter(k => k !== "_id") : []
+                        // the shared field row - same look and local-time formatting
+                        delegate: DetailField {
+                            required property var modelData
+                            label: modelData
+                            value: view.sel ? (view.sel[modelData] ?? "") : ""
+                        }
+                    }
+                    QQC2.Button {
+                        Layout.fillWidth: true
+                        visible: view.sel && view.sel.package_name
+                        text: "Show the package in State"
+                        icon.name: "search"
+                        onClicked: root.focusState("applications", "name", view.sel.package_name)
+                    }
+                }
+            }
+        }
+    }
+}

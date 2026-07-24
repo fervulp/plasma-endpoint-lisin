@@ -3,6 +3,7 @@ table: listening_ports
 type: input
 version: 1.0.0
 title: Listening ports
+icon: network-connect
 description: Listening sockets (raw). The owning process is attached by the
   ports_owned enrichment view, not here — enrichment joins across tables that
   may come from different inputs, so it belongs in the derivation layer.

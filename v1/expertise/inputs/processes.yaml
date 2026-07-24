@@ -3,6 +3,7 @@ table: processes
 type: input
 version: 1.0.0
 title: Processes
+icon: utilities-system-monitor
 description: Running processes, point-in-time snapshot from osquery.
 # osquery returns clean typed columns; cgroup_path carries the systemd unit,
 # parent is the ppid — both are facts we will join on, not guess.

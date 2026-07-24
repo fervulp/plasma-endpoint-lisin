@@ -2,6 +2,7 @@ type: view
 name: ports_owned
 version: 1.0.0
 title: Listening ports with owner
+icon: network-server
 description: Attaches the owning process to each listening socket by joining on
   pid — a fact edge, not a lookup. Base tables come from two inputs
   (listening_ports, processes); the join happens here in the derivation layer.
