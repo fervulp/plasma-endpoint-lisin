@@ -1545,12 +1545,35 @@ Item {
                 highlighted: bar.dirty
                 onClicked: bar.apply()
             }
-            QQC2.Button {
-                text: "Build"
-                icon.name: "draw-freehand"
-                QQC2.ToolTip.text: "Build the query by clicking instead"
+            QQC2.ToolButton {
+                icon.name: "overflow-menu"
+                QQC2.ToolTip.text: "Build by clicking, history, save/use from expertise"
                 QQC2.ToolTip.visible: hovered
-                onClicked: { bar.builderMode = true; bar.apply() }
+                onClicked: sqlMenu2.popup()
+                QQC2.Menu {
+                    id: sqlMenu2
+                    QQC2.MenuItem {
+                        text: "Build the query by clicking"
+                        icon.name: "draw-freehand"
+                        onTriggered: { bar.builderMode = true; bar.apply() }
+                    }
+                    QQC2.MenuItem {
+                        text: "SQL history…"
+                        icon.name: "view-history"
+                        onTriggered: bar.historyRequested()
+                    }
+                    QQC2.MenuSeparator {}
+                    QQC2.MenuItem {
+                        text: "Save to expertise…"
+                        icon.name: "document-save"
+                        onTriggered: bar.saveToExpertise(bar.fullSql())
+                    }
+                    QQC2.MenuItem {
+                        text: "Use from expertise…"
+                        icon.name: "document-open"
+                        onTriggered: bar.useExpertiseRequested()
+                    }
+                }
             }
             QQC2.ToolButton {
                 icon.name: "edit-clear-all"
