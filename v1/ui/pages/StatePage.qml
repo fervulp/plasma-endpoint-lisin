@@ -1049,14 +1049,6 @@ Kirigami.Page {
                 Layout.topMargin: Kirigami.Units.smallSpacing
                 spacing: Kirigami.Units.smallSpacing
 
-                QQC2.Label {
-                    visible: page.selCount > 0
-                    opacity: 0.6
-                    font.pointSize: Kirigami.Theme.smallFont.pointSize
-                    text: page.allSelected ? "all " + page.curTotal + " selected"
-                                           : page.selRows.length + " selected"
-                }
-                Item { Layout.fillWidth: true }
                 QQC2.ToolButton {
                     icon.name: "go-previous"
                     flat: true
@@ -1074,16 +1066,18 @@ Kirigami.Page {
                     QQC2.Popup {
                         id: pagePopup
                         y: -height - Kirigami.Units.smallSpacing
-                        x: parent.width - width
-                        padding: Kirigami.Units.largeSpacing
+                        x: 0                                    // open at the bottom-left
+                        padding: Kirigami.Units.largeSpacing + 2   // +2px all sides
                         ColumnLayout {
                             spacing: Kirigami.Units.smallSpacing
                             QQC2.Label {
+                                Layout.alignment: Qt.AlignHCenter
                                 text: "Rows per page"
                                 opacity: 0.6
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize
                             }
                             Flow {
+                                Layout.alignment: Qt.AlignHCenter
                                 Layout.preferredWidth: Kirigami.Units.gridUnit * 7
                                 spacing: 2
                                 Repeater {
@@ -1103,14 +1097,18 @@ Kirigami.Page {
                                 }
                             }
                             QQC2.Label {
+                                Layout.alignment: Qt.AlignHCenter
                                 text: "Go to page"
                                 opacity: 0.6
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize
                             }
                             RowLayout {
+                                Layout.alignment: Qt.AlignHCenter
                                 spacing: Kirigami.Units.smallSpacing
                                 QQC2.SpinBox {
                                     implicitHeight: Kirigami.Units.gridUnit * 1.6
+                                    // narrow: content width (page digits + steppers)
+                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 5
                                     from: 1
                                     to: Math.max(1, page.pageCount)
                                     value: page.pageIndex + 1
@@ -1130,6 +1128,14 @@ Kirigami.Page {
                     flat: true
                     enabled: page.pageIndex < page.pageCount - 1
                     onClicked: page.pageIndex++
+                }
+                Item { Layout.fillWidth: true }
+                QQC2.Label {
+                    visible: page.selCount > 0
+                    opacity: 0.6
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                    text: page.allSelected ? "all " + page.curTotal + " selected"
+                                           : page.selRows.length + " selected"
                 }
             }
         }
