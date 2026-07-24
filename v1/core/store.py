@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 # Vendored duckdb: add explicitly so it loads even with PYTHONNOUSERSITE=1.
@@ -45,9 +46,13 @@ class Store:
     def __init__(self, path: str | None = None):
         self.path = path or str(data_path())
         self._con = duckdb.connect(self.path)
+        # A DuckDB connection is not thread-safe; the background collector writes
+        # while the UI reads, so serialize every access on one lock.
+        self._lock = threading.RLock()
 
     def close(self) -> None:
-        self._con.close()
+        with self._lock:
+            self._con.close()
 
     def replace_table(self, name: str, rows: list[dict]) -> int:
         """Replace a state table with the full current snapshot.
