@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from . import osquery
+from . import osquery, views
 from .store import Store
 
 INPUTS_DIR = Path(__file__).resolve().parent.parent / "expertise" / "inputs"
@@ -42,3 +42,9 @@ def run_once(store: Store) -> list[dict]:
         except Exception as e:  # noqa: BLE001 — a bad rule must not kill the run
             status.append({"table": table, "rows": 0, "error": str(e)})
     return status
+
+
+def run_all(store: Store) -> dict:
+    """Collect base tables (inputs), then rebuild the declarative derivation
+    layer (enrichment views + validated edges)."""
+    return {"inputs": run_once(store), "derive": views.apply(store)}

@@ -1,0 +1,10 @@
+type: edge
+name: process_listens
+version: 1.0.0
+title: process → listening port
+description: A declared fact relation on a real key column (pid). Valid only if
+  both columns exist; the graph reads this, it does not guess from value
+  overlap.
+from: processes.pid
+to: listening_ports.pid
+label: listens

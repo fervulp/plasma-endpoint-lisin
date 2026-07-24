@@ -1,0 +1,23 @@
+type: view
+name: ports_owned
+version: 1.0.0
+title: Listening ports with owner
+description: Attaches the owning process to each listening socket by joining on
+  pid — a fact edge, not a lookup. Base tables come from two inputs
+  (listening_ports, processes); the join happens here in the derivation layer.
+sql: |
+  SELECT
+    l.port,
+    l.protocol,
+    l.address,
+    l.socket_path,
+    l.pid,
+    p.name        AS process,
+    p.cmdline     AS process_cmdline,
+    p.cgroup_path AS process_cgroup
+  FROM listening_ports l
+  LEFT JOIN processes p ON p.pid = l.pid
+# In-rule tests (run on save): the join must not lose rows and must attach names.
+tests:
+  expect_columns: [port, protocol, address, pid, process, process_cmdline]
+  min_rows: 1

@@ -3,20 +3,17 @@ table: listening_ports
 type: input
 version: 1.0.0
 title: Listening ports
-description: Listening sockets with their owning process.
-# The process name is attached by a JOIN inside osquery (fact edge on pid),
-# not by a Python lookup — this is the enrichment-as-join model in miniature.
+description: Listening sockets (raw). The owning process is attached by the
+  ports_owned enrichment view, not here — enrichment joins across tables that
+  may come from different inputs, so it belongs in the derivation layer.
 query: |
   SELECT
-    l.pid,
-    l.port,
-    l.protocol,
-    l.family,
-    l.address,
-    l.path        AS socket_path,
-    p.name        AS process,
-    p.cmdline     AS process_cmdline
-  FROM listening_ports l
-  LEFT JOIN processes p ON p.pid = l.pid
-  WHERE l.port > 0
-  ORDER BY l.port
+    pid,
+    port,
+    protocol,
+    family,
+    address,
+    path AS socket_path
+  FROM listening_ports
+  WHERE port > 0
+  ORDER BY port
