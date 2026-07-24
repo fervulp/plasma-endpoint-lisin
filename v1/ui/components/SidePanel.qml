@@ -21,10 +21,8 @@ Kirigami.ShadowedRectangle {
     Kirigami.Theme.colorSet: Kirigami.Theme.View
     Kirigami.Theme.inherit: false
     color: Kirigami.Theme.backgroundColor
-    // a floating card: rounded, soft shadow (matches FloatCard)
+    // a floating card: rounded, soft shadow (matches FloatCard), no border
     radius: Kirigami.Units.smallSpacing * 1.5
-    border.width: 1
-    border.color: Qt.alpha(Kirigami.Theme.textColor, 0.08)
     shadow.size: Kirigami.Units.gridUnit
     shadow.yOffset: 2
     shadow.color: Qt.rgba(0, 0, 0, 0.18)

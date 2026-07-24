@@ -111,28 +111,24 @@ Kirigami.ApplicationWindow {
         Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
 
-        // a tidy collapse control that reads like the menu items above it
-        footer: ColumnLayout {
-            spacing: 0
-            Kirigami.Separator { Layout.fillWidth: true; opacity: 0.4 }
-            QQC2.ItemDelegate {
-                Layout.fillWidth: true
-                icon.name: drawer.collapsed ? "sidebar-expand-left-symbolic"
-                                            : "sidebar-collapse-left-symbolic"
-                text: drawer.collapsed ? "" : "Collapse sidebar"
-                display: drawer.collapsed ? QQC2.AbstractButton.IconOnly
-                                          : QQC2.AbstractButton.TextBesideIcon
-                onClicked: drawer.collapsed = !drawer.collapsed
-                QQC2.ToolTip.text: "Toggle sidebar"
-                QQC2.ToolTip.visible: hovered
-            }
+        // a subtle, icon-only collapse arrow — barely there until hovered
+        footer: QQC2.ToolButton {
+            flat: true
+            opacity: hovered ? 0.9 : 0.3
+            icon.name: drawer.collapsed ? "sidebar-expand-left-symbolic"
+                                        : "sidebar-collapse-left-symbolic"
+            onClicked: drawer.collapsed = !drawer.collapsed
+            QQC2.ToolTip.text: drawer.collapsed ? "Expand sidebar" : "Collapse sidebar"
+            QQC2.ToolTip.visible: hovered
         }
 
         header: Rectangle {
             Kirigami.Theme.colorSet: Kirigami.Theme.Window
             Kirigami.Theme.inherit: false
             color: Kirigami.Theme.backgroundColor
-            implicitHeight: logoRow.implicitHeight + Kirigami.Units.largeSpacing * 2
+            // a STABLE height, so collapsing the drawer does not pull the menu
+            // icons up into where the title used to be
+            implicitHeight: Kirigami.Units.gridUnit * 3.5
             RowLayout {
                 id: logoRow
                 anchors.fill: parent
@@ -146,6 +142,7 @@ Kirigami.ApplicationWindow {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 0
+                    visible: !drawer.collapsed          // hide the title when collapsed
                     Kirigami.Heading { level: 1; text: "LiSin" }
                     QQC2.Label {
                         text: "Endpoint Detection and Response"

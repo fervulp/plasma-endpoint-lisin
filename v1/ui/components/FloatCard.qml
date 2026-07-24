@@ -10,8 +10,7 @@ Kirigami.ShadowedRectangle {
     Kirigami.Theme.inherit: false
     color: Kirigami.Theme.backgroundColor
     radius: Kirigami.Units.smallSpacing * 1.5
-    border.width: 1
-    border.color: Qt.alpha(Kirigami.Theme.textColor, 0.08)
+    // no border — the card is set off by its colour and shadow alone
     shadow.size: Kirigami.Units.gridUnit
     shadow.xOffset: 0
     shadow.yOffset: 2

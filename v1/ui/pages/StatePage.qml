@@ -627,81 +627,10 @@ Kirigami.Page {
     Timer { id: persistTimer; interval: 400; onTriggered: page.persistWidths() }
 
 
-    // -------- bottom toolbar --------
-    footer: QQC2.ToolBar {
-        RowLayout {
-            anchors.fill: parent
-            spacing: Kirigami.Units.smallSpacing
-            // HOW MANY ROWS ARE SELECTED — on the LEFT of the footer.
-            QQC2.Label {
-                visible: page.selCount > 0
-                opacity: 0.7
-                text: page.allSelected
-                      ? "Selected: all " + page.curTotal + " rows"
-                      : "Selected: " + page.selRows.length +
-                        (page.selRows.length === 1 ? " row" : " rows")
-            }
-            // when this table was filled last
-            QQC2.Label {
-                visible: page.cur && page.cur.collected_at
-                text: "collected " + Fmt.local(page.cur ? page.cur.collected_at : "")
-                opacity: 0.6
-                font.pointSize: Kirigami.Theme.smallFont.pointSize
-            }
-            QQC2.Label {
-                Layout.leftMargin: Kirigami.Units.smallSpacing
-                opacity: 0.6
-                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                text: page.s ? "Updated: " + page.s.collected_at : "Collecting…"
-            }
-            Item { Layout.fillWidth: true }
-            // SELECT ALL — every matching record across ALL pages. Toggles with
-            // Clear.
-            QQC2.ToolButton {
-                visible: page.curTotal > 0
-                readonly property bool anySel: page.allSelected || page.selRows.length > 0
-                icon.name: anySel ? "edit-clear" : "edit-select-all-layers"
-                text: anySel ? "Clear" : "Select all (" + page.curTotal + ")"
-                onClicked: {
-                    page.selRows = []
-                    page.allSelected = !anySel
-                }
-            }
-            QQC2.Label {
-                opacity: 0.7
-                // "1–50 of <matching>"; on Events, when a filter narrows the set,
-                // also show the grand total so the effect is obvious.
-                text: page.curTotal === 0 ? "0 rows"
-                      : (page.pageIndex * page.pageLimit + 1) + "–" +
-                        Math.min((page.pageIndex + 1) * page.pageLimit, page.curTotal) +
-                        " of " + page.curTotal +
-                        (page.cur && page.cur.name === "events"
-                         && page.curTotal < page.eventsTotal
-                         ? " · " + page.eventsTotal + " total" : "")
-            }
-            QQC2.ToolButton {
-                icon.name: "go-previous"
-                enabled: page.pageIndex > 0
-                onClicked: page.pageIndex--
-            }
-            QQC2.ToolButton {
-                icon.name: "go-next"
-                enabled: page.pageIndex < page.pageCount - 1
-                onClicked: page.pageIndex++
-            }
-            QQC2.ComboBox {
-                // how many rows to show; "all" = no limit
-                model: [{ t: "50", v: 50 }, { t: "100", v: 100 }, { t: "200", v: 200 },
-                        { t: "500", v: 500 }, { t: "1000", v: 1000 },
-                        { t: "all", v: 0 }]
-                textRole: "t"
-                valueRole: "v"
-                implicitWidth: Kirigami.Units.gridUnit * 6
-                onActivated: { page.pageLimit = currentValue > 0 ? currentValue : 100000; page.pageIndex = 0 }
-            }
-            // THE COLUMN CHOICE WAS REMOVED: the columns are set by SELECT in the query bar
-        }
-    }
+    // The page-level footer was split into the cards themselves: data freshness
+    // sits at the bottom of the tabs card, pagination + selection at the bottom
+    // of the table card, so each card carries the information about its own
+    // content.
 
     // -------- page body: main column + full-height right sidebars --------
     RowLayout {
@@ -783,6 +712,17 @@ Kirigami.Page {
                     }
                 }
             }
+
+            // data freshness, at the bottom of the tabs card
+            QQC2.Label {
+                Layout.fillWidth: true
+                Layout.margins: Kirigami.Units.smallSpacing
+                opacity: 0.45
+                elide: Text.ElideRight
+                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                visible: page.s && page.s.collected_at
+                text: "updated " + Fmt.localHM(page.s ? page.s.collected_at : "")
+            }
             }
 
             MouseArea {   // the resize handle of the tab panel
@@ -816,6 +756,7 @@ Kirigami.Page {
             QueryBar {
                 id: qbar
                 Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.smallSpacing
                 Layout.leftMargin: Kirigami.Units.smallSpacing
                 Layout.rightMargin: Kirigami.Units.smallSpacing
                 // the fields offered in the pickers = THIS table's columns (and the
@@ -1073,6 +1014,93 @@ Kirigami.Page {
                     text: "Empty"
                 }
             }
+            }
+
+            // ---- the table's OWN footer: selection + pagination ----
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.smallSpacing
+
+                QQC2.Label {
+                    visible: page.selCount > 0
+                    opacity: 0.6
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                    text: page.allSelected ? "all " + page.curTotal + " selected"
+                                           : page.selRows.length + " selected"
+                }
+                Item { Layout.fillWidth: true }
+                QQC2.ToolButton {
+                    icon.name: "go-previous"
+                    flat: true
+                    enabled: page.pageIndex > 0
+                    onClicked: page.pageIndex--
+                }
+                // the page range; a click reveals rows-per-page + go-to-page
+                QQC2.ToolButton {
+                    flat: true
+                    text: page.curTotal === 0 ? "0"
+                          : (page.pageIndex * page.pageLimit + 1) + "–"
+                            + Math.min((page.pageIndex + 1) * page.pageLimit, page.curTotal)
+                            + " of " + page.curTotal
+                    onClicked: pagePopup.open()
+                    QQC2.Popup {
+                        id: pagePopup
+                        y: -height - Kirigami.Units.smallSpacing
+                        x: parent.width - width
+                        padding: Kirigami.Units.largeSpacing
+                        ColumnLayout {
+                            spacing: Kirigami.Units.smallSpacing
+                            QQC2.Label {
+                                text: "Rows per page"
+                                opacity: 0.6
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            }
+                            Flow {
+                                Layout.preferredWidth: Kirigami.Units.gridUnit * 15
+                                spacing: Kirigami.Units.smallSpacing
+                                Repeater {
+                                    model: [50, 100, 200, 500, 1000, 0]
+                                    QQC2.Button {
+                                        flat: true
+                                        checkable: true
+                                        text: modelData === 0 ? "all" : "" + modelData
+                                        checked: modelData === 0 ? page.pageLimit >= 100000
+                                                                 : page.pageLimit === modelData
+                                        onClicked: {
+                                            page.pageLimit = modelData > 0 ? modelData : 100000
+                                            page.pageIndex = 0
+                                        }
+                                    }
+                                }
+                            }
+                            QQC2.Label {
+                                text: "Go to page"
+                                opacity: 0.6
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                            }
+                            RowLayout {
+                                spacing: Kirigami.Units.smallSpacing
+                                QQC2.SpinBox {
+                                    from: 1
+                                    to: Math.max(1, page.pageCount)
+                                    value: page.pageIndex + 1
+                                    onValueModified: page.pageIndex = value - 1
+                                }
+                                QQC2.Label {
+                                    opacity: 0.6
+                                    text: "of " + Math.max(1, page.pageCount)
+                                }
+                            }
+                        }
+                    }
+                }
+                QQC2.ToolButton {
+                    icon.name: "go-next"
+                    flat: true
+                    enabled: page.pageIndex < page.pageCount - 1
+                    onClicked: page.pageIndex++
+                }
             }
         }
         }
