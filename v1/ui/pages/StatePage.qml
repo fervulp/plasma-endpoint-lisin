@@ -957,6 +957,14 @@ Kirigami.Page {
                 Layout.topMargin: Kirigami.Units.smallSpacing
                 spacing: Kirigami.Units.smallSpacing
 
+                QQC2.Label {
+                    visible: page.selCount > 0
+                    opacity: 0.6
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                    text: page.allSelected ? "all " + page.curTotal + " selected"
+                                           : page.selRows.length + " selected"
+                }
+                Item { Layout.fillWidth: true }
                 QQC2.ToolButton {
                     icon.name: "go-previous"
                     flat: true
@@ -974,7 +982,7 @@ Kirigami.Page {
                     QQC2.Popup {
                         id: pagePopup
                         y: -height - Kirigami.Units.smallSpacing
-                        x: 0                                    // open at the bottom-left
+                        x: parent.width - width                 // open at the bottom-right
                         padding: Kirigami.Units.largeSpacing + 2   // +2px all sides
                         ColumnLayout {
                             spacing: Kirigami.Units.smallSpacing
@@ -1036,14 +1044,6 @@ Kirigami.Page {
                     flat: true
                     enabled: page.pageIndex < page.pageCount - 1
                     onClicked: page.pageIndex++
-                }
-                Item { Layout.fillWidth: true }
-                QQC2.Label {
-                    visible: page.selCount > 0
-                    opacity: 0.6
-                    font.pointSize: Kirigami.Theme.smallFont.pointSize
-                    text: page.allSelected ? "all " + page.curTotal + " selected"
-                                           : page.selRows.length + " selected"
                 }
             }
         }
