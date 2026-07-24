@@ -1158,6 +1158,9 @@ Item {
         // ---- the query line + the mode switch ----
         RowLayout {
             Layout.fillWidth: true
+            // this row shows only in SQL mode; a top margin brings the SQL field
+            // down to the same level as the tabs 'find a table' search
+            Layout.topMargin: Kirigami.Units.smallSpacing
             spacing: Kirigami.Units.smallSpacing
 
             Kirigami.Icon {
@@ -1209,9 +1212,10 @@ Item {
             Layout.fillWidth: true
             // The panel IS the "click it together" mode
             visible: bar.builderMode
-            implicitHeight: bcol.implicitHeight + Kirigami.Units.largeSpacing
-            radius: 4
-            color: Kirigami.Theme.alternateBackgroundColor
+            implicitHeight: bcol.implicitHeight
+            // transparent: the search / group / select controls sit on the white
+            // card, so the field matches the left 'find a table' search
+            color: "transparent"
 
             ColumnLayout {
                 id: bcol
@@ -1220,7 +1224,6 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.margins: Kirigami.Units.smallSpacing
                 spacing: Kirigami.Units.smallSpacing
 
                 // ===== THE SEARCH ROW =====

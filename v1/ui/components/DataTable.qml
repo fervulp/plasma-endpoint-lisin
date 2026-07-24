@@ -200,13 +200,20 @@ Item {
                         height: hdrRow.height
                         readonly property string kind: modelData.kind || "text"
 
-                        // checkbox column: a tristate "select the page" box
+                        // checkbox column: a tristate "select the page" box.
+                        // A CheckBox toggles its OWN checkState on click, which
+                        // breaks the binding to headerCheckState; a MouseArea on
+                        // top drives the state through the owner instead, so the
+                        // box always reflects headerCheckState.
                         QQC2.CheckBox {
                             anchors.verticalCenter: parent.verticalCenter
                             visible: hcell.kind === "check" && table.showHeaderCheck
                             tristate: true
                             checkState: table.headerCheckState
-                            onClicked: table.headerCheckClicked()
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: table.headerCheckClicked()
+                            }
                         }
                         // value column: label + sort direction
                         QQC2.Label {
@@ -386,12 +393,17 @@ Item {
                                 property string val: kind === "text"
                                     ? table.cellText(row.modelData, colDef.k) : ""
 
-                                // checkbox
+                                // checkbox (driven by the owner; MouseArea on top
+                                // so the box's own toggle does not break the
+                                // binding to isChecked)
                                 QQC2.CheckBox {
                                     anchors.verticalCenter: parent.verticalCenter
                                     visible: cell.kind === "check"
                                     checked: table.isChecked ? table.isChecked(row.modelData) : false
-                                    onClicked: table.checkToggled(row.modelData, row.index)
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: table.checkToggled(row.modelData, row.index)
+                                    }
                                 }
                                 // leading type icon
                                 Kirigami.Icon {
