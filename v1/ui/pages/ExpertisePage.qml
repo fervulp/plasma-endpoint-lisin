@@ -223,7 +223,7 @@ Kirigami.Page {
                             implicitWidth: Kirigami.Units.gridUnit * 1.3
                         }
                         Kirigami.Icon {
-                            source: modelData.depth === 0 ? "folder-favorites" : "folder"
+                            source: "folder"
                             Layout.preferredWidth: Kirigami.Units.iconSizes.small
                             Layout.preferredHeight: Kirigami.Units.iconSizes.small
                         }
