@@ -1100,11 +1100,16 @@ Kirigami.Page {
                             // only the non-empty fields of this group
                             readonly property var nonEmpty: (modelData.fields || [])
                                 .filter(function (f) {
-                                    return page.lastSel
-                                        && String(page.lastSel[f] ?? "") !== ""
-                                        && (page.detailFilter === ""
-                                            || f.toLowerCase().indexOf(
-                                                   page.detailFilter.toLowerCase()) >= 0) })
+                                    if (!page.lastSel
+                                        || String(page.lastSel[f] ?? "") === "")
+                                        return false
+                                    if (page.detailFilter === "") return true
+                                    // match the field NAME or its VALUE
+                                    var flt = page.detailFilter.toLowerCase()
+                                    return f.toLowerCase().indexOf(flt) >= 0
+                                        || String(page.lastSel[f] ?? "")
+                                               .toLowerCase().indexOf(flt) >= 0
+                                })
                             visible: nonEmpty.length > 0
                             // the category header (events only - the plain section
                             // for a state table has an empty group name)
