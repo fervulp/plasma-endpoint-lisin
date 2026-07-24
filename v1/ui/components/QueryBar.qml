@@ -1240,7 +1240,7 @@ Item {
                         // gets narrow, down to a still-usable minimum - instead of
                         // pushing the toolbar buttons off the edge.
                         Layout.fillWidth: true
-                        Layout.minimumWidth: Kirigami.Units.gridUnit * 7
+                        Layout.minimumWidth: Kirigami.Units.gridUnit * 3
                         Layout.preferredWidth: Kirigami.Units.gridUnit * 18
                         Layout.maximumWidth: Kirigami.Units.gridUnit * 24
                         visible: bar.builderMode      // not needed in SQL mode

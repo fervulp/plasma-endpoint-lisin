@@ -111,32 +111,42 @@ Kirigami.ApplicationWindow {
         // the collapsed rail a little more width
         showHeaderWhenCollapsed: true
         collapsedSize: Kirigami.Units.gridUnit * 3
-        // a WHITE sidebar (View palette), not grey
-        Kirigami.Theme.colorSet: Kirigami.Theme.View
+        // a grey sidebar (Window palette)
+        Kirigami.Theme.colorSet: Kirigami.Theme.Window
         Kirigami.Theme.inherit: false
 
-        // a subtle, icon-only collapse arrow — barely there until hovered
-        footer: QQC2.ToolButton {
-            flat: true
-            opacity: hovered ? 0.9 : 0.3
-            icon.name: drawer.collapsed ? "sidebar-expand-left-symbolic"
-                                        : "sidebar-collapse-left-symbolic"
-            onClicked: drawer.collapsed = !drawer.collapsed
-            QQC2.ToolTip.text: drawer.collapsed ? "Expand sidebar" : "Collapse sidebar"
-            QQC2.ToolTip.visible: hovered
+        // a subtle, icon-only collapse arrow — raised off the very bottom so it
+        // sits about the level of the tabs card's 'updated' line
+        footer: Item {
+            implicitHeight: collapseBtn.implicitHeight + Kirigami.Units.largeSpacing
+            QQC2.ToolButton {
+                id: collapseBtn
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: Kirigami.Units.largeSpacing
+                flat: true
+                opacity: hovered ? 0.9 : 0.3
+                icon.name: drawer.collapsed ? "sidebar-expand-left-symbolic"
+                                            : "sidebar-collapse-left-symbolic"
+                onClicked: drawer.collapsed = !drawer.collapsed
+                QQC2.ToolTip.text: drawer.collapsed ? "Expand sidebar" : "Collapse sidebar"
+                QQC2.ToolTip.visible: hovered
+            }
         }
 
         header: Rectangle {
-            Kirigami.Theme.colorSet: Kirigami.Theme.View
+            Kirigami.Theme.colorSet: Kirigami.Theme.Window
             Kirigami.Theme.inherit: false
             color: Kirigami.Theme.backgroundColor
-            // a STABLE height, so collapsing the drawer does not pull the menu
-            // icons up into where the title used to be
-            implicitHeight: Kirigami.Units.gridUnit * 3.5
+            // compact, with a stable height (so collapse does not shift the menu)
+            implicitHeight: Kirigami.Units.gridUnit * 3.0
             RowLayout {
                 id: logoRow
                 anchors.fill: parent
-                anchors.margins: Kirigami.Units.largeSpacing
+                anchors.leftMargin: Kirigami.Units.largeSpacing
+                anchors.rightMargin: Kirigami.Units.smallSpacing
+                anchors.topMargin: Kirigami.Units.smallSpacing
+                anchors.bottomMargin: Kirigami.Units.smallSpacing
                 spacing: Kirigami.Units.smallSpacing
                 Kirigami.Icon {
                     source: "view-visible"
@@ -147,7 +157,7 @@ Kirigami.ApplicationWindow {
                     Layout.fillWidth: true
                     spacing: 0
                     visible: !drawer.collapsed          // hide the title when collapsed
-                    Kirigami.Heading { level: 1; text: "LiSin" }
+                    Kirigami.Heading { level: 2; text: "LiSin" }
                     QQC2.Label {
                         text: "Endpoint Detection and Response"
                         opacity: 0.6
@@ -158,6 +168,16 @@ Kirigami.ApplicationWindow {
                 }
             }
         }
+
+        // set the logo off from the sections with a subtle divider
+        topContent: [
+            Kirigami.Separator {
+                Layout.fillWidth: true
+                Layout.bottomMargin: Kirigami.Units.smallSpacing
+                opacity: 0.3
+            }
+        ]
+
         actions: [
             Kirigami.Action {
                 text: "Dashboards"

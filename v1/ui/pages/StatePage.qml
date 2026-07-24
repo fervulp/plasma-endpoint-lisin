@@ -821,7 +821,7 @@ Kirigami.Page {
                         Layout.fillWidth: true
                         Layout.preferredHeight: gProbe.implicitHeight
                                                 + Kirigami.Units.smallSpacing * 2
-                        color: Kirigami.Theme.alternateBackgroundColor
+                        color: Kirigami.Theme.backgroundColor
                         QQC2.Label { id: gProbe; visible: false; text: "Ag"; font.bold: true }
                         // value column(s) fill the width, count sits right after -
                         // no empty gap, borders between columns, like the main table

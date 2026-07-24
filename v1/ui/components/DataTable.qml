@@ -165,7 +165,7 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: hdrProbe.implicitHeight + Kirigami.Units.smallSpacing * 2
-            color: Kirigami.Theme.alternateBackgroundColor
+            color: Kirigami.Theme.backgroundColor
             clip: true
             QQC2.Label { id: hdrProbe; visible: false; text: "Ag"; font.bold: true }
             Row {
