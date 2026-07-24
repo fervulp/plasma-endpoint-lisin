@@ -470,10 +470,55 @@ Kirigami.Page {
     property string groupVal: ""
     property bool groupPicked: false
     property var groupRows: []
+    // reload groups whenever the grouping changes (not only via applyQuery), so
+    // the values always show
+    onGroupByChanged: reloadGroups()
     function reloadGroups() {
         if (!cur || !groupBy.length) { groupRows = []; return }
         var r = backend.stateGroups(cur.name, groupBy.join(","), page.baseWhere())
         groupRows = r.rows || []
+    }
+    // ---- the group panel as the SHARED DataTable (same formatting/functionality) ----
+    readonly property var groupColumns: {
+        var out = []
+        for (var i = 0; i < groupBy.length; i++)
+            out.push({ k: "g" + i, t: groupBy[i], fill: i === groupBy.length - 1, w: 8 })
+        out.push({ k: "_count", t: "count", w: 7, right: true })
+        return out
+    }
+    readonly property var groupTableRows: {
+        var out = []
+        for (var i = 0; i < groupRows.length; i++) {
+            var gr = groupRows[i]
+            var parts = gr.parts || [String(gr.value)]
+            var o = { _id: String(i), _count: gr.n, _gval: gr.value, _gparts: parts }
+            for (var j = 0; j < groupBy.length; j++)
+                o["g" + j] = j < parts.length ? String(parts[j]) : ""
+            out.push(o)
+        }
+        return out
+    }
+    // format the field columns exactly like the main table; count as a number
+    function groupCellDisplay(row, key) {
+        if (key === "_count") return String(row._count)
+        var val = row[key]
+        if (val === "" || val === undefined) return "(empty)"
+        var idx = parseInt(key.substring(1))
+        var pseudo = {}; pseudo[page.groupBy[idx]] = val
+        return page.cellDisplay(pseudo, page.groupBy[idx])
+    }
+    function isGroupSel(row) {
+        return page.groupPicked && page.groupVal === String(row._gval || "")
+    }
+    function toggleGroup(row) {
+        var v = String(row._gval || "")
+        if (page.groupPicked && page.groupVal === v) {
+            page.groupPicked = false; page.groupVal = ""; page.groupParts = []
+        } else {
+            page.groupPicked = true; page.groupVal = v
+            page.groupParts = row._gparts || [v]
+        }
+        page.applyQuery(page.queryText)
     }
     // the condition without the group - the groups themselves are counted by it
     // (time filtering is done by adding a `ts` condition in the query bar - the
@@ -832,160 +877,21 @@ Kirigami.Page {
                 Layout.fillHeight: true
                 spacing: 0
 
-            // ---- THE GROUP PANEL ----
+            // ---- THE GROUP PANEL: the SHARED DataTable, so it has the same
+            //      formatting and functionality as the main table ----
             Item {
                 visible: page.groupBy.length > 0
                 Layout.preferredWidth: Math.min(page.width * 0.45,
                                                 Kirigami.Units.gridUnit * (8 + 9 * page.groupBy.length))
                 Layout.fillHeight: true
-                ColumnLayout {
+                DataTable {
                     anchors.fill: parent
-                    spacing: 0
-                    // the header - the same as the table's
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: gProbe.implicitHeight
-                                                + Kirigami.Units.smallSpacing * 2
-                        color: Kirigami.Theme.backgroundColor
-                        QQC2.Label { id: gProbe; visible: false; text: "Ag"; font.bold: true }
-                        // value column(s) fill the width, count sits right after -
-                        // no empty gap, borders between columns, like the main table
-                        RowLayout {
-                            anchors.fill: parent
-                            spacing: 0
-                            Repeater {
-                                model: page.groupBy
-                                delegate: Item {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    QQC2.Label {
-                                        anchors.fill: parent
-                                        verticalAlignment: Text.AlignVCenter
-                                        leftPadding: Kirigami.Units.smallSpacing
-                                        text: modelData
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                    }
-                                    Kirigami.Separator {
-                                        anchors { right: parent.right; top: parent.top
-                                                  bottom: parent.bottom }
-                                        opacity: 0.25
-                                    }
-                                }
-                            }
-                            QQC2.Label {
-                                Layout.preferredWidth: Kirigami.Units.gridUnit * 5
-                                Layout.fillHeight: true
-                                horizontalAlignment: Text.AlignRight
-                                verticalAlignment: Text.AlignVCenter
-                                rightPadding: Kirigami.Units.largeSpacing
-                                text: "count"
-                                font.bold: true
-                            }
-                        }
-                        Kirigami.Separator {
-                            anchors.bottom: parent.bottom
-                            width: parent.width
-                            opacity: 0.35
-                        }
-                    }
-                    QQC2.ScrollView {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        clip: true
-                        ListView {
-                            model: page.groupRows
-                            reuseItems: true
-                            delegate: QQC2.ItemDelegate {
-                                id: gRow
-                                required property var modelData
-                                required property int index
-                                width: ListView.view.width
-                                height: page.rowHeight
-                                padding: 0
-                                highlighted: page.groupPicked
-                                             && page.groupVal === String(modelData.value || "")
-                                onClicked: {
-                                    var v = String(modelData.value || "")
-                                    if (page.groupPicked && page.groupVal === v) {
-                                        page.groupPicked = false
-                                        page.groupVal = ""; page.groupParts = []
-                                    } else {
-                                        page.groupPicked = true
-                                        page.groupVal = v
-                                        page.groupParts = modelData.parts || [v]
-                                    }
-                                    page.applyQuery(page.queryText)
-                                }
-                                // THE SAME COLOURS AS THE TABLE: otherwise two
-                                // tables side by side look like different programs
-                                background: Rectangle {
-                                    // EXACTLY the table's row colours (highlight /
-                                    // hover / zebra) + the same fade, so the two
-                                    // tables side by side read as one program
-                                    color: gRow.highlighted
-                                           ? Qt.alpha(Kirigami.Theme.highlightColor, 0.20)
-                                           : gRow.hovered
-                                             ? Qt.alpha(Kirigami.Theme.textColor, 0.05)
-                                             : gRow.index % 2 === 0
-                                               ? Kirigami.Theme.backgroundColor
-                                               : Kirigami.Theme.alternateBackgroundColor
-                                    Behavior on color {
-                                        ColorAnimation { duration: Kirigami.Units.shortDuration }
-                                    }
-                                    Kirigami.Separator {
-                                        anchors.bottom: parent.bottom
-                                        width: parent.width
-                                        opacity: 0.35
-                                    }
-                                    Rectangle {
-                                        anchors { left: parent.left; top: parent.top
-                                                  bottom: parent.bottom }
-                                        width: 3
-                                        visible: gRow.highlighted
-                                        color: Kirigami.Theme.highlightColor
-                                    }
-                                }
-                                contentItem: RowLayout {
-                                    spacing: 0
-                                    Repeater {
-                                        model: modelData.parts
-                                               ? modelData.parts : [String(modelData.value)]
-                                        delegate: Item {
-                                            required property var modelData
-                                            Layout.fillWidth: true
-                                            Layout.fillHeight: true
-                                            QQC2.Label {
-                                                anchors.fill: parent
-                                                verticalAlignment: Text.AlignVCenter
-                                                leftPadding: Kirigami.Units.smallSpacing
-                                                rightPadding: Kirigami.Units.largeSpacing
-                                                text: String(modelData) === "" ? "(empty)"
-                                                                              : String(modelData)
-                                                opacity: String(modelData) === "" ? 0.5 : 1
-                                                elide: Text.ElideRight
-                                            }
-                                            Kirigami.Separator {
-                                                anchors { right: parent.right; top: parent.top
-                                                          bottom: parent.bottom }
-                                                opacity: 0.25
-                                            }
-                                        }
-                                    }
-                                    QQC2.Label {
-                                        text: modelData.n
-                                        opacity: 0.75
-                                        horizontalAlignment: Text.AlignRight
-                                        verticalAlignment: Text.AlignVCenter
-                                        rightPadding: Kirigami.Units.largeSpacing
-                                        Layout.preferredWidth: Kirigami.Units.gridUnit * 5
-                                        Layout.fillHeight: true
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    rowHeight: page.rowHeight
+                    columns: page.groupColumns
+                    rows: page.groupTableRows
+                    formatter: page.groupCellDisplay
+                    isSelected: page.isGroupSel
+                    onRowClicked: function (row, index, mods) { page.toggleGroup(row) }
                 }
             }
             Kirigami.Separator {
