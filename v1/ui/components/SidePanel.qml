@@ -15,6 +15,11 @@ Kirigami.ShadowedRectangle {
     property string iconName: ""
     property bool open: false
     property real panelWidth: Kirigami.Units.gridUnit * 20
+    // optional search in the header, aligned with the other search bars: set
+    // searchPlaceholder to show a SearchField (with the collapse button to its
+    // right) instead of the icon + title
+    property string searchPlaceholder: ""
+    property alias searchText: hdrSearch.text
     signal closeRequested()
     default property alias content: body.data
 
@@ -65,6 +70,8 @@ Kirigami.ShadowedRectangle {
         anchors.fill: parent
         anchors.margins: Kirigami.Units.smallSpacing
         anchors.leftMargin: Kirigami.Units.smallSpacing * 2
+        // align the header (search) with the cards' search bars
+        anchors.topMargin: Kirigami.Units.smallSpacing * 2
         spacing: Kirigami.Units.smallSpacing
         // the contents fade with the panel instead of flashing at full width
         // while it is still sliding open
@@ -77,14 +84,23 @@ Kirigami.ShadowedRectangle {
         RowLayout {
             Layout.fillWidth: true
             spacing: Kirigami.Units.smallSpacing
+            // search mode: a search field fills the header (with the collapse
+            // button to its right); otherwise the icon + title
+            Kirigami.SearchField {
+                id: hdrSearch
+                visible: panel.searchPlaceholder !== ""
+                Layout.fillWidth: true
+                placeholderText: panel.searchPlaceholder
+            }
             Kirigami.Icon {
                 source: panel.iconName
-                visible: panel.iconName !== ""
+                visible: panel.searchPlaceholder === "" && panel.iconName !== ""
                 Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
                 Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
             }
             Kirigami.Heading {
                 level: 3
+                visible: panel.searchPlaceholder === ""
                 text: panel.title
                 Layout.fillWidth: true
                 elide: Text.ElideRight
@@ -96,7 +112,10 @@ Kirigami.ShadowedRectangle {
                 onClicked: panel.closeRequested()
             }
         }
-        Kirigami.Separator { Layout.fillWidth: true }
+        Kirigami.Separator {
+            Layout.fillWidth: true
+            visible: panel.searchPlaceholder === ""
+        }
 
         ColumnLayout {
             id: body

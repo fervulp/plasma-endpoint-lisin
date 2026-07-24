@@ -203,22 +203,34 @@ class Backend(QObject):
         # no events source in v1 yet
         return {"names": [], "groups": []}
 
-    @Slot(str, str, result="QVariant")
-    def stateGroups(self, table, field):
-        # group-by counts for the filter panel; simple and safe over DuckDB
-        if not re.fullmatch(r"[A-Za-z0-9_]+", field or ""):
-            return []
+    @Slot(str, str, str, result="QVariant")
+    def stateGroups(self, table, fields_csv, where=""):
+        # distinct value groups (one or more fields) with counts, for the group
+        # panel. Returns {rows:[{value, parts, count}]}.
+        fields = [f.strip() for f in (fields_csv or "").split(",") if f.strip()]
+        if not fields or not all(re.fullmatch(r"[A-Za-z0-9_]+", f) for f in fields):
+            return {"rows": []}
         with self.store._lock:
             if table not in self.store.tables():
-                return []
+                return {"rows": []}
+            cols = ", ".join(_ident(f) for f in fields)
+            wh = f" WHERE {where}" if where else ""
             try:
                 rows = self.store._con.execute(
-                    f"SELECT {_ident(field)} AS v, count(*) AS n "
-                    f"FROM {_ident(table)} GROUP BY 1 ORDER BY n DESC LIMIT 200"
+                    f"SELECT {cols}, count(*) AS n FROM {_ident(table)}{wh} "
+                    f"GROUP BY {cols} ORDER BY n DESC LIMIT 500"
                 ).fetchall()
-                return [{"value": r[0], "count": r[1]} for r in rows]
-            except Exception:
-                return []
+                out = []
+                for r in rows:
+                    parts = ["" if r[i] is None else str(r[i]) for i in range(len(fields))]
+                    out.append({
+                        "value": " · ".join(parts),
+                        "parts": parts,
+                        "n": r[len(fields)],
+                    })
+                return {"rows": out}
+            except Exception as e:  # noqa: BLE001
+                return {"rows": [], "error": str(e)}
 
     # ---------- join stubs (no cross-table joins wired yet) ----------
     @Slot(str, result="QVariant")

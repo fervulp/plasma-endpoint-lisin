@@ -991,6 +991,7 @@ Kirigami.Page {
             Kirigami.Separator {
                 visible: page.groupBy.length > 0
                 Layout.fillHeight: true
+                Layout.preferredWidth: 1
             }
 
             // table (the shared DataTable template - principle 15/17)
@@ -1143,15 +1144,10 @@ Kirigami.Page {
             iconName: "documentinfo"
             panelWidth: Kirigami.Units.gridUnit * 22
             onCloseRequested: open = false
-
-            // search across the shown fields — same as the tables' search bars
-            Kirigami.SearchField {
-                Layout.fillWidth: true
-                Layout.margins: Kirigami.Units.smallSpacing
-                placeholderText: "find a field…"
-                text: page.detailFilter
-                onTextChanged: page.detailFilter = text
-            }
+            // the field search lives in the panel header now, aligned with the
+            // other search bars (its collapse button is right beside it)
+            searchPlaceholder: "find a field…"
+            onSearchTextChanged: page.detailFilter = searchText
 
             QQC2.ScrollView {
                 Layout.fillWidth: true

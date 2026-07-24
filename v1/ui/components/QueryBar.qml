@@ -1169,8 +1169,11 @@ Item {
         // ---- the query line + the mode switch ----
         RowLayout {
             Layout.fillWidth: true
-            // this row shows only in SQL mode; a top margin brings the SQL field
-            // down to the same level as the tabs 'find a table' search
+            // only in SQL mode; hiding the row EXCLUDES it from the column layout
+            // (otherwise its top margin pushes the builder search down)
+            visible: !bar.builderMode
+            // a top margin brings the SQL field down to the same level as the
+            // tabs 'find a table' search
             Layout.topMargin: Kirigami.Units.smallSpacing
             spacing: Kirigami.Units.smallSpacing
 
@@ -1245,6 +1248,8 @@ Item {
                 // line, while a counter is read instantly.
                 RowLayout {
                     Layout.fillWidth: true
+                    // align the builder search with the left / SQL search bars
+                    Layout.topMargin: Kirigami.Units.smallSpacing
                     spacing: Kirigami.Units.smallSpacing
 
                     Kirigami.SearchField {
