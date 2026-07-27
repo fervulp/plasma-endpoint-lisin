@@ -32,7 +32,7 @@ priority: 70
 #               hardcoded home directory.
 # The fields worth reading FIRST in this table; everything else the
 # source produces stays available in the Columns panel.
-columns: [name, type, status, path, source, username]
+columns: [name, type, status, command, source, username]
 description: >
   Desktop-session autostart: .desktop entries run when a session starts, system-
   wide and per user. A per-user autostart entry needs no privilege to create and

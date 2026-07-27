@@ -125,6 +125,33 @@ def check_engine(store):
         ok("no temp files left behind")
 
 
+# --------------------------------------------------------------- contract
+def check_contract(store):
+    """A RULE'S DECLARED COLUMNS MUST EXIST. `columns:` is the rule's contract
+    with the interface — the fields it says are worth reading first, which is
+    what the table shows before anything is unhidden. A name that does not exist
+    is dropped silently, so the tab quietly shows less than its author intended
+    and nothing anywhere says so. Two rules were doing exactly that: `network`
+    named ipv4/ipv6 where the query produces family/address, and `startup_items`
+    named path where the query aliases it to command."""
+    section("contract")
+    from core import pipeline as _pl, views as _views
+    have = {t: set(store.columns(t)) for t in store.tables()}
+    checked = broken = 0
+    for r in _pl.load_inputs() + _views.load_views():
+        decl = list(r.get("columns") or [])
+        if not decl:
+            continue
+        name = r.get("table") or r.get("name")
+        checked += 1
+        missing = [c for c in decl if c not in have.get(name, set())]
+        if missing:
+            broken += 1
+            bad(f"{name} declares columns it does not produce: {', '.join(missing)}")
+    if not broken:
+        ok(f"{checked} rules declare columns, all of them exist")
+
+
 # ---------------------------------------------------------------- data
 def check_data(store):
     section("data")
@@ -459,6 +486,7 @@ def main() -> int:
         return len(FAIL)
     try:
         check_engine(be.store)
+        check_contract(be.store)
         check_data(be.store)
         check_reads(be)
         check_events(be.events)

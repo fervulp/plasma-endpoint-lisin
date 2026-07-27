@@ -10,7 +10,7 @@ interval: 60
 priority: 220
 # The fields worth reading FIRST in this table; everything else the
 # source produces stays available in the Columns panel.
-columns: [interface, kind, state, mac, ipv4, ipv6, mtu, promisc]
+columns: [interface, kind, state, family, address, mask, mac, mtu, promisc]
 description: >-
   One readable row per interface address (interface_details joined to
   interface_addresses). An interface that has no address still appears once,
