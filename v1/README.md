@@ -3,12 +3,17 @@
 Two sensors, one database, one desktop app:
 
 - **osquery** answers *what is on this machine* — every source is an SQL query in
-  a YAML rule, and its result replaces a table (a snapshot, not a diff).
+  a YAML rule, and its result replaces a table (a snapshot, not a diff). Where
+  osquery has no answer (systemd timers, firewalld, browser profiles), the rule
+  runs a command instead and the engine reads its output the same way.
 - **Tetragon (eBPF)** answers *what is happening* — exec, exit, connect and
   access to credential files, as they occur.
 - **DuckDB** stores both: `v1.duckdb` for state (snapshots), `v1-events.duckdb`
   for the event stream (append + retention).
 - **Qt/QML (Kirigami)** reads it. No web interface, no cloud, no telemetry.
+- **One process owns the databases** and serves reads to any other on a Unix
+  socket, because DuckDB locks a file exclusively — so a second window, a script
+  or the test suite can read while the first keeps collecting.
 
 Nothing leaves the machine. The only outbound traffic the agent itself makes is
 none: osquery and rpm read locally, `dnf repoquery -C` reads the metadata cache
@@ -60,15 +65,25 @@ systemctl --user stop lisin.service      # the app holds the database lock
 cd v1 && PYTHONNOUSERSITE=1 python3 tests/run.py
 ```
 
-Six sections: everything compiles; a full collection runs with no failing source
-or view; how many columns are empty in every row; the event pipeline's invariants
-(watermark, retention, bytes per event); a deliberately broken source has to
-surface in the interface; and every user path — search, condition, sort,
-grouping — is walked **on every tab**.
+Fourteen sections. Everything compiles. A full collection runs with no failing
+source or view. The read-only guard refuses everything that writes and nothing
+that reads. Each rule's own assertions about its table hold. Every declared
+column exists. How many columns are empty in every row. Every tab reads a page in
+under 60 ms. The event pipeline's invariants — watermark, retention, folding,
+bytes per event. A deliberately broken source, and a deliberately stopped
+ingest, must surface in the interface. A wasteful database file is rewritten and
+keeps every row. A second process reads while this one collects, and is refused a
+write. No QML property is both bound and assigned. And every user path — search,
+condition, sort, grouping — is walked **on every tab**.
 
 That last one exists because compiling proves the QML parses and rendering proves
 it lays out, and neither presses a button: most defects here were a query the
-interface builds being refused by the database on one particular table.
+interface builds being refused by the database on one particular table. Several
+of the others exist because a defect got past everything else once — each section
+names what it caught.
+
+When the application is already running, the suite runs as a follower through its
+socket and says which sections it skipped, rather than failing on the lock.
 
 ## The screenshots contain no real data
 
