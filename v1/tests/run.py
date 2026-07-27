@@ -246,6 +246,42 @@ def check_events(events):
     else:
         ok(f"history bounded to {hist2:,} (max {MAX_ROWS:,})")
 
+    # 4. FOLDING MUST MOVE AN EVENT, NEVER LOSE ONE. A process start and its end
+    # arrive as two events, and the ends were 134 389 rows of 281 514 — so the end
+    # is written onto the row that already describes that process. Two things have
+    # to hold: a pair becomes ONE row carrying the lifetime, and an end whose
+    # start is not in the table is still recorded, as itself.
+    import json as _j
+    tag2 = "lisin-foldtest"
+    eid = "foldtest-exec-id-1"
+    def _tetra(kind, exec_id, when, pid):
+        key = "process_exec" if kind == "exec" else "process_exit"
+        proc = {"binary": "/usr/bin/true", "pid": pid, "uid": 0, "arguments": "",
+                "exec_id": exec_id, "start_time": when}
+        return _j.dumps({key: {"process": proc, "parent": proc},
+                         "node_name": tag2, "time": when})
+    mark2 = events._con.execute(
+        "SELECT coalesce(max(seq), -1) FROM tetragon_raw").fetchone()[0]
+    events.append([
+        _tetra("exec", eid, "2026-01-01T00:00:00.000Z", 991001),
+        _tetra("exit", eid, "2026-01-01T00:00:02.500Z", 991001),
+        _tetra("exit", "foldtest-orphan-id", "2026-01-01T00:00:03.000Z", 991002),
+    ])
+    events.materialize()
+    got = events._con.execute(
+        "SELECT event_kind, lifetime_ms FROM events WHERE host = ? ORDER BY 1",
+        [tag2]).fetchall()
+    kinds = [g[0] for g in got]
+    life = [g[1] for g in got if g[0] == "exec"]
+    if kinds != ["exec", "exit"]:
+        bad(f"a folded pair should leave one exec and the orphan exit, got {kinds}")
+    elif not life or life[0] != 2500:
+        bad(f"the folded exec should carry a 2500 ms lifetime, got {life}")
+    else:
+        ok("an exit folds onto its exec (2500 ms) and an orphan exit is kept")
+    events._con.execute("DELETE FROM tetragon_raw WHERE seq > ?", [mark2])
+    events._con.execute("DELETE FROM events WHERE host = ?", [tag2])
+
     # 4. A BURST OF LONG LINES MUST STILL NORMALIZE. Parsing raw JSON into the
     # taxonomy costs roughly a hundred times the line itself, and that allocation
     # counts against the memory cap while not showing up in duckdb_memory() — so
@@ -278,15 +314,27 @@ def check_events(events):
         events._con.execute("DELETE FROM tetragon_raw WHERE seq > ?", [mark])
         events._con.execute("DELETE FROM events WHERE host = ?", [tag])
 
-    # 4. the file must not carry the deleted pages
-    import os as _os
-    size = _os.path.getsize(events.path) / 1048576
-    per = size * 1048576 / max(hist2, 1)
-    if per > 1500:
-        bad(f"{size:.0f} MB for {hist2:,} events = {per:.0f} bytes each — the raw"
-            f" copy is being kept as well as the normalized one")
+    # 5. the file must not carry the raw copy of what it already normalized.
+    # Measured against the USED bytes, not the file size: DuckDB does not return
+    # freed blocks to the operating system, so a file that has just lost rows is
+    # mostly empty until it is rewritten — that is the compaction section's
+    # business, and counting it here would report the wrong defect.
+    # The ratio only MEANS anything once the history is large: the staging window
+    # is a fixed few thousand raw lines, so on a small table it is most of the
+    # file by itself. Below that the numbers are reported and not judged, which is
+    # the honest thing to do with a measurement that does not apply yet.
+    free, total = events.waste()
+    used = max(total - free, 0)
+    per = used / max(hist2, 1)
+    if hist2 < 50_000:
+        ok(f"{used/1048576:.0f} MB of data for {hist2:,} events and {raw2:,} staged"
+           f" raw lines — too few events yet to judge bytes per event")
+    elif per > 1500:
+        bad(f"{used/1048576:.0f} MB of data for {hist2:,} events = {per:.0f} bytes"
+            f" each — the raw copy is being kept as well as the normalized one")
     else:
-        ok(f"{size:.0f} MB on disk, {per:.0f} bytes per event")
+        ok(f"{used/1048576:.0f} MB of data ({total/1048576:.0f} MB file),"
+           f" {per:.0f} bytes per event")
 
 
 BATCH_SLACK = 6000      # one materialize batch may sit above the bound

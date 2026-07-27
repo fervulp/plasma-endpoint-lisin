@@ -23,7 +23,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from .db import DuckDB, apply_views as _apply_view_sql, data_dir, load_yaml_dir
+from .db import (DuckDB, apply_views as _apply_view_sql, data_dir, ident,
+                 load_yaml_dir)
 
 EVENT_VIEWS_DIR = Path(__file__).resolve().parent.parent / "expertise" / "events"
 
@@ -273,10 +274,7 @@ class EventStore(DuckDB):
                 ).fetchone()[0]
                 if nxt is None:
                     break
-                self._con.execute(
-                    f"INSERT INTO {EVENTS_TABLE} SELECT * FROM {NORM_VIEW} "
-                    f"WHERE seq > ? AND seq <= ?", [self._watermark, nxt]
-                )
+                self._insert_batch(self._watermark, nxt)
                 self._watermark = nxt
                 if nxt >= hi:
                     break
@@ -284,3 +282,63 @@ class EventStore(DuckDB):
                 f"SELECT count(*) FROM {EVENTS_TABLE}"
             ).fetchone()[0]
             return int(after - before)
+
+    # ------------------------------------------------------------------ fold
+    def _fold_spec(self) -> dict:
+        """The rule's `fold:` block, if it declares one. WHICH events are folded
+        onto which is a statement about the taxonomy, so it lives in the rule; the
+        engine only knows how to carry it out."""
+        for v in self.load_views():
+            f = v.get("fold")
+            if isinstance(f, dict) and f.get("when") and f.get("key"):
+                return f
+        return {}
+
+    def _insert_batch(self, lo, hi) -> None:
+        """Write one normalized batch into the events table.
+
+        WITH FOLDING, when the rule asks for it. Tetragon reports a process start
+        and its end as two events, and the ends were 134 389 rows of 281 514 here
+        — 38 MB of an 82 MB file — each carrying the whole taxonomy to say "that
+        pid is gone". They are not noise (a process that lived 20 ms is exactly
+        what an operator looks for), so instead of dropping them their facts are
+        written ONTO the row that already describes that process.
+
+        The order matters: the ordinary rows go in FIRST, so an exit can fold onto
+        an exec that arrived in the same batch; then the update; then any folded
+        row that found no target at all is inserted as itself. Folding must move
+        an event, never lose it — a process that started before this history did
+        still gets its exit recorded."""
+        f = self._fold_spec()
+        if not f:
+            self._con.execute(
+                f"INSERT INTO {EVENTS_TABLE} SELECT * FROM {NORM_VIEW} "
+                f"WHERE seq > ? AND seq <= ?", [lo, hi])
+            return
+
+        def q(expr: str) -> str:
+            """A rule writes `source.` and `target.` — the engine binds them."""
+            return expr.replace("source.", "s.").replace("target.", "t.")
+
+        key = ident(f["key"])
+        when = q(f["when"])
+        onto = q(f.get("onto") or "true")
+        sets = f.get("set") or {}
+        # the batch once: the view parses JSON and this reads it three ways
+        self._con.execute(
+            f"CREATE OR REPLACE TEMP TABLE _batch AS SELECT * FROM {NORM_VIEW} "
+            f"WHERE seq > ? AND seq <= ?", [lo, hi])
+        self._con.execute(
+            f"INSERT INTO {EVENTS_TABLE} SELECT * FROM _batch s WHERE NOT ({when})")
+        if sets:
+            assign = ", ".join(f"{ident(c)} = ({q(e)})" for c, e in sets.items())
+            self._con.execute(
+                f"UPDATE {EVENTS_TABLE} AS t SET {assign} FROM _batch s "
+                f"WHERE s.{key} = t.{key} AND s.{key} <> '' "
+                f"AND ({when}) AND ({onto})")
+        self._con.execute(
+            f"INSERT INTO {EVENTS_TABLE} SELECT * FROM _batch s WHERE ({when}) "
+            f"AND (s.{key} = '' OR s.{key} IS NULL OR NOT EXISTS ("
+            f"  SELECT 1 FROM {EVENTS_TABLE} t WHERE t.{key} = s.{key} "
+            f"  AND ({onto})))")
+        self._con.execute("DROP TABLE IF EXISTS _batch")

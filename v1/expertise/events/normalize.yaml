@@ -122,9 +122,33 @@ sql: |
                           || json_extract_string(data,'$.process_kprobe.args[0].sock_arg.daddr')
                           || ':' || json_extract_string(data,'$.process_kprobe.args[0].sock_arg.dport')
       WHEN 'file' THEN json_extract_string(data,'$.process_kprobe.args[0].file_arg.path')
-      ELSE event_kind END                                          AS message
+      ELSE event_kind END                                          AS message,
+    -- FILLED IN LATER, when the matching exit arrives (see `fold` below): an
+    -- exec row is the process, and how long it lived belongs on it.
+    CAST(NULL AS TIMESTAMP)                                        AS process_end,
+    CAST(NULL AS BIGINT)                                           AS lifetime_ms
   FROM ev
+# HOW A PROCESS EXIT IS STORED. Tetragon reports a start and an end as two
+# events, and on this machine the ends were 134 389 rows of the 281 514 — 38 MB
+# of the 82 MB file — each one carrying the whole taxonomy to say "that pid is
+# gone". They are not noise (a process that lived 20 ms is exactly what an
+# operator looks for), so they are not dropped: they are FOLDED onto the row that
+# already describes that process, which is what the exec row is.
+# The key is Tetragon's exec_id, which both events carry and which is unique per
+# execution — a pid is not, because pids are reused.
+# An exit whose exec is not in the window (it started before we did) is kept as
+# its own row rather than silently discarded.
+# `source` is the arriving event, `target` the row it is folded onto — the engine
+# binds those two names and nothing else, so a rule cannot reach past its own row.
+fold:
+  when: "source.event_kind = 'exit'"
+  onto: "target.event_kind = 'exec'"
+  key: process_exec_id
+  set:
+    process_end: "source.ts"
+    lifetime_ms: "CAST(date_diff('millisecond', target.ts, source.ts) AS BIGINT)"
 tests:
   expect_columns: [ts, event_kind, event_action, process_pid, process_name,
-                   parent_name, subject_name, dest_ip, file_path, message]
+                   parent_name, subject_name, dest_ip, file_path, message,
+                   process_end, lifetime_ms]
   min_rows: 1
