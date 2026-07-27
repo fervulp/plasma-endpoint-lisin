@@ -23,9 +23,12 @@ from core.store import data_path  # noqa: E402
 _lock_handle = None
 
 
-def _single_instance() -> bool:
-    """One writer only (a second instance would fight over the DuckDB file).
-    A separate lock from v0 so both can run side by side during the migration."""
+def _is_owner() -> bool:
+    """Whether THIS process gets to own the databases. It is not "one instance
+    only" any more: the first process owns the files and serves reads on a
+    socket, and a later one runs as a window over that owner. The lock is what
+    decides which of the two this is — taken here rather than left to DuckDB, so
+    the answer is known before anything is opened."""
     global _lock_handle
     import fcntl
 
@@ -39,9 +42,15 @@ def _single_instance() -> bool:
 
 
 def main():
-    if not _single_instance():
-        sys.stderr.write("LiSin v1 is already running.\n")
-        sys.exit(1)
+    if not _is_owner():
+        # A second window is fine — it reads through the owner. What is not fine
+        # is a second window when nobody is answering: that means the owner died
+        # holding the lock file, and opening the databases would fail anyway.
+        from core.remote import probe
+        if not probe():
+            sys.stderr.write(
+                "LiSin v1 is locked by another process that is not answering.\n")
+            sys.exit(1)
 
     app = QGuiApplication(sys.argv)
     app.setApplicationName("LiSin")

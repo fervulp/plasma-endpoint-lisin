@@ -26,7 +26,7 @@ from pathlib import Path
 import yaml
 from PySide6.QtCore import QObject, Signal, Slot
 
-from core import pipeline, views
+from core import eventstore, pipeline, remote, service, views
 from core.db import data_dir, ident, load_yaml_dir, select_only
 from core.eventstore import EventStore
 from core.store import Store
@@ -99,11 +99,27 @@ class Backend(QObject):
 
     def __init__(self):
         super().__init__()
-        self.store = Store()
-        # events live in a SEPARATE DuckDB (stream vs snapshot); the reader tails
-        # the root Tetragon export and lands raw JSON, normalized by a SQL view.
-        self.events = EventStore()
-        self.events.apply_views()
+        # ONE PROCESS OWNS THE DATABASES; ANYONE ELSE ASKS IT.
+        # DuckDB takes an exclusive lock on a file: measured here, a second
+        # process cannot open it even read-only while a writer holds it. So the
+        # first instance to start owns both stores, collects, and serves reads on
+        # a Unix socket; a later instance (a second window, the test suite, a
+        # script) finds the socket and reads through it. Both are the same
+        # application — the difference is only who does the writing.
+        self.owner = True
+        self.service = None
+        try:
+            self.store = Store()
+            self.events = EventStore()
+        except Exception as own_err:      # noqa: BLE001 — someone owns the file
+            info = remote.probe()
+            if not info:
+                raise                      # locked, and nobody answering: real
+            self.owner = False
+            self.store = remote.RemoteDB("state")
+            self.events = remote.RemoteDB("events")
+            self._owner_pid = info.get("pid")
+            self._own_error = str(own_err).splitlines()[0]
         self.reader = TetragonReader()
         self._events_at = ""
         self._collected_at: dict[str, str] = {}
@@ -121,9 +137,48 @@ class Backend(QObject):
         self._flows_cache = None      # pipelineFlows is expensive to build
         self._flows_gen = (-1, -1)
         self._meta = self._load_meta()
-        if not os.environ.get("LISIN_NO_COLLECT"):
-            threading.Thread(target=self._scheduler, daemon=True).start()
-            threading.Thread(target=self._event_loop, daemon=True).start()
+        if self.owner:
+            self.events.apply_views()
+            self.service = service.QueryService(
+                {"state": self.store, "events": self.events},
+                hooks={"apply_event_views": self.events.apply_views,
+                       "agent_state": self._agent_state},
+            )
+            self.service.start()
+            if not os.environ.get("LISIN_NO_COLLECT"):
+                threading.Thread(target=self._scheduler, daemon=True).start()
+                threading.Thread(target=self._event_loop, daemon=True).start()
+        else:
+            # Not collecting — the owner does that. Following instead: the
+            # owner's generation and per-source outcomes are polled, so this
+            # window shows the same failures and the same timestamps rather
+            # than an empty Pipelines page.
+            threading.Thread(target=self._follow, daemon=True).start()
+
+    # ---------- what the owner tells a follower ----------
+    def _agent_state(self) -> dict:
+        return {"gen": self._gen, "status_rev": self._status_rev,
+                "status": self._status, "collected_at": self._collected_at,
+                "events_at": self._events_at}
+
+    def _follow(self):
+        """A follower's whole loop: ask the owner what changed, redraw if so."""
+        seen = None
+        while True:
+            try:
+                st = self.store.hook("agent_state")
+                key = (st.get("gen"), st.get("status_rev"), st.get("events_at"))
+                if key != seen:
+                    seen = key
+                    self._gen = int(st.get("gen") or 0)
+                    self._status = dict(st.get("status") or {})
+                    self._collected_at = dict(st.get("collected_at") or {})
+                    self._events_at = str(st.get("events_at") or "")
+                    self._status_rev += 1
+                    self._push_state()
+            except Exception:  # noqa: BLE001 — the owner may be restarting
+                pass
+            time.sleep(2)
 
     # ---------- metadata (table -> title/icon, from the YAML rules) ----------
     def _load_meta(self) -> dict:
@@ -255,12 +310,9 @@ class Backend(QObject):
         the default view (the full taxonomy is still offered in the picker)."""
         cnt, cols = 0, []
         try:
-            with self.events._lock:
-                cnt = self.events._con.execute(
-                    "SELECT count(*) FROM events"
-                ).fetchone()[0]
-                cols = [c for c in self.events.columns("events") if c != "seq"]
-        except Exception:
+            cnt = self.events.fetch("SELECT count(*) FROM events")["rows"][0][0]
+            cols = [c for c in self.events.columns("events") if c != "seq"]
+        except Exception:  # noqa: BLE001 — an empty/absent stream is not an error
             pass
         # THE COLUMNS ARE THE TABLE'S REAL COLUMNS (so a field picker only ever
         # offers something that exists); the curated set is what is SHOWN by
@@ -308,9 +360,7 @@ class Backend(QObject):
             for c in cols
         )
         try:
-            vals = self.store._con.execute(
-                f"SELECT {parts} FROM {ident(table)}"
-            ).fetchone()
+            vals = self.store.fetch(f"SELECT {parts} FROM {ident(table)}")["rows"][0]
         except Exception:  # noqa: BLE001
             return []
         return [c for c, v in zip(cols, vals) if not v]
@@ -323,49 +373,48 @@ class Backend(QObject):
         # the column list only change when the table is rewritten, so they are
         # cached and refreshed only when the collection timestamp moved.
         tabs = []
-        with self.store._lock:
-            for name in self.store.tables():
-                if name.startswith("_"):
-                    continue
-                meta = self._meta.get(name, {})
-                if meta.get("hidden"):  # e.g. the plain listening_ports, superseded
-                    continue            # by the ports_owned view (with the owner)
-                # Keyed by THIS TABLE's collection stamp so one source being
-                # re-collected does not invalidate the other thirty-five; a
-                # derived view has no stamp of its own, so it follows the
-                # generation instead.
-                stamp = self._collected_at.get(name, "")
-                key = stamp or f"gen{self._gen}"
-                cached = self._tab_cache.get(name)
-                if cached is None or cached[0] != key:
-                    cols = self.store.columns(name)
-                    # what the rule itself declares comes first; otherwise the
-                    # columns that are empty in every row start hidden
-                    declared = meta.get("columns") or []
-                    if declared:
-                        hidden = [c for c in cols if c not in declared]
-                        # the rule's order IS the order — it says what to read
-                        # first; without passing it as the order the UI would
-                        # re-sort by its own name heuristic and put `path` ahead
-                        # of `pid`.
-                        cols = [c for c in declared if c in cols] + hidden
-                        order = list(cols)
-                    else:
-                        hidden = self._dead_columns(name, cols)
-                        order = []
-                    cached = (key, cols, self.store.row_count(name), hidden, order)
-                    self._tab_cache[name] = cached
-                tabs.append({
-                    "name": name,
-                    "title": meta.get("title", name),
-                    "icon": meta.get("icon", "table"),
-                    "priority": meta.get("priority"),
-                    "builtin": True,
-                    "columns": cached[1],
-                    "count": cached[2],
-                    "colcfg": {"hidden": cached[3], "order": cached[4]},
-                    "collected_at": stamp,
-                })
+        for name in self.store.tables():
+            if name.startswith("_"):
+                continue
+            meta = self._meta.get(name, {})
+            if meta.get("hidden"):  # e.g. the plain listening_ports, superseded
+                continue            # by the ports_owned view (with the owner)
+            # Keyed by THIS TABLE's collection stamp so one source being
+            # re-collected does not invalidate the other thirty-five; a
+            # derived view has no stamp of its own, so it follows the
+            # generation instead.
+            stamp = self._collected_at.get(name, "")
+            key = stamp or f"gen{self._gen}"
+            cached = self._tab_cache.get(name)
+            if cached is None or cached[0] != key:
+                cols = self.store.columns(name)
+                # what the rule itself declares comes first; otherwise the
+                # columns that are empty in every row start hidden
+                declared = meta.get("columns") or []
+                if declared:
+                    hidden = [c for c in cols if c not in declared]
+                    # the rule's order IS the order — it says what to read
+                    # first; without passing it as the order the UI would
+                    # re-sort by its own name heuristic and put `path` ahead
+                    # of `pid`.
+                    cols = [c for c in declared if c in cols] + hidden
+                    order = list(cols)
+                else:
+                    hidden = self._dead_columns(name, cols)
+                    order = []
+                cached = (key, cols, self.store.row_count(name), hidden, order)
+                self._tab_cache[name] = cached
+            tabs.append({
+                "name": name,
+                "title": meta.get("title", name),
+                "icon": meta.get("icon", "table"),
+                "priority": meta.get("priority"),
+                "builtin": True,
+                "columns": cached[1],
+                "count": cached[2],
+                "colcfg": {"hidden": cached[3], "order": cached[4]},
+                "collected_at": stamp,
+            })
         # the Events tab is served here like every other tab (StatePage sorts it
         # first via its priority map); its rows come from the event store.
         tabs.append(self._events_tab())
@@ -396,48 +445,45 @@ class Backend(QObject):
         if name == "events":
             return self._rows(self.events, "events", where, order, limit, offset,
                               default_order="seq DESC", id_col="seq")
-        with self.store._lock:
-            if name not in self.store.tables():
-                return {"rows": [], "total": 0, "columns": [], "error": "unknown table"}
+        if name not in self.store.tables():
+            return {"rows": [], "total": 0, "columns": [], "error": "unknown table"}
         return self._rows(self.store, name, where, order, limit, offset)
 
     def _rows(self, target, table, where, order, limit, offset,
               default_order="", id_col=None):
         """Shared table-page reader for both stores: count + a SELECT window, each
         row turned into a QML-friendly dict with a stable _id."""
-        with target._lock:
-            wh = f" WHERE {where}" if where else ""
-            order = order or default_order
-            try:
-                total = target._con.execute(
-                    f"SELECT count(*) FROM {ident(table)}{wh}"
-                ).fetchone()[0]
-                sql = f"SELECT * FROM {ident(table)}{wh}"
-                if order:
-                    sql += f" ORDER BY {order}"
-                if limit and int(limit) > 0:
-                    sql += f" LIMIT {int(limit)} OFFSET {int(offset)}"
-                # the read cap must follow the page size, or a page silently comes
-                # back short while the footer still reports the true total
-                cap = int(limit) if limit and int(limit) > 0 else 5000
-                cols, rows, truncated = target.query(sql, max_rows=cap)
-                base = int(offset) if (limit and int(limit) > 0) else 0
-                objs = []
-                for i, r in enumerate(rows):
-                    # a datetime / typed value cannot cross to QML (it arrives as
-                    # "QVariant(PyObject)") — stringify anything not already a
-                    # primitive. _id is a stable per-row key (seq) or the offset.
-                    o = {c: (v if v is None or isinstance(v, (str, int, float, bool))
-                             else str(v))
-                         for c, v in zip(cols, r)}
-                    o["_id"] = (str(o[id_col]) if id_col and id_col in o
-                                else str(base + i))
-                    objs.append(o)
-                return {"rows": objs, "total": total, "columns": cols,
-                        "truncated": truncated, "error": ""}
-            except Exception as e:  # noqa: BLE001
-                return {"rows": [], "total": 0, "columns": [],
-                        "truncated": False, "error": str(e)}
+        wh = f" WHERE {where}" if where else ""
+        order = order or default_order
+        try:
+            total = target.fetch(
+                f"SELECT count(*) FROM {ident(table)}{wh}")["rows"][0][0]
+            sql = f"SELECT * FROM {ident(table)}{wh}"
+            if order:
+                sql += f" ORDER BY {order}"
+            if limit and int(limit) > 0:
+                sql += f" LIMIT {int(limit)} OFFSET {int(offset)}"
+            # the read cap must follow the page size, or a page silently comes
+            # back short while the footer still reports the true total
+            cap = int(limit) if limit and int(limit) > 0 else 5000
+            cols, rows, truncated = target.query(sql, max_rows=cap)
+            base = int(offset) if (limit and int(limit) > 0) else 0
+            objs = []
+            for i, r in enumerate(rows):
+                # a datetime / typed value cannot cross to QML (it arrives as
+                # "QVariant(PyObject)") — stringify anything not already a
+                # primitive. _id is a stable per-row key (seq) or the offset.
+                o = {c: (v if v is None or isinstance(v, (str, int, float, bool))
+                         else str(v))
+                     for c, v in zip(cols, r)}
+                o["_id"] = (str(o[id_col]) if id_col and id_col in o
+                            else str(base + i))
+                objs.append(o)
+            return {"rows": objs, "total": total, "columns": cols,
+                    "truncated": truncated, "error": ""}
+        except Exception as e:  # noqa: BLE001
+            return {"rows": [], "total": 0, "columns": [],
+                    "truncated": False, "error": str(e)}
 
     @Slot(result="QVariant")
     def eventTaxonomy(self):
@@ -490,42 +536,40 @@ class Backend(QObject):
                 key_labels.append(f)
         # events group over the event store; everything else over the state store
         target = self.events if table == "events" else self.store
-        with target._lock:
-            if table != "events" and table not in self.store.tables():
-                return {"rows": []}
-            wh = f" WHERE {where}" if where else ""
-            cols = keys + ["count(*)"] + measures
-            sel = ", ".join(cols)
-            grp = f" GROUP BY {', '.join(keys)}" if keys else ""
-            # order by the FIRST measure when there is one (the interesting groups
-            # are the heavy ones, not the numerous ones), else by the count
-            order = f"{measures[0]} DESC" if measures else "count(*) DESC"
-            try:
-                rows = target._con.execute(
-                    f"SELECT {sel} FROM {ident(table)}{wh}{grp} "
-                    f"ORDER BY {order} LIMIT 500"
-                ).fetchall()
-                nk = len(keys)
-                out = []
-                for r in rows:
-                    parts = ["" if r[i] is None else str(r[i]) for i in range(nk)]
-                    vals = []
-                    for j, v in enumerate(r[nk + 1:]):
-                        if v is None:
-                            vals.append("")
-                        elif isinstance(v, float):
-                            vals.append(f"{v:.1f}" if abs(v) < 1e6 else f"{v:.0f}")
-                        else:
-                            vals.append(str(v))
-                    out.append({
-                        "value": " · ".join(parts),
-                        "parts": parts,
-                        "n": r[nk],
-                        "measures": vals,
-                    })
-                return {"rows": out, "keys": key_labels, "measures": measures}
-            except Exception as e:  # noqa: BLE001
-                return {"rows": [], "error": str(e)}
+        if table != "events" and table not in self.store.tables():
+            return {"rows": []}
+        wh = f" WHERE {where}" if where else ""
+        cols = keys + ["count(*)"] + measures
+        sel = ", ".join(cols)
+        grp = f" GROUP BY {', '.join(keys)}" if keys else ""
+        # order by the FIRST measure when there is one (the interesting groups
+        # are the heavy ones, not the numerous ones), else by the count
+        order = f"{measures[0]} DESC" if measures else "count(*) DESC"
+        try:
+            rows = target.fetch(
+                f"SELECT {sel} FROM {ident(table)}{wh}{grp} "
+                f"ORDER BY {order} LIMIT 500")["rows"]
+            nk = len(keys)
+            out = []
+            for r in rows:
+                parts = ["" if r[i] is None else str(r[i]) for i in range(nk)]
+                vals = []
+                for j, v in enumerate(r[nk + 1:]):
+                    if v is None:
+                        vals.append("")
+                    elif isinstance(v, float):
+                        vals.append(f"{v:.1f}" if abs(v) < 1e6 else f"{v:.0f}")
+                    else:
+                        vals.append(str(v))
+                out.append({
+                    "value": " · ".join(parts),
+                    "parts": parts,
+                    "n": r[nk],
+                    "measures": vals,
+                })
+            return {"rows": out, "keys": key_labels, "measures": measures}
+        except Exception as e:  # noqa: BLE001
+            return {"rows": [], "error": str(e)}
 
     # ---------- Process dashboard: the process tree ----------
     @Slot(result="QVariant")
@@ -535,14 +579,13 @@ class Backend(QObject):
         and CPU, the WHOLE BRANCH's total RSS (the process plus every descendant),
         and how long it has been running. Built from the collected `processes`
         table, not read live."""
-        with self.store._lock:
-            if "processes" not in self.store.tables():
-                return []
-            cols, rows, _tr = self.store.query(
-                "SELECT pid, ppid, name, user, rss, cpu_pct, elapsed_sec "
-                "FROM processes",
-                max_rows=100000,
-            )
+        if "processes" not in self.store.tables():
+            return []
+        cols, rows, _tr = self.store.query(
+            "SELECT pid, ppid, name, user, rss, cpu_pct, elapsed_sec "
+            "FROM processes",
+            max_rows=100000,
+        )
         col = {c: i for i, c in enumerate(cols)}
         nodes: dict[str, dict] = {}
         kids: dict[str, list] = {}
@@ -643,65 +686,63 @@ class Backend(QObject):
         # --- osquery inputs: input -> table -> views that read it ---
         view_specs = views.load_views()
         inputs = pipeline.load_inputs()
-        with self.store._lock:
-            tables = set(self.store.tables())
-            for inp in inputs:
-                if str(inp.get("kind", "")) == "tetragon":
-                    continue                    # handled below (a stream, not a query)
-                table = inp.get("table") or inp.get("name")
-                stages = [{
-                    "kind": "input", "name": inp.get("name", table),
-                    "title": inp.get("title", table),
-                    "detail": "osquery", "rows": -1,
-                    "ref": "inputs/" + str(inp.get("name", table)),
-                }]
-                rows = self._cached_count(table, tables)
-                stages.append({
-                    "kind": "table", "name": table, "title": table,
-                    "detail": "DuckDB table", "rows": rows, "ref": "",
-                })
-                # a view belongs to this flow if it READS this table — matched on a
-                # word boundary, so `ports` does not also match `ports_owned`
-                tre = re.compile(r"\b" + re.escape(str(table)) + r"\b") if table else None
-                for v in view_specs:
-                    if tre and tre.search(str(v.get("sql", ""))):
-                        vn = v.get("name", "")
-                        stages.append({
-                            "kind": "view", "name": vn,
-                            "title": v.get("title", vn),
-                            "detail": "SQL view",
-                            "rows": self._cached_count(vn, tables),
-                            "ref": "views/" + str(vn),
-                        })
-                st = self._status.get(table, {})
-                flows.append({
-                    "error": st.get("error", ""),
-                    "error_at": st.get("at", ""),
-                    "name": inp.get("name", table),
-                    "title": inp.get("title", table),
-                    "icon": inp.get("icon", "table"),
-                    "source": "osquery",
-                    "enabled": inp.get("enabled") is not False,
-                    # the rule's own cadence, not a number written here
-                    "interval": f"{inp.get('interval', pipeline.DEFAULT_INTERVAL)} s",
-                    "collected_at": self._collected_at.get(table, ""),
-                    "hidden": bool(inp.get("hidden")),
-                    "stages": stages,
-                })
+        tables = set(self.store.tables())
+        for inp in inputs:
+            if str(inp.get("kind", "")) == "tetragon":
+                continue                    # handled below (a stream, not a query)
+            table = inp.get("table") or inp.get("name")
+            stages = [{
+                "kind": "input", "name": inp.get("name", table),
+                "title": inp.get("title", table),
+                "detail": "osquery", "rows": -1,
+                "ref": "inputs/" + str(inp.get("name", table)),
+            }]
+            rows = self._cached_count(table, tables)
+            stages.append({
+                "kind": "table", "name": table, "title": table,
+                "detail": "DuckDB table", "rows": rows, "ref": "",
+            })
+            # a view belongs to this flow if it READS this table — matched on a
+            # word boundary, so `ports` does not also match `ports_owned`
+            tre = re.compile(r"\b" + re.escape(str(table)) + r"\b") if table else None
+            for v in view_specs:
+                if tre and tre.search(str(v.get("sql", ""))):
+                    vn = v.get("name", "")
+                    stages.append({
+                        "kind": "view", "name": vn,
+                        "title": v.get("title", vn),
+                        "detail": "SQL view",
+                        "rows": self._cached_count(vn, tables),
+                        "ref": "views/" + str(vn),
+                    })
+            st = self._status.get(table, {})
+            flows.append({
+                "error": st.get("error", ""),
+                "error_at": st.get("at", ""),
+                "name": inp.get("name", table),
+                "title": inp.get("title", table),
+                "icon": inp.get("icon", "table"),
+                "source": "osquery",
+                "enabled": inp.get("enabled") is not False,
+                # the rule's own cadence, not a number written here
+                "interval": f"{inp.get('interval', pipeline.DEFAULT_INTERVAL)} s",
+                "collected_at": self._collected_at.get(table, ""),
+                "hidden": bool(inp.get("hidden")),
+                "stages": stages,
+            })
 
         # --- the Tetragon entry point: log tail -> raw -> normalize -> events ---
         tet = next((i for i in inputs if str(i.get("kind", "")) == "tetragon"), None)
         if tet is not None:
             raw_n = ev_n = 0
             try:
-                with self.events._lock:
-                    raw_n = self.events._con.execute(
-                        "SELECT count(*) FROM tetragon_raw").fetchone()[0]
-                    ev_n = self.events._con.execute(
-                        "SELECT count(*) FROM events").fetchone()[0]
+                raw_n = self.events.fetch(
+                    "SELECT count(*) FROM tetragon_raw")["rows"][0][0]
+                ev_n = self.events.fetch(
+                    "SELECT count(*) FROM events")["rows"][0][0]
             except Exception as e:  # noqa: BLE001
                 self._set_status("_events", str(e).splitlines()[0])
-            norm = self.events.load_views()
+            norm = eventstore.load_event_views()
             nname = norm[0].get("name", "events_norm") if norm else "events_norm"
             est = self._status.get("_events") or self._status.get("_retention") or {}
             flows.append({
@@ -832,9 +873,11 @@ class Backend(QObject):
         # event views are applied at init; re-apply so an edit takes effect now
         if str(rel).startswith("events/"):
             try:
-                self.events.apply_views()
-            except Exception:
-                pass
+                # only the owner holds the database; a follower asks it to
+                (self.events.apply_views() if self.owner
+                 else self.events.hook("apply_event_views"))
+            except Exception as e:  # noqa: BLE001
+                return f"saved, but the rule was not applied: {e}"
         return ""
 
     @Slot(str, str, str, result=str)

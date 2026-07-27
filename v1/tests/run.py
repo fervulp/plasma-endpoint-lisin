@@ -367,6 +367,58 @@ def check_ingest_visible(backend):
         backend._clear_status("_events")
 
 
+def check_concurrency(backend):
+    """A SECOND PROCESS MUST BE ABLE TO READ WHILE THIS ONE COLLECTS. DuckDB
+    locks a file exclusively — measured: while a writer holds it, another process
+    cannot open it even read-only — so the owner serves reads over a Unix socket
+    instead. This is that promise, checked by actually starting another process:
+    it has to see the same numbers, be refused a write, and find the socket
+    private to this user."""
+    section("concurrency")
+    import subprocess, stat
+    if not backend.owner or backend.service is None:
+        bad("this process is not the owner, so the service was never started")
+        return
+    from core.service import socket_path
+    sp = socket_path()
+    if not os.path.exists(sp):
+        bad("the owner is not serving: no socket")
+        return
+    mode = stat.S_IMODE(os.stat(sp).st_mode)
+    if mode != 0o600:
+        bad(f"the socket is {oct(mode)}, not 0600 — anyone on the machine could read")
+    else:
+        ok("the socket is private to this user (0600)")
+    mine = backend.store.row_count("processes")
+    prog = (
+        "import sys; sys.path.insert(0, %r)\n"
+        "from core.remote import RemoteDB, probe\n"
+        "p = probe()\n"
+        "s = RemoteDB('state'); e = RemoteDB('events')\n"
+        "n = s.row_count('processes'); m = e.row_count('events')\n"
+        "try:\n"
+        "    s.fetch('DROP TABLE processes'); w = 'ALLOWED'\n"
+        "except Exception: w = 'refused'\n"
+        "print(p.get('pid'), n, m, w)\n" % V1)
+    r = subprocess.run([sys.executable, "-c", prog], capture_output=True,
+                       text=True, timeout=60,
+                       env={**os.environ, "PYTHONNOUSERSITE": "1"})
+    if r.returncode != 0:
+        bad(f"a second process could not read: {r.stderr.strip().splitlines()[-1][:110]}")
+        return
+    pid, n, m, w = r.stdout.split()
+    if int(pid) != os.getpid():
+        bad(f"the second process reached pid {pid}, not this owner ({os.getpid()})")
+    elif int(n) != mine:
+        bad(f"the second process sees {n} processes, the owner {mine}")
+    else:
+        ok(f"a second process reads the same {n} processes and {int(m):,} events")
+    if w != "refused":
+        bad("a client was allowed to WRITE through the service")
+    else:
+        ok("a client may read, never write")
+
+
 def check_paths(backend):
     section("paths")
     from PySide6.QtGui import QGuiApplication
@@ -484,14 +536,30 @@ def main() -> int:
         bad(f"backend would not start: {e}")
         print(f"\n{len(FAIL)} failures")
         return len(FAIL)
+    # WHICH CHECKS CAN RUN DEPENDS ON WHO OWNS THE DATABASES. Collecting,
+    # normalizing and breaking a rule on purpose are WRITES, and there is exactly
+    # one writer — so when the application is already running, this process is a
+    # follower and those sections cannot run here. The read-side checks still can,
+    # through the same socket the interface uses, and which ones were skipped is
+    # said out loud rather than quietly passing a shorter suite.
     try:
-        check_engine(be.store)
-        check_contract(be.store)
-        check_data(be.store)
-        check_reads(be)
-        check_events(be.events)
-        check_errors(be)
-        check_ingest_visible(be)
+        if be.owner:
+            check_engine(be.store)
+            check_contract(be.store)
+            check_data(be.store)
+            check_reads(be)
+            check_events(be.events)
+            check_errors(be)
+            check_ingest_visible(be)
+            check_concurrency(be)
+        else:
+            section("follower")
+            ok(f"the databases are owned by pid {getattr(be, '_owner_pid', '?')};"
+               " reading through its service")
+            print("  --    skipped (they write, and the owner is the only writer):"
+                  " engine, data, events, errors, ingest")
+            check_contract(be.store)
+            check_reads(be)
         check_paths(be)
     finally:
         be.events.close()

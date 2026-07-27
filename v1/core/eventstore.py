@@ -68,6 +68,13 @@ BATCH_BYTES = 1_000_000
 # a row ceiling as well, so a flood of tiny lines cannot make one statement huge
 BATCH_ROWS = 5_000
 
+def load_event_views() -> list[dict]:
+    """The normalization rules, read from disk. NOT a database call: a follower
+    process has no database of its own but reads the same expertise directory,
+    so this must not sit behind the connection."""
+    return load_yaml_dir(EVENT_VIEWS_DIR)
+
+
 NORM_VIEW = "events_norm"   # normalization view, from expertise
 EVENTS_TABLE = "events"     # materialized, queryable table (what the UI reads)
 
@@ -175,7 +182,7 @@ class EventStore(DuckDB):
 
     # ---------- derivation: normalize view -> materialized table ----------
     def load_views(self) -> list[dict]:
-        return load_yaml_dir(EVENT_VIEWS_DIR)
+        return load_event_views()
 
     def _cols(self, name: str) -> list[str]:
         return [

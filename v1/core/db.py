@@ -233,34 +233,57 @@ class DuckDB:
             self._con.close()
 
     def tables(self) -> list[str]:
-        return [
-            r[0]
-            for r in self._con.execute(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'main' ORDER BY table_name"
-            ).fetchall()
-        ]
+        # every read takes the lock: the connection is shared with the collector's
+        # thread, and a DuckDB connection is not thread-safe
+        with self._lock:
+            return [
+                r[0]
+                for r in self._con.execute(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_schema = 'main' ORDER BY table_name"
+                ).fetchall()
+            ]
 
     def columns(self, name: str) -> list[str]:
-        return [
-            r[0]
-            for r in self._con.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = ? ORDER BY ordinal_position",
-                [name],
-            ).fetchall()
-        ]
+        with self._lock:
+            return [
+                r[0]
+                for r in self._con.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_name = ? ORDER BY ordinal_position",
+                    [name],
+                ).fetchall()
+            ]
 
     def row_count(self, name: str) -> int:
-        return self._con.execute(
-            f"SELECT count(*) FROM {ident(name)}"
-        ).fetchone()[0]
+        with self._lock:
+            return self._con.execute(
+                f"SELECT count(*) FROM {ident(name)}"
+            ).fetchone()[0]
+
+    def fetch(self, sql: str, args=None, max_rows=None) -> dict:
+        """THE one read path. Everything that reads a database goes through this
+        — the interface, the dashboards, the tests — because it is also what the
+        query service serves to other processes, and the two must not be able to
+        drift into different behaviour. Returns the same shape on both sides of
+        the socket: {columns, rows, truncated}.
+
+        max_rows=None means all of them; a number means read one more than asked
+        so `truncated` is a fact rather than a guess (a page that quietly stops
+        at the limit reads as "that is everything")."""
+        with self._lock:
+            cur = self._con.execute(sql, list(args or []))
+            cols = [d[0] for d in cur.description]
+            if max_rows is None:
+                rows = [list(r) for r in cur.fetchall()]
+                truncated = False
+            else:
+                got = cur.fetchmany(int(max_rows) + 1)
+                truncated = len(got) > int(max_rows)
+                rows = [list(r) for r in got[: int(max_rows)]]
+        return {"columns": cols, "rows": rows, "truncated": truncated}
 
     def query(self, sql: str, params=None, max_rows: int = 1000):
         """Run a read query for the UI. Returns (columns, rows, truncated)."""
-        cur = self._con.cursor()
-        cur.execute(sql, params or [])
-        cols = [d[0] for d in cur.description]
-        fetched = cur.fetchmany(max_rows + 1)
-        truncated = len(fetched) > max_rows
-        return cols, [list(r) for r in fetched[:max_rows]], truncated
+        r = self.fetch(sql, params, max_rows)
+        return r["columns"], r["rows"], r["truncated"]
