@@ -1,0 +1,40 @@
+name: boot
+table: boot
+type: input
+kind: command
+version: 1.0.0
+title: Boot and kernel hardening
+icon: computer
+interval: 900
+priority: 290
+columns: [item, value, status]
+description: >-
+  How this kernel was started and what it is protected against: the command line
+  it booted with, the state of every CPU vulnerability mitigation the kernel
+  reports, whether Secure Boot verified the image, and whether kernel lockdown is
+  on.
+  The mitigation lines come from the kernel itself, one file per issue — so this
+  is the machine's own account of what it is exposed to, not a checklist written
+  here. `status` marks the ones the kernel says are NOT mitigated.
+tsv_columns: [item, value, status]
+command: |
+  export LC_ALL=C
+  printf 'kernel command line\t%s\t\n' "$(cat /proc/cmdline 2>/dev/null)"
+  printf 'kernel\t%s\t\n' "$(uname -r)"
+  for f in /sys/devices/system/cpu/vulnerabilities/*; do
+    [ -r "$f" ] || continue
+    v=$(cat "$f" 2>/dev/null)
+    case "$v" in
+      Vulnerable*) st="vulnerable" ;;
+      "Not affected") st="" ;;
+      *) st="mitigated" ;;
+    esac
+    printf 'mitigation: %s\t%s\t%s\n' "$(basename "$f")" "$v" "$st"
+  done
+  sb=$(mokutil --sb-state 2>/dev/null | head -1)
+  [ -n "$sb" ] && printf 'secure boot\t%s\t%s\n' "$sb" \
+    "$(printf '%s' "$sb" | grep -qi enabled && echo '' || echo 'off')"
+  ld=$(cat /sys/kernel/security/lockdown 2>/dev/null)
+  [ -n "$ld" ] && printf 'kernel lockdown\t%s\t%s\n' "$ld" \
+    "$(printf '%s' "$ld" | grep -q '\[none\]' && echo 'off' || echo '')"
+  true

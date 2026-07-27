@@ -1,0 +1,94 @@
+name: privesc
+table: privesc
+type: input
+kind: command
+version: 1.0.0
+title: Privilege escalation surface
+icon: security-low
+interval: 600
+priority: 70
+columns: [kind, name, detail, risk, changed, age_days, source]
+description: >-
+  The ways an ordinary user could become a privileged one, WITHOUT root to look:
+  file capabilities (a binary carrying cap_setuid does what setuid does, while
+  never showing up in a search for setuid bits), sudo rules that need no password,
+  and the sudoers files themselves where they are readable.
+  WITH THE TIME EACH ONE APPEARED. A capability granted years ago is how the
+  system was built; the same capability granted this afternoon, next to something
+  else that happened this afternoon, is a lead. Without that column the two are
+  indistinguishable, which is why the modification time of the carrier is
+  collected and its age in days computed.
+  Where the machine gives no answer without privileges (an unreadable
+  /etc/sudoers), the section is simply empty — no guess is recorded.
+tsv_columns: [kind, name, detail, risk, changed, age_days, source]
+command: |
+  export LC_ALL=C
+  python3 - <<'PYPRIV' 2>/dev/null || true
+  import os, subprocess, time
+
+  HIGH = ("cap_setuid", "cap_setgid", "cap_dac_read_search", "cap_dac_override",
+          "cap_sys_admin", "cap_sys_ptrace", "cap_sys_module")
+
+  def age(path):
+      try:
+          m = os.lstat(path).st_mtime
+      except OSError:
+          return "", ""
+      return (time.strftime("%Y-%m-%d %H:%M", time.localtime(m)),
+              str(int((time.time() - m) / 86400)))
+
+  def out(kind, name, detail, risk, path, source):
+      when, days = age(path) if path else ("", "")
+      print("\t".join(str(x or "").replace("\t", " ")[:400]
+                      for x in (kind, name, detail, risk, when, days, source)))
+
+  # --- file capabilities
+  try:
+      r = subprocess.run(["getcap", "-r", "/usr", "/opt",
+                          os.path.expanduser("~/.local")],
+                         capture_output=True, text=True, timeout=120)
+      for ln in r.stdout.splitlines():
+          if " " not in ln:
+              continue
+          path, _, caps = ln.partition(" ")
+          path = path.rstrip(":")
+          risk = "high" if any(h in caps for h in HIGH) else "note"
+          out("capability", os.path.basename(path), caps.strip(), risk, path, path)
+  except Exception:
+      pass
+
+  # --- sudo rules for THIS user, asked without a password prompt
+  try:
+      r = subprocess.run(["sudo", "-n", "-l"], capture_output=True, text=True,
+                         timeout=20)
+      for ln in r.stdout.splitlines():
+          ln = ln.strip()
+          if not ln or ln.endswith(":"):
+              continue
+          risk = "high" if "NOPASSWD" in ln else "note"
+          out("sudo rule", ln.split()[0], ln, risk, "", "sudo -n -l")
+  except Exception:
+      pass
+
+  # --- the sudoers files, where they can be read at all
+  for base in ("/etc/sudoers",):
+      files = [base]
+      d = "/etc/sudoers.d"
+      if os.path.isdir(d):
+          try:
+              files += [os.path.join(d, f) for f in sorted(os.listdir(d))]
+          except OSError:
+              pass
+      for f in files:
+          if not os.access(f, os.R_OK):
+              continue
+          try:
+              for ln in open(f, errors="replace"):
+                  ln = ln.strip()
+                  if not ln or ln.startswith("#"):
+                      continue
+                  risk = "high" if "NOPASSWD" in ln else "note"
+                  out("sudoers", os.path.basename(f), ln, risk, f, f)
+          except OSError:
+              pass
+  PYPRIV

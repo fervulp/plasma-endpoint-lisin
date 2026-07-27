@@ -1,0 +1,66 @@
+name: persistence
+table: persistence
+type: input
+kind: command
+version: 1.0.0
+title: Persistence vectors
+icon: system-run
+interval: 600
+priority: 65
+columns: [vector, path, detail]
+description: >-
+  The places something can arrange to be run again that are NOT services, timers,
+  cron or desktop autostart — those have their own tables, and an attacker who
+  reads the same documentation uses the ones that do not.
+  What is collected here: the dynamic linker (ld.so.preload and ld.so.conf.d,
+  which inject a library into every program that starts), LD_PRELOAD written into
+  an environment or shell file, profile.d and the shell rc files themselves,
+  nsswitch, modprobe install hooks (which run a command when a module loads),
+  modules-load, udev RUN rules, systemd generators, active .path and .socket
+  units, user lingering, update-motd, rc.local, PAM exec modules and a global git
+  hooks path.
+  A row here is NOT a finding: nearly all of them belong to packages on a healthy
+  machine. It is the inventory against which "which of these is not from a
+  package" can be asked.
+tsv_columns: [vector, path, detail]
+command: |
+  emit() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
+  # --- the dynamic linker ---
+  if [ -s /etc/ld.so.preload ]; then
+    while IFS= read -r lib; do [ -n "$lib" ] && emit ld_preload /etc/ld.so.preload "$lib"; done < /etc/ld.so.preload
+  fi
+  for f in /etc/ld.so.conf.d/*.conf; do
+    [ -f "$f" ] && emit ld_conf "$f" "$(grep -vE '^\s*#|^\s*$' "$f" 2>/dev/null | tr '\n' ' ')"
+  done
+  # --- LD_PRELOAD/LD_LIBRARY_PATH in env/rc ---
+  for f in /etc/environment /etc/profile /etc/bashrc "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile"; do
+    [ -f "$f" ] && grep -nE 'LD_PRELOAD|LD_LIBRARY_PATH' "$f" 2>/dev/null | while IFS= read -r ln; do emit env_ld "$f" "$ln"; done
+  done
+  # --- shell rc + profile.d ---
+  for f in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.bash_login" /etc/bashrc /etc/profile; do
+    [ -f "$f" ] && emit shell_rc "$f" ""
+  done
+  for f in /etc/profile.d/*.sh; do [ -f "$f" ] && emit profile_d "$f" ""; done
+  [ -f /etc/nsswitch.conf ] && emit nsswitch /etc/nsswitch.conf "$(grep -E '^(passwd|hosts):' /etc/nsswitch.conf 2>/dev/null | tr '\n' '; ')"
+  # --- kernel modules (install hooks execute commands) ---
+  for f in /etc/modprobe.d/*.conf; do
+    [ -f "$f" ] && grep -nE '^\s*install ' "$f" 2>/dev/null | while IFS= read -r ln; do emit modprobe "$f" "$ln"; done
+  done
+  for f in /etc/modules-load.d/*.conf; do [ -f "$f" ] && emit modules_load "$f" "$(grep -vE '^\s*#|^\s*$' "$f" 2>/dev/null | tr '\n' ' ')"; done
+  # --- udev RUN (execution on an event) ---
+  for f in /etc/udev/rules.d/*.rules; do
+    [ -f "$f" ] && grep -E 'RUN\+?=' "$f" >/dev/null 2>&1 && emit udev_run "$f" "$(grep -E 'RUN\+?=' "$f" 2>/dev/null | head -1)"
+  done
+  # --- systemd: generators / .path / socket / lingering ---
+  for d in /etc/systemd/system-generators /usr/local/lib/systemd/system-generators; do
+    [ -d "$d" ] && for f in "$d"/*; do [ -e "$f" ] && emit sd_generator "$f" ""; done
+  done
+  systemctl list-units --type=path --state=active --no-legend --plain 2>/dev/null | awk '{print $1}' | while read -r u; do [ -n "$u" ] && emit sd_path "$u" ""; done
+  systemctl list-units --type=socket --state=active --no-legend --plain 2>/dev/null | awk '{print $1}' | while read -r u; do [ -n "$u" ] && emit sd_socket "$u" ""; done
+  for f in /var/lib/systemd/linger/*; do [ -e "$f" ] && emit linger "$f" "$(basename "$f")"; done
+  # --- other executable hooks ---
+  for f in /etc/update-motd.d/*; do [ -f "$f" ] && emit update_motd "$f" ""; done
+  for f in /etc/rc.local /etc/rc.d/rc.local; do [ -f "$f" ] && emit rc_local "$f" ""; done
+  grep -rlE 'pam_exec|pam_python' /etc/pam.d 2>/dev/null | while read -r f; do emit pam_exec "$f" "$(grep -E 'pam_exec|pam_python' "$f" 2>/dev/null | head -1)"; done
+  gh=$(git config --global core.hooksPath 2>/dev/null); [ -n "$gh" ] && emit git_hooks "$gh" "core.hooksPath"
+  true

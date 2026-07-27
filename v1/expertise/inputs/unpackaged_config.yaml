@@ -1,0 +1,64 @@
+name: unpackaged_config
+table: unpackaged_config
+type: input
+kind: command
+version: 1.0.0
+title: Configuration outside the packages
+icon: dialog-warning
+interval: 900
+priority: 130
+columns: [path, owner, group, mode, size, modified, writable_by]
+description: >-
+  Files under /etc that belong to NO package. The package manager knows every
+  file it installed; what is left was put there by hand, and nobody verifies it,
+  updates it, or notices when it changes.
+  The permissions come with it, because the sharp case is a configuration file
+  that a service reads AS ROOT while an ordinary user may write it — the user
+  then decides what the privileged process does. `writable_by` names that
+  outright instead of leaving a mode string to be decoded.
+tsv_columns: [path, owner, group, mode, size, modified, writable_by]
+command: |
+  export LC_ALL=C
+  python3 - <<'PYCONF' 2>/dev/null || true
+  import grp, os, pwd, stat, subprocess, time
+
+  owned = set()
+  try:
+      out = subprocess.run(["rpm", "-qa", "--qf", "[%{FILENAMES}\n]"],
+                           capture_output=True, text=True, timeout=180).stdout
+      owned = set(out.splitlines())
+  except Exception:
+      pass
+  if not owned:          # without the package list every file would look unowned
+      raise SystemExit
+
+  def name_of(getter, i):
+      try:
+          return getter(i)[0]
+      except Exception:
+          return str(i)
+
+  for root, dirs, files in os.walk("/etc"):
+      dirs[:] = [d for d in dirs if d not in (".git", "ssl")]
+      for f in files:
+          p = os.path.join(root, f)
+          if p in owned:
+              continue
+          try:
+              st = os.lstat(p)
+          except OSError:
+              continue
+          mode = stat.S_IMODE(st.st_mode)
+          who = []
+          if mode & stat.S_IWOTH:
+              who.append("anyone")
+          if mode & stat.S_IWGRP:
+              who.append("group " + name_of(grp.getgrgid, st.st_gid))
+          if st.st_uid != 0:
+              who.append("owner " + name_of(pwd.getpwuid, st.st_uid))
+          print("\t".join((
+              p, name_of(pwd.getpwuid, st.st_uid), name_of(grp.getgrgid, st.st_gid),
+              oct(mode)[2:], str(st.st_size),
+              time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)),
+              ", ".join(who))))
+  PYCONF

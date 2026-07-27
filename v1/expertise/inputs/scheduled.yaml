@@ -1,67 +1,128 @@
 name: scheduled
 table: scheduled
 type: input
-version: 1.0.0
+kind: command
+version: 2.0.0
 title: Scheduled
 icon: appointment-new
 interval: 60
-# where this table sits in the reading order of the Data section
-# (lower comes first); a rule without one sorts after these.
 priority: 60
-# Collection belongs to the input:
-#   * schedule - the five cron fields joined into the one string a human reads,
-#                or the @event keyword (@reboot/@daily) when the entry uses one.
-#                The five raw columns are kept beside it for filtering.
-#   * run_as   - WHO the entry runs as. This is not a column osquery returns; it
-#                has to be derived, and the rule is a format fact from crontab(5),
-#                not a guess: the SYSTEM crontabs (/etc/crontab and /etc/cron.d/*)
-#                carry a user field between the time spec and the command, while a
-#                per-user crontab does not - there the spool file is named after
-#                its owner. So: first token of command for system files, file
-#                basename otherwise.
-#   * command  - with that user field stripped for system entries, so the column
-#                means the same thing in every row and can be compared or joined.
-#                Live: "root run-parts /etc/cron.hourly" -> run_as=root,
-#                command="run-parts /etc/cron.hourly".
-#   * scope    - system (under /etc) or user.
-# The user-spool branch has no live rows on this machine (see below), so its
-# basename expression was checked separately against a literal path rather than
-# claimed to work: '/var/spool/cron/someuser' -> 'someuser'.
-# The fields worth reading FIRST in this table; everything else the
-# source produces stays available in the Columns panel.
-columns: [command, minute, hour, day_of_month, month, day_of_week, path, event]
-description: >
-  Cron entries osquery can read: /etc/crontab and /etc/cron.d/*. HONEST LIMIT -
-  per-user crontabs live in /var/spool/cron, which is mode 0700 root, so a
-  collector running as a normal user sees NONE of them; this is not "no user cron
-  jobs exist", it is "we cannot look". Two more real gaps, stated rather than
-  papered over: the run-parts drop-in directories (/etc/cron.hourly and friends)
-  are script directories, not crontab files, so their scripts show up only as the
-  run-parts command that calls them; and on Fedora most timed work is systemd
-  timers, which are in the services table as kind = 'timer', not here. One row on
-  this machine is the correct answer, not a broken query - Fedora's /etc/crontab
-  ships with environment assignments and comments only.
-query: |
-  SELECT
-    path,
-    CASE WHEN path LIKE '/etc/%' THEN 'system' ELSE 'user' END       AS scope,
-    CASE WHEN path LIKE '/etc/%'
-         THEN split(command, ' ', 0)
-         ELSE replace(path, rtrim(path, replace(path, '/', '')), '')
-    END                                                              AS run_as,
-    CASE WHEN path LIKE '/etc/%'
-         THEN ltrim(substr(command, length(split(command, ' ', 0)) + 1))
-         ELSE command
-    END                                                              AS command,
-    CASE WHEN event <> '' THEN event
-         ELSE minute || ' ' || hour || ' ' || day_of_month || ' ' ||
-              month || ' ' || day_of_week
-    END                                                              AS schedule,
-    event,
-    minute,
-    hour,
-    day_of_month,
-    month,
-    day_of_week
-  FROM crontab
-  ORDER BY path, hour, minute, command
+columns: [kind, name, scope, next_run, last_run, schedule, command, source]
+description: >-
+  EVERYTHING THAT RUNS ON A SCHEDULE, in one table: systemd timers (system and
+  user), cron (the system files, /etc/cron.d, this user's crontab and the
+  run-parts directories) and any queued at job.
+  It used to read osquery's `crontab` table alone, and on this machine that is
+  ONE row against fifty-four things that really are scheduled — systemd timers
+  are how a Fedora system schedules work, and they were entirely missing.
+  WHEN IT FIRES is carried for timers (next_run/last_run), because that is the
+  question a scheduled task is looked up to answer; cron entries keep their
+  schedule expression instead, since the next occurrence is a calculation rather
+  than a fact the system reports.
+  A script dropped into /etc/cron.daily runs without any crontab line naming it,
+  so those directories are listed as entries in their own right.
+tsv_columns: [kind, name, scope, run_as, command, schedule, next_run, last_run, source]
+command: |
+  export LC_ALL=C
+  python3 - <<'PYSCHED' 2>/dev/null || true
+  import json, os, subprocess, time
+  from pathlib import Path
+
+  def tsv(*f):
+      print("\t".join(str(x or "").replace("\t", " ").replace("\n", " ")[:400]
+                      for x in f))
+
+  def when(us):
+      """systemd reports microseconds since the epoch; 0 means never."""
+      try:
+          us = int(us)
+      except (TypeError, ValueError):
+          return ""
+      return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(us / 1e6)) if us else ""
+
+  # --- systemd timers, system and user. THE POINT OF A TIMER IS WHEN IT FIRES,
+  # so next_run/last_run are carried; a table of timers without times answers
+  # nothing.
+  for scope, argv in (("system", ["systemctl", "list-timers", "--all",
+                                  "--output=json"]),
+                      ("user", ["systemctl", "--user", "list-timers", "--all",
+                                "--output=json"])):
+      try:
+          out = subprocess.run(argv, capture_output=True, text=True,
+                               timeout=30).stdout
+          rows = json.loads(out) if out.strip() else []
+      except Exception:
+          rows = []
+      for r in rows:
+          tsv("timer", r.get("unit", ""), scope, "", r.get("activates", ""),
+              "", when(r.get("next")), when(r.get("last")), "systemd")
+
+  # --- cron: the system files and every user crontab that is readable
+  def cron_lines(path, source, scope):
+      try:
+          text = Path(path).read_text(errors="replace")
+      except OSError:
+          return
+      for ln in text.splitlines():
+          ln = ln.strip()
+          if not ln or ln.startswith("#"):
+              continue
+          parts = ln.split()
+          if not parts:
+              continue
+          if parts[0].startswith("@"):
+              sched, rest = parts[0], parts[1:]
+          elif len(parts) >= 6:
+              sched, rest = " ".join(parts[:5]), parts[5:]
+          else:
+              continue
+          # /etc/crontab and /etc/cron.d carry a user field, a user crontab does not
+          user = ""
+          if scope == "system" and rest:
+              user, rest = rest[0], rest[1:]
+          tsv("cron", (rest[0] if rest else ""), scope, user,
+              " ".join(rest), sched, "", "", source)
+
+  cron_lines("/etc/crontab", "/etc/crontab", "system")
+  d = Path("/etc/cron.d")
+  if d.is_dir():
+      for f in sorted(d.iterdir()):
+          if f.is_file():
+              cron_lines(f, str(f), "system")
+  for who in ("crontab -l",):
+      try:
+          out = subprocess.run(["crontab", "-l"], capture_output=True, text=True,
+                               timeout=15)
+          if out.returncode == 0:
+              tmp = Path("/tmp/.lisin-crontab")
+              tmp.write_text(out.stdout)
+              cron_lines(tmp, "crontab -l", "user")
+              tmp.unlink(missing_ok=True)
+      except Exception:
+          pass
+
+  # --- periodic run-parts directories: a script dropped in one of these runs on
+  # a schedule without any crontab line mentioning it
+  for name in ("cron.hourly", "cron.daily", "cron.weekly", "cron.monthly"):
+      p = Path("/etc") / name
+      if not p.is_dir():
+          continue
+      for f in sorted(p.iterdir()):
+          if f.is_file():
+              tsv("cron", f.name, "system", "root", str(f),
+                  name.replace("cron.", ""), "", "", str(p))
+
+  # --- at jobs (nothing queued is the normal case, and an empty section is the
+  # honest answer for it)
+  try:
+      out = subprocess.run(["atq"], capture_output=True, text=True, timeout=15)
+      for ln in out.stdout.splitlines():
+          p = ln.split("\t")
+          if p:
+              tsv("at", p[0].split()[0] if p[0].split() else "", "user",
+                  p[-1].strip() if len(p) > 1 else "", "",
+                  " ".join(p[0].split()[1:]) if len(p[0].split()) > 1 else "",
+                  "", "", "atq")
+  except Exception:
+      pass
+  PYSCHED

@@ -1,0 +1,39 @@
+name: pam_config
+table: pam_config
+type: input
+kind: command
+version: 1.0.0
+title: PAM configuration
+icon: dialog-password
+interval: 1800
+priority: 145
+columns: [service, type, control, module, arguments]
+description: >-
+  How authentication is assembled on this machine, one row per PAM directive.
+  PAM is where "who may log in and how" is actually decided, and it is a stack of
+  modules: a line added to it can accept any password, run a command on every
+  login, or quietly log one. Recording the stack as rows makes it comparable —
+  the interesting question is which module is in a service's stack that is in no
+  other, and that is a query rather than a reading of thirty files.
+tsv_columns: [service, type, control, module, arguments]
+command: |
+  export LC_ALL=C
+  for f in /etc/pam.d/*; do
+    [ -r "$f" ] || continue
+    svc=$(basename "$f")
+    awk -v svc="$svc" '
+      /^[ \t]*#/ { next }
+      /^[ \t]*$/ { next }
+      {
+        type = $1; ctrl = $2; i = 3
+        # a bracketed control field spans several fields: [success=1 default=ignore]
+        if (ctrl ~ /^\[/) {
+          while (i <= NF && ctrl !~ /\]$/) { ctrl = ctrl " " $i; i++ }
+        }
+        mod = (i <= NF ? $i : ""); i++
+        args = ""
+        for (; i <= NF; i++) args = args (args == "" ? "" : " ") $i
+        printf "%s\t%s\t%s\t%s\t%s\n", svc, type, ctrl, mod, args
+      }' "$f"
+  done
+  true

@@ -1,0 +1,39 @@
+name: pkg_history
+table: pkg_history
+type: input
+kind: command
+version: 1.0.0
+title: Package history
+icon: view-history
+interval: 1800
+priority: 190
+columns: [id, when, action, altered, command]
+description: >-
+  What was installed, removed or upgraded on this machine and when, from the
+  package manager's own transaction log. The inventory says what is here now;
+  this says when it arrived and by which command — which is the difference
+  between "there is a compiler on this laptop" and "a compiler was installed at
+  three in the morning".
+tsv_columns: [id, when, action, altered, command]
+command: |
+  export LC_ALL=C
+  # dnf5 prints a fixed-width table, not a pipe-separated one: the columns are
+  # ID, command line, date and time, action(s), altered — so the row is taken
+  # apart by position (id first, count last, timestamp by its shape) rather than
+  # by a separator that is not there.
+  dnf history list 2>/dev/null | tail -n +2 | head -300 | python3 -c '
+  import re, sys
+  pat = re.compile(r"^\s*(\d+)\s+(.*?)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(.*?)\s+(\d+)\s*$")
+  for line in sys.stdin:
+      m = pat.match(line.rstrip())
+      if not m:
+          continue
+      hid, cmd, when, action, altered = m.groups()
+      if not action.strip():
+          # dnf5 leaves the action column empty and the command line says what it
+          # was; taking the verb from the command is the fact, not a guess
+          parts = cmd.split()
+          action = parts[1] if len(parts) > 1 else ""
+      print("\t".join((hid, when, action.strip(), altered, cmd.strip())))
+  '
+  true

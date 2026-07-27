@@ -1,0 +1,20 @@
+type: view
+name: browser_extensions
+title: Browser extensions
+icon: internet-web-browser
+priority: 230
+version: 1.0.0
+columns: [browser, name, version, enabled, source, permissions, origins, profile]
+description: >-
+  Every extension in every browser profile on this machine. What matters here is
+  not the name but the MISMATCH: an extension that claims to be part of the
+  system yet was installed from a file, or one that can read every site while
+  nobody knows where it came from. `source` is that provenance — store,
+  sideloaded, system, unknown — and `origins` is what it may read.
+sql: |
+  SELECT browser, name, version, enabled, source, ext_type, installed,
+         permissions, origins, update_url, ext_id, engine, profile, path
+  FROM browser_data
+  WHERE kind = 'extension'
+tests:
+  expect_columns: [browser, name, source, permissions]

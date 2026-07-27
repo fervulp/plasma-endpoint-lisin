@@ -1,0 +1,25 @@
+name: failed_units
+table: failed_units
+type: input
+kind: command
+version: 1.0.0
+title: Failed units
+icon: dialog-error
+interval: 120
+priority: 75
+columns: [scope, unit, load, active, sub, description]
+description: >-
+  Units that failed, system and user. A short table that is usually empty, and
+  that is the point: something which was supposed to be running and is not is a
+  fact worth one glance, and it is also how a tampered-with service announces
+  itself.
+tsv_columns: [scope, unit, load, active, sub, description]
+command: |
+  export LC_ALL=C
+  systemctl --failed --no-legend --plain 2>/dev/null |
+    awk '{u=$1; l=$2; a=$3; s=$4; d=""; for(i=5;i<=NF;i++) d=d (i>5?" ":"") $i;
+          printf "system\t%s\t%s\t%s\t%s\t%s\n", u, l, a, s, d}'
+  systemctl --user --failed --no-legend --plain 2>/dev/null |
+    awk '{u=$1; l=$2; a=$3; s=$4; d=""; for(i=5;i<=NF;i++) d=d (i>5?" ":"") $i;
+          printf "user\t%s\t%s\t%s\t%s\t%s\n", u, l, a, s, d}'
+  true

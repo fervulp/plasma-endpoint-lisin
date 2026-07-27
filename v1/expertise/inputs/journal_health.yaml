@@ -1,0 +1,24 @@
+name: journal_health
+table: journal_health
+type: input
+kind: command
+version: 1.0.0
+title: Journal health
+icon: view-list-text
+interval: 1800
+priority: 310
+columns: [item, value]
+description: >-
+  Whether the system journal can still answer questions: how much disk it holds,
+  how many boots it remembers, and whether this user may read it at all. An
+  endpoint tool that reads the journal should say when the journal has been
+  truncated or closed off — otherwise a missing event looks like an event that
+  never happened.
+tsv_columns: [item, value]
+command: |
+  export LC_ALL=C
+  printf 'disk usage\t%s\n' "$(journalctl --disk-usage 2>/dev/null | sed 's/.*take up //')"
+  printf 'boots remembered\t%s\n' "$(journalctl --list-boots --no-pager 2>/dev/null | wc -l)"
+  printf 'readable by this user\t%s\n' "$(journalctl -n 1 --no-pager >/dev/null 2>&1 && echo yes || echo no)"
+  printf 'persistent storage\t%s\n' "$([ -d /var/log/journal ] && echo yes || echo 'no (memory only)')"
+  true

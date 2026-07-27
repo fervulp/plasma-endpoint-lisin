@@ -1,0 +1,75 @@
+name: vulnerabilities
+table: vulnerabilities
+type: input
+kind: command
+version: 1.0.0
+title: Security advisories
+icon: security-low
+interval: 3600
+priority: 80
+columns: [status, severity, advisory, packages, cve, cve_count, issued, action]
+description: >-
+  Security advisories that apply to the packages on THIS machine, from the
+  repository metadata the system already downloads — one row per advisory, with
+  the command that installs it.
+  BOTH OPEN AND CLOSED are listed. Hiding the closed ones would mean that a
+  machine which has just been fully patched shows an empty table, and an empty
+  table reads as "nothing was checked" rather than "there is nothing to do".
+  NOTHING IS FETCHED FROM THE INTERNET. This reads dnf's local metadata cache
+  only, which is what keeps the agent's promise that nothing leaves the machine.
+  That also sets the honest limit: the severity is the vendor's, and there is no
+  CVSS vector here, because obtaining one means asking a registry about the CVEs
+  of this host.
+  WE READ THE CACHE (-C). Without it dnf goes off to refresh the repositories
+  when the cache has expired, and the source either finishes in two seconds or
+  hangs past its limit; the cache is refreshed by the system's own
+  dnf-makecache.timer.
+tsv_columns: [status, severity, advisory, packages, cve, cve_count, issued, action]
+command: |
+  export LC_ALL=C
+  q() { timeout 25 dnf -q -C "$@" 2>/dev/null || timeout 25 dnf -q "$@" 2>/dev/null; }
+  { q updateinfo list --security --available | sed 's/^/open /'
+    q updateinfo list --security --installed | sed 's/^/closed /'; } |
+  python3 -c '
+  import re, subprocess, sys, collections
+  # dnf5 prints: <advisory> <type> <severity> <package-nevra> <issued>, with a
+  # header line. One advisory covers several packages, so the lines are folded
+  # into one row per advisory — a table where the same advisory appears eight
+  # times is eight times the reading for one decision.
+  adv = collections.OrderedDict()
+  for ln in sys.stdin:
+      p = ln.split()
+      if len(p) < 5 or p[1] == "Name" or not p[1].startswith(("FEDORA", "RHSA", "ALSA")):
+          continue
+      status, aid, _type, sev, pkg = p[0], p[1], p[2], p[3], p[4]
+      e = adv.setdefault(aid, {"status": status, "sev": sev, "pkgs": [],
+                               "cves": set(), "issued": " ".join(p[5:7])})
+      if pkg not in e["pkgs"]:
+          e["pkgs"].append(pkg)
+      # an open advisory wins: the same id can be listed as installed for one
+      # package and still pending for another
+      if status == "open":
+          e["status"] = "open"
+  # the CVEs live in the description of `updateinfo info`, one block per advisory
+  try:
+      info = subprocess.run(["dnf", "-q", "-C", "updateinfo", "info", "--security"],
+                            capture_output=True, text=True, timeout=40).stdout
+  except Exception:
+      info = ""
+  cur = None
+  for ln in info.splitlines():
+      m = re.match(r"Name\s*:\s*(\S+)", ln)
+      if m:
+          cur = m.group(1)
+          continue
+      if cur and cur in adv:
+          for c in re.findall(r"CVE-\d{4}-\d{4,7}", ln):
+              adv[cur]["cves"].add(c)
+  for aid, e in adv.items():
+      cves = sorted(e["cves"])
+      print("\t".join((
+          e["status"], e["sev"], aid, ", ".join(e["pkgs"][:12]),
+          ", ".join(cves[:12]), str(len(cves)), e["issued"],
+          "sudo dnf upgrade --advisory=" + aid if e["status"] == "open" else "")))
+  '
+  true

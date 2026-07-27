@@ -1,0 +1,38 @@
+name: polkit_actions
+table: polkit_actions
+type: input
+kind: command
+version: 1.0.0
+title: Polkit actions
+icon: security-medium
+interval: 1800
+priority: 150
+columns: [action, vendor, allow_active, allow_inactive, allow_any, description]
+description: >-
+  Every privileged operation a desktop program may ask to perform, and what
+  polkit answers by default. This is the other half of the privilege surface: the
+  sudoers file governs the terminal, polkit governs everything a session does
+  through D-Bus — installing packages, changing the network, mounting a disk.
+  An action whose default is `yes` for an active session is one an ordinary user
+  performs with no password at all, which is why the three defaults are their own
+  columns rather than buried in a policy file.
+tsv_columns: [action, vendor, allow_active, allow_inactive, allow_any, description]
+command: |
+  export LC_ALL=C
+  python3 - <<'PYPOL' 2>/dev/null || true
+  import glob, xml.etree.ElementTree as ET
+  for path in sorted(glob.glob("/usr/share/polkit-1/actions/*.policy")):
+      try:
+          root = ET.parse(path).getroot()
+      except Exception:
+          continue
+      vendor = (root.findtext("vendor") or "").strip()
+      for act in root.findall("action"):
+          d = act.find("defaults")
+          def g(tag):
+              return (d.findtext(tag) or "").strip() if d is not None else ""
+          desc = (act.findtext("description") or "").strip()
+          print("\t".join(x.replace("\t", " ")[:400] for x in (
+              act.get("id", ""), vendor, g("allow_active"), g("allow_inactive"),
+              g("allow_any"), desc)))
+  PYPOL

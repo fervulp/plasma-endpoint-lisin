@@ -1,0 +1,20 @@
+name: swap_info
+table: swap_info
+type: input
+kind: command
+version: 1.0.0
+title: Swap
+icon: drive-harddisk
+interval: 300
+priority: 300
+columns: [name, type, size, used, priority]
+description: >-
+  Where this machine swaps and how much of it is in use. Kept as its own table
+  rather than folded into memory because swap is a DEVICE question — a swap file
+  on an unencrypted partition is where the contents of memory end up on disk.
+tsv_columns: [name, type, size, used, priority]
+command: |
+  export LC_ALL=C
+  swapon --show=NAME,TYPE,SIZE,USED,PRIO --noheadings --raw 2>/dev/null |
+    tr ' ' '\t'
+  true

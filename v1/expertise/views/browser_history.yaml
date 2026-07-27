@@ -1,0 +1,17 @@
+type: view
+name: browser_history
+title: Browser history
+icon: view-history
+priority: 240
+version: 1.0.0
+columns: [last_visit, browser, title, url, visits, profile]
+description: >-
+  The most recent 400 pages per profile, from every browser found on disk. Kept
+  because a download or a console page is often the only record left of how
+  something arrived on the machine.
+sql: |
+  SELECT last_visit, browser, title, url, visits, profile, engine, path
+  FROM browser_data
+  WHERE kind = 'history'
+tests:
+  expect_columns: [last_visit, browser, url]

@@ -1,59 +1,82 @@
 name: firewall
 table: firewall
 type: input
-version: 1.0.0
-title: Firewall rules
-icon: firewall-config
+kind: command
+version: 2.0.0
+title: Firewall
+icon: security-medium
 interval: 300
-# where this table sits in the reading order of the Data section
-# (lower comes first); a rule without one sorts after these.
-priority: 260
+priority: 110
+columns: [zone, kind, value, target, interfaces, active, default_zone]
 description: >-
-  Packet-filter rules as osquery reads them from the LEGACY iptables/xtables
-  interface: table, chain, policy, target, protocol, source and destination,
-  interfaces and the per-rule counters. EXPECT THIS TAB TO BE EMPTY, for two
-  separate and honest reasons. (1) It needs root — the rules are read through a
-  raw socket and /proc/net/ip_tables_names, neither of which an unprivileged
-  collector may touch. (2) Even as root it stays empty on a host whose firewall
-  runs on the nftables backend (firewalld on current Fedora does): the rules
-  then live in nf_tables, the ip_tables module is not even loaded, and osquery
-  5.x has no nftables table. So an empty tab here means "no legacy rules
-  visible", NOT "this machine has no firewall" — check the loaded kernel
-  modules (nf_tables vs ip_tables) to tell the two cases apart. Nothing is
-  faked and no shell fallback is invented to fill it.
-# Notes on the real schema, verified against the binary:
-#   * there is no `iface` column; the table has iniface/outiface (plus their
-#     masks) and they are exposed under those names;
-#   * `proto` decodes the protocol NUMBER the row carries (6/17/1/58/0) into a
-#     readable name and falls back to the number itself, so nothing is lost;
-#   * osquery exposes no rule INDEX, so the original evaluation order of a
-#     chain cannot be reconstructed from this table — ORDER BY here is only for
-#     a stable display, it is not the order the kernel applies rules in.
-query: |
-  SELECT
-    filter_name,
-    chain,
-    policy,
-    target,
-    protocol,
-    CASE protocol
-      WHEN 0  THEN 'any'
-      WHEN 1  THEN 'icmp'
-      WHEN 6  THEN 'tcp'
-      WHEN 17 THEN 'udp'
-      WHEN 58 THEN 'icmpv6'
-      ELSE CAST(protocol AS TEXT)
-    END AS proto,
-    src_ip,
-    src_mask,
-    src_port,
-    dst_ip,
-    dst_mask,
-    dst_port,
-    iniface,
-    outiface,
-    match,
-    packets,
-    bytes
-  FROM iptables
-  ORDER BY filter_name, chain, target, src_ip, dst_ip, dst_port
+  What the firewall actually permits, read from the firewall this machine runs.
+  It used to read osquery's `iptables` table and returned ZERO rows: Fedora
+  filters through firewalld over nftables, and the legacy iptables chains that
+  table reads are empty. A firewall tab that says nothing is worse than no tab —
+  it reads as "nothing is open".
+  ONLY THE ZONES IN USE. firewalld ships about fifteen predefined zones and a
+  machine typically uses two; listing all of them buries the two that decide
+  anything. So the active zones (those with an interface or source bound to
+  them) and the default zone are read, and each permitted port, service,
+  protocol, forwarded port, masquerade and rich rule becomes one row.
+  The nftables ruleset underneath needs root and is not read here; what firewalld
+  reports is the configuration that produced it.
+tsv_columns: [zone, kind, value, target, interfaces, active, default_zone]
+command: |
+  export LC_ALL=C
+  command -v firewall-cmd >/dev/null || exit 0
+  systemctl is-active --quiet firewalld || exit 0
+  # ONE call per zone: --list-all prints every setting at once (--get-target and
+  # friends only work with --permanent, and a call per setting cost 4.9 s).
+  DEF=$(firewall-cmd --get-default-zone 2>/dev/null)
+  ACT=$(firewall-cmd --get-active-zones 2>/dev/null | grep -v '^ ' | sed 's/ .*//')
+  for z in $(printf '%s\n%s\n' "$ACT" "$DEF" | sort -u | grep -v '^$'); do
+    firewall-cmd --zone="$z" --list-all 2>/dev/null
+    echo "===ZONE-END==="
+  done | awk -F: '
+    # Every setting that PERMITS something becomes its own row; the settings that
+    # merely describe the zone (target, interfaces, active, default) ride along on
+    # each of its rows, so one row is readable on its own.
+    function emit(kind, value) {
+      if (value == "") return
+      printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", zone, kind, value, target, ifaces, active, isdef
+    }
+    function flush_lists(  i, n, parts) {
+      for (key in list) {
+        n = split(list[key], parts, " ")
+        for (i = 1; i <= n; i++) emit(kindof[key], parts[i])
+      }
+      delete list
+    }
+    /^[^ \t]/ && $0 !~ /^===/ {
+      if (zone != "") { flush_lists(); }
+      zone = $0; sub(/[ \t].*/, "", zone)   # the header line is "<zone> (default, active)"
+      active = (index($0, "active") ? "yes" : "")
+      isdef  = (index($0, "default") ? "yes" : "")
+      target = ""; ifaces = ""
+      next
+    }
+    /^===ZONE-END===/ {
+      if (zone != "") { emit("zone", "target " (target == "" ? "default" : target)); flush_lists() }
+      zone = ""; next
+    }
+    /^  [a-z-]+:/ {
+      key = $1; sub(/^  */, "", key); sub(/:.*/, "", key)
+      val = $0; sub(/^  [a-z-]+:[ \t]*/, "", val)
+      if (key == "target") { target = val }
+      else if (key == "interfaces") { ifaces = val; list[key] = val }
+      else if (key == "services" || key == "ports" || key == "protocols" ||
+               key == "sources" || key == "forward-ports" ||
+               key == "source-ports" || key == "icmp-blocks" ||
+               key == "rich" ) { list[key] = val }
+      else if ((key == "masquerade" || key == "forward") && val == "yes") { list[key] = "yes" }
+      next
+    }
+    BEGIN {
+      kindof["services"] = "service"; kindof["ports"] = "port"
+      kindof["protocols"] = "protocol"; kindof["sources"] = "source"
+      kindof["forward-ports"] = "forward"; kindof["source-ports"] = "source port"
+      kindof["icmp-blocks"] = "icmp block"; kindof["interfaces"] = "interface"
+      kindof["masquerade"] = "masquerade"; kindof["forward"] = "forward"
+    }
+  '

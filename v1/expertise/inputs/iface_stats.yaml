@@ -1,0 +1,34 @@
+name: iface_stats
+table: iface_stats
+type: input
+kind: command
+version: 1.0.0
+title: Interface counters
+icon: network-wired
+interval: 120
+priority: 120
+columns: [interface, rx_bytes, tx_bytes, rx_packets, tx_packets, rx_dropped, tx_dropped, errors]
+description: >-
+  Bytes and packets each interface has carried since boot. Volume is the one
+  network measurement available without root — the sockets table says WHO is
+  talking, these counters say HOW MUCH went out of a given interface, which is
+  what makes a quiet-looking machine with a busy tunnel visible.
+tsv_columns: [interface, rx_bytes, tx_bytes, rx_packets, tx_packets, rx_dropped, tx_dropped, errors]
+command: |
+  export LC_ALL=C
+  ip -s -j link 2>/dev/null | python3 -c '
+  import json, sys
+  try:
+      data = json.load(sys.stdin)
+  except Exception:
+      raise SystemExit
+  for i in data:
+      rx = i.get("stats64", {}).get("rx", {}) or {}
+      tx = i.get("stats64", {}).get("tx", {}) or {}
+      print("\t".join(str(x) for x in (
+          i.get("ifname", ""), rx.get("bytes", 0), tx.get("bytes", 0),
+          rx.get("packets", 0), tx.get("packets", 0),
+          rx.get("dropped", 0), tx.get("dropped", 0),
+          (rx.get("errors", 0) or 0) + (tx.get("errors", 0) or 0))))
+  '
+  true

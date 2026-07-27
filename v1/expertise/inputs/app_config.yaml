@@ -1,0 +1,59 @@
+name: app_config
+table: app_config
+type: input
+kind: command
+version: 1.0.0
+title: Application configuration
+icon: configure
+interval: 1800
+priority: 135
+columns: [app, path, scope, kind, entries, origin, modified]
+description: >-
+  WHERE THE CONFIGURATION OF EACH APPLICATION LIVES, from two sources the system
+  maintains itself — no list of well-known paths is written here.
+  System files: rpm marks its own configuration files with the %config flag, so
+  the package manager is asked which of its files are configuration and for which
+  package.
+  User files: the XDG standard says a directory in ~/.config or ~/.local/share
+  named after the application IS that application's configuration, and the
+  directory name is the binding — again nothing invented.
+  Why it matters: joined with the process table by package, this answers "which
+  files decide what this running service does", which is the question behind a
+  configuration that was changed by hand.
+tsv_columns: [app, path, scope, kind, entries, origin, modified]
+command: |
+  export LC_ALL=C
+  # rpm's own %config flag — inside an array iteration the package name must be
+  # %{=NAME}; a plain %{NAME} is not expanded and returns three rows instead of
+  # thousands (a mistake made twice before, hence the note).
+  rpm -qa --qf '[%{=NAME}\t%{FILENAMES}\t%{FILEFLAGS:fflags}\n]' 2>/dev/null |
+    awk -F'\t' '$3 ~ /c/ {
+        cmd = "stat -c %y \"" $2 "\" 2>/dev/null"
+        printf "%s\t%s\tsystem\tfile\t\trpm %%config\t\n", $1, $2
+      }'
+  python3 - <<'PYU' 2>/dev/null || true
+  import os, time
+  home = os.path.expanduser("~")
+  for root, origin in ((os.path.join(home, ".config"), "XDG_CONFIG_HOME"),
+                       (os.path.join(home, ".local/share"), "XDG_DATA_HOME")):
+      if not os.path.isdir(root):
+          continue
+      for name in sorted(os.listdir(root)):
+          p = os.path.join(root, name)
+          try:
+              st = os.stat(p)
+          except OSError:
+              continue
+          n, kind = "", "file"
+          if os.path.isdir(p):
+              kind = "directory"
+              c = 0
+              for _r, _d, _f in os.walk(p):
+                  c += len(_f)
+                  if c > 500:
+                      break
+              n = str(c)
+          print("\t".join((
+              name, p, "user", kind, n, origin,
+              time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)))))
+  PYU
