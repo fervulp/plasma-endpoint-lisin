@@ -987,10 +987,16 @@ Kirigami.Page {
             }
 
             // table (the shared DataTable template - principle 15/17)
-            ColumnLayout {
+            //
+            // AN ITEM ON ANCHORS, NOT A LAYOUT. The table and the "Empty"
+            // placeholder are both anchored to this item; turning it into a
+            // ColumnLayout to add the provenance line above the table left BOTH
+            // of them layout-managed, their anchors ignored, and every tab came
+            // up with a zero-sized table. The line is anchored to the top and the
+            // table starts below it instead.
+            Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: 0
 
                 // WHERE THESE ROWS COME FROM. A table used to appear with no
                 // account of itself: which rule produced it, how that rule reads
@@ -999,10 +1005,12 @@ Kirigami.Page {
                 // Pipelines page, in the source — but not where the rows are
                 // read, which is where the question is asked.
                 RowLayout {
-                    Layout.fillWidth: true
-                    Layout.leftMargin: Kirigami.Units.smallSpacing
-                    Layout.rightMargin: Kirigami.Units.smallSpacing
-                    Layout.bottomMargin: 2
+                    id: provRow
+                    anchors.top: parent.top
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.leftMargin: Kirigami.Units.smallSpacing
+                    anchors.rightMargin: Kirigami.Units.smallSpacing
                     spacing: Kirigami.Units.smallSpacing
                     visible: page.src !== null
 
@@ -1033,7 +1041,11 @@ Kirigami.Page {
 
                 DataTable {
                     id: dtable
-                    anchors.fill: parent
+                    anchors.top: provRow.visible ? provRow.bottom : parent.top
+                    anchors.topMargin: provRow.visible ? 2 : 0
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
                     rowHeight: page.rowHeight
                     resizable: true
                     externalSort: true          // Data owns the 3-click sort

@@ -639,6 +639,78 @@ def check_concurrency(backend):
         ok("a client may read, never write")
 
 
+def check_layout(backend):
+    """THE TABLE MUST ACTUALLY OCCUPY THE PAGE. Compiling proves the QML parses;
+    the path walk proves the queries run; neither notices a table that is drawn
+    at zero size. That happened: wrapping the table in a layout to add a line
+    above it left its anchors ignored, and every tab in Data came up blank while
+    the rows were sitting in the model. So the size is measured, on several tabs,
+    against the window it should be filling."""
+    section("layout")
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtQml import QQmlApplicationEngine
+    from PySide6.QtCore import QUrl, QMetaObject, Qt, Q_ARG
+
+    app = QGuiApplication.instance() or QGuiApplication(sys.argv)
+    eng = QQmlApplicationEngine()
+    eng.rootContext().setContextProperty("backend", backend)
+    eng.addImportPath(f"{V1}/ui")
+    eng.load(QUrl.fromLocalFile(f"{V1}/ui/Main.qml"))
+    if not eng.rootObjects():
+        bad("Main.qml did not load")
+        return
+    win = eng.rootObjects()[0]
+    win.resize(1500, 900)
+    QMetaObject.invokeMethod(win, "open", Qt.DirectConnection,
+                             Q_ARG("QVariant", "state"))
+    for _ in range(12):
+        app.processEvents()
+
+    def page_of(o):
+        if o.property("curName") is not None and o.property("tabsModel") is not None:
+            return o
+        for c in o.children():
+            r = page_of(c)
+            if r:
+                return r
+        return None
+
+    def tables(o, out=None):
+        # a DataTable is the thing with both a row height and a column list
+        if out is None:
+            out = []
+        if o.property("rowHeight") is not None and o.property("columns") is not None:
+            out.append(o)
+        for c in o.children():
+            tables(c, out)
+        return out
+
+    pg = page_of(win)
+    if pg is None:
+        bad("the Data page was not found in the window")
+        return
+    checked, blank = 0, []
+    for i in (0, 1, 5, 9, 20):
+        pg.setProperty("tabIndex", i)
+        for _ in range(8):
+            app.processEvents()
+        name = pg.property("curName")
+        vis = [d for d in tables(pg) if d.property("visible")]
+        if not vis:
+            blank.append(f"{name}: no visible table")
+            continue
+        w = max(d.property("width") for d in vis)
+        h = max(d.property("height") for d in vis)
+        checked += 1
+        if w < 200 or h < 200:
+            blank.append(f"{name}: {w:.0f}x{h:.0f} px")
+    if blank:
+        for b in blank:
+            bad(f"the table is not drawn — {b}")
+    else:
+        ok(f"the table fills the page on {checked} tabs")
+
+
 def check_bindings():
     """A PROPERTY MUST NOT BE BOTH BOUND AND ASSIGNED. Assigning to a property
     that carries a declarative binding destroys the binding silently, and from
@@ -701,9 +773,14 @@ def check_paths(backend):
     import PySide6.QtCore as C
 
     warn: list[str] = []
+    # "Detected anchors on an item that is managed by a layout" belongs here: it
+    # is how Qt reports the mistake that left every table in Data at zero size —
+    # the page still compiled, still had its rows, and drew nothing.
     C.qInstallMessageHandler(lambda m, c, t: warn.append(t) if any(
         k in t for k in ("ReferenceError", "TypeError", "Unable to assign",
-                         "is not a function", "Cannot read")) else None)
+                         "is not a function", "Cannot read",
+                         "Detected anchors", "managed by a layout",
+                         "Binding loop")) else None)
     app = QGuiApplication.instance() or QGuiApplication(sys.argv)
     eng = QQmlApplicationEngine()
     eng.rootContext().setContextProperty("backend", backend)
@@ -819,6 +896,7 @@ def main() -> int:
     try:
         check_sql_guard()
         check_bindings()
+        check_layout(be)
         if be.owner:
             check_engine(be.store)
             check_contract(be.store)
