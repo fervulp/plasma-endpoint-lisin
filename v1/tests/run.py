@@ -307,6 +307,39 @@ def check_errors(backend):
             pass
 
 
+def check_ingest_visible(backend):
+    """A STOPPED EVENT INGEST MUST BE VISIBLE TOO. The stream is the other half
+    of this tool, and its loop used to swallow every exception: normalizing a
+    batch hit the memory cap, every later cycle threw on the same backlog, and
+    the interface kept showing the events collected before that — a stream that
+    had stopped hours ago looked exactly like a quiet machine. Broken here on
+    purpose, the way a source is."""
+    section("ingest")
+    real = backend.events.materialize
+    backend.events.materialize = lambda: (_ for _ in ()).throw(
+        RuntimeError("deliberate: normalization refused"))
+    try:
+        # one turn of the loop body, without waiting on the thread's sleep
+        try:
+            backend.events.materialize()
+        except Exception as e:  # noqa: BLE001
+            backend._set_status("_events", str(e).splitlines()[0],
+                                at="2026-01-01T00:00:00Z")
+        flow = next((f for f in backend.pipelineFlows()
+                     if "tetragon" in f.get("name", "")), None)
+        if flow is None:
+            bad("the Tetragon stream has no flow on the Pipelines page")
+        elif not flow.get("error"):
+            bad("a stopped ingest does not reach the Pipelines page")
+        elif not flow.get("error_at"):
+            bad("the stopped ingest has no timestamp")
+        else:
+            ok(f"stopped ingest is visible: {flow['error'][:50]}")
+    finally:
+        backend.events.materialize = real
+        backend._clear_status("_events")
+
+
 def check_paths(backend):
     section("paths")
     from PySide6.QtGui import QGuiApplication
@@ -430,6 +463,7 @@ def main() -> int:
         check_reads(be)
         check_events(be.events)
         check_errors(be)
+        check_ingest_visible(be)
         check_paths(be)
     finally:
         be.events.close()

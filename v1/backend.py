@@ -113,8 +113,13 @@ class Backend(QObject):
         # last outcome per source: {table: {error, at, rows}} — read by the
         # Pipelines page, so a broken source is visible instead of silent
         self._status: dict[str, dict] = {}
+        # Bumped by every status write. The flow list is cached against the
+        # collection generation, and a failure can appear BETWEEN collections
+        # (the event ingest runs on its own thread) — without this, a stopped
+        # stream stayed invisible until the next source happened to collect.
+        self._status_rev = 0
         self._flows_cache = None      # pipelineFlows is expensive to build
-        self._flows_gen = -1
+        self._flows_gen = (-1, -1)
         self._meta = self._load_meta()
         if not os.environ.get("LISIN_NO_COLLECT"):
             threading.Thread(target=self._scheduler, daemon=True).start()
@@ -152,6 +157,18 @@ class Backend(QObject):
             self._run_all()
             time.sleep(5)
 
+    def _set_status(self, key: str, error: str = "", rows: int = 0,
+                    at: str = "") -> None:
+        """The ONE place a source's outcome is recorded. Everything the interface
+        says about what is working goes through here, so nothing can be changed
+        without the pages that draw it being told."""
+        self._status[key] = {"error": error, "at": at or _iso_now(), "rows": rows}
+        self._status_rev += 1
+
+    def _clear_status(self, key: str) -> None:
+        if self._status.pop(key, None) is not None:
+            self._status_rev += 1
+
     def _run_all(self, force: bool = False):
         ran = []
         try:
@@ -169,19 +186,15 @@ class Backend(QObject):
                     # nobody had touched in a while — the worst kind of silence in
                     # a tool whose whole job is to tell you what is on the machine.
                     if x.get("error"):
-                        self._status[x["table"]] = {
-                            "error": x["error"], "at": now, "rows": 0}
+                        self._set_status(x["table"], x["error"], at=now)
                     else:
                         self._collected_at[x["table"]] = now
-                        self._status[x["table"]] = {
-                            "error": "", "at": now, "rows": x.get("rows", 0)}
+                        self._set_status(x["table"], rows=x.get("rows", 0), at=now)
             for v in st.get("derive", {}).get("views", []):
                 if v.get("error"):
-                    self._status[v["view"]] = {
-                        "error": v["error"], "at": _iso_now(), "rows": 0}
+                    self._set_status(v["view"], v["error"])
         except Exception as e:  # noqa: BLE001
-            self._status["_collector"] = {"error": str(e), "at": _iso_now(),
-                                          "rows": 0}
+            self._set_status("_collector", str(e))
         # the tick is every few seconds but most of them collect nothing (each
         # input has its own interval) — pushing a snapshot then would just make
         # every open page re-read for no new data.
@@ -212,13 +225,25 @@ class Backend(QObject):
                 filled = self.events.materialize()
                 if lines or filled:
                     self._push_state()  # refresh the Events tab count
-            except Exception:
-                pass
+                self._clear_status("_events")
+            except Exception as e:  # noqa: BLE001
+                # A STOPPED INGEST MUST BE VISIBLE, for the same reason a failing
+                # source is. This was `pass`, and it hid a real one: normalizing a
+                # batch hit the memory cap, every later cycle threw on the same
+                # backlog, and the interface went on showing the events collected
+                # before that — a stream that had stopped hours ago looked exactly
+                # like a quiet machine. Recorded like any other source, drawn on
+                # the Pipelines page with the time it happened.
+                self._set_status("_events", str(e).splitlines()[0])
             try:
                 if cycles % 20 == 0:  # ~every 60 s: bound the stream
                     self.events.prune()
-            except Exception:
-                pass
+                    self._clear_status("_retention")
+            except Exception as e:  # noqa: BLE001
+                # retention failing is not visible in the interface at all — the
+                # events keep arriving, the file just grows until the disk is full
+                self._set_status("_retention",
+                                 "retention: " + str(e).splitlines()[0])
             time.sleep(3)
 
     def _events_tab(self) -> dict:
@@ -597,10 +622,11 @@ class Backend(QObject):
         at 781 ms, called from the GUI thread every time events arrived: with the
         Pipelines page open the window froze every few seconds. The flows can only
         change when a collection ran, so they are rebuilt only then."""
-        if self._flows_cache is not None and self._flows_gen == self._gen:
+        key = (self._gen, self._status_rev)
+        if self._flows_cache is not None and self._flows_gen == key:
             return self._flows_cache
         flows = self._build_flows()
-        self._flows_cache, self._flows_gen = flows, self._gen
+        self._flows_cache, self._flows_gen = flows, key
         return flows
 
     def _build_flows(self):
@@ -670,11 +696,14 @@ class Backend(QObject):
                         "SELECT count(*) FROM tetragon_raw").fetchone()[0]
                     ev_n = self.events._con.execute(
                         "SELECT count(*) FROM events").fetchone()[0]
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001
+                self._set_status("_events", str(e).splitlines()[0])
             norm = self.events.load_views()
             nname = norm[0].get("name", "events_norm") if norm else "events_norm"
+            est = self._status.get("_events") or self._status.get("_retention") or {}
             flows.append({
+                "error": est.get("error", ""),
+                "error_at": est.get("at", ""),
                 "name": tet.get("name", "tetragon_events"),
                 "title": tet.get("title", "Tetragon runtime events"),
                 "icon": tet.get("icon", "security-high"),
