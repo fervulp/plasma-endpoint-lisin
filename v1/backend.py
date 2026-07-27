@@ -163,7 +163,7 @@ class Backend(QObject):
 
     def _follow(self):
         """A follower's whole loop: ask the owner what changed, redraw if so."""
-        seen = None
+        seen, misses = None, 0
         while True:
             try:
                 st = self.store.hook("agent_state")
@@ -176,8 +176,21 @@ class Backend(QObject):
                     self._events_at = str(st.get("events_at") or "")
                     self._status_rev += 1
                     self._push_state()
-            except Exception:  # noqa: BLE001 — the owner may be restarting
-                pass
+            except Exception as e:  # noqa: BLE001
+                # One miss is normal: the owner may be mid-restart. A run of them
+                # is not — this window would go on showing an hour-old snapshot as
+                # if it were current, which is the exact failure this project
+                # keeps finding. Said out loud after half a minute of silence.
+                misses += 1
+                if misses == 15:
+                    self._set_status(
+                        "_agent", "no answer from the agent that owns the "
+                        f"databases ({str(e).splitlines()[0]}) — what is shown "
+                        "is the last state it reported")
+            else:
+                if misses:
+                    misses = 0
+                    self._clear_status("_agent")
             time.sleep(2)
 
     # ---------- metadata (table -> title/icon, from the YAML rules) ----------

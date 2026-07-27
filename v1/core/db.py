@@ -60,13 +60,18 @@ FORBIDDEN = re.compile(
 def select_only(sql: str) -> bool:
     """True if sql is a single SELECT/WITH statement with no DDL/DML keywords.
 
-    STRING LITERALS AND COMMENTS ARE REMOVED BEFORE THE KEYWORD SCAN. Without
-    that, a perfectly good rule was refused because a VALUE contained a keyword
-    (`THEN 'delete'`, `LIKE '%copy%'`) or because a literal held a semicolon — and
-    the refusal was silent, so the rule simply stopped taking effect."""
+    STRING LITERALS, COMMENTS AND QUOTED IDENTIFIERS ARE REMOVED BEFORE THE
+    KEYWORD SCAN. Without that a perfectly good query is refused for containing a
+    keyword it never executes: a VALUE (`THEN 'delete'`, `LIKE '%copy%'`), a
+    literal holding a semicolon — or, found by the dead-column audit, a COLUMN
+    NAMED `load` in the failed-units table, which reads as the LOAD statement that
+    pulls in an extension. A quoted identifier can never be a statement, so it is
+    blanked out too; an unquoted LOAD is still refused, and a second statement is
+    still refused, because those are what the guard is for."""
     body = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)   # block comments
     body = re.sub(r"--[^\n]*", " ", body)               # line comments
     body = re.sub(r"'(?:''|[^'])*'", "''", body)        # string literals
+    body = re.sub(r'"(?:""|[^"])*"', '"x"', body)       # quoted identifiers
     stmts = [s for s in body.split(";") if s.strip()]
     if len(stmts) != 1:
         return False

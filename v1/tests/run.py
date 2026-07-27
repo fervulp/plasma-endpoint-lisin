@@ -125,6 +125,39 @@ def check_engine(store):
         ok("no temp files left behind")
 
 
+# ------------------------------------------------------------------ guard
+def check_sql_guard():
+    """THE READ-ONLY GUARD MUST REFUSE WHAT IT IS FOR AND NOTHING ELSE. It is the
+    only thing standing between the query service (and the SQL page) and a write,
+    so it cannot be loosened casually — and it cannot be so blunt that ordinary
+    queries are refused, because the refusal is silent and the feature just stops
+    working. Both directions are asserted here; the third case is the one the
+    dead-column audit found, where a COLUMN NAMED `load` read as the LOAD
+    statement."""
+    section("sql guard")
+    from core.db import select_only
+    cases = [
+        ('SELECT a FROM t', True, "a plain select"),
+        ('SELECT "load" FROM failed_units', True, "a column named load"),
+        ('SELECT "attach" FROM t', True, "a column named attach"),
+        ("SELECT 'delete' AS x", True, "a keyword inside a value"),
+        ("SELECT * FROM t WHERE x = 'a;b'", True, "a semicolon inside a literal"),
+        ("WITH c AS (SELECT 1) SELECT * FROM c", True, "a CTE"),
+        ('LOAD httpfs', False, "a real LOAD"),
+        ('INSTALL httpfs', False, "a real INSTALL"),
+        ("ATTACH 'x.db' AS y", False, "a real ATTACH"),
+        ("SELECT 1; DROP TABLE t", False, "two statements"),
+        ("DROP TABLE t", False, "a drop"),
+        ("UPDATE t SET a = 1", False, "an update"),
+    ]
+    wrong = [(s, w, l) for s, w, l in cases if select_only(s) is not w]
+    for s, w, l in wrong:
+        bad(f"the guard {'refuses' if w else 'allows'} {l}: {s}")
+    if not wrong:
+        ok(f"{len(cases)} cases: everything that writes is refused, "
+           f"everything that reads is not")
+
+
 # ------------------------------------------------------------- rule tests
 def check_rule_tests(store):
     """Run what each rule says about its own table. A source does not usually
@@ -642,6 +675,7 @@ def main() -> int:
     # through the same socket the interface uses, and which ones were skipped is
     # said out loud rather than quietly passing a shorter suite.
     try:
+        check_sql_guard()
         if be.owner:
             check_engine(be.store)
             check_contract(be.store)
