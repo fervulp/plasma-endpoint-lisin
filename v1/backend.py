@@ -113,6 +113,8 @@ class Backend(QObject):
         # last outcome per source: {table: {error, at, rows}} — read by the
         # Pipelines page, so a broken source is visible instead of silent
         self._status: dict[str, dict] = {}
+        self._flows_cache = None      # pipelineFlows is expensive to build
+        self._flows_gen = -1
         self._meta = self._load_meta()
         if not os.environ.get("LISIN_NO_COLLECT"):
             threading.Thread(target=self._scheduler, daemon=True).start()
@@ -247,6 +249,19 @@ class Backend(QObject):
             "count": cnt, "collected_at": self._events_at,
             "colcfg": {"hidden": hidden},
         }
+
+    def _cached_count(self, name: str, tables) -> int:
+        """Row count from the snapshot cache when it has one. Counting a view
+        means running it, and one of ours is a recursive graph query."""
+        if name not in tables:
+            return 0
+        c = self._tab_cache.get(name)
+        if c is not None:
+            return c[2]
+        try:
+            return self.store.row_count(name)
+        except Exception:  # noqa: BLE001
+            return 0
 
     def _dead_columns(self, table: str, cols: list[str]) -> list[str]:
         """Columns that hold NO value at all in this table, right now.
@@ -576,6 +591,19 @@ class Backend(QObject):
     # ---------- Pipelines: the data flows, built from the expertise itself ----------
     @Slot(result="QVariant")
     def pipelineFlows(self):
+        """Cached per collection. Building this walks every rule file and counts
+        every table and view — and counting a VIEW re-executes it, which for the
+        dependency graph is a recursive CTE over twenty thousand edges. Measured
+        at 781 ms, called from the GUI thread every time events arrived: with the
+        Pipelines page open the window froze every few seconds. The flows can only
+        change when a collection ran, so they are rebuilt only then."""
+        if self._flows_cache is not None and self._flows_gen == self._gen:
+            return self._flows_cache
+        flows = self._build_flows()
+        self._flows_cache, self._flows_gen = flows, self._gen
+        return flows
+
+    def _build_flows(self):
         """One flow per ENTRY POINT, as declared in expertise — not a hardcoded
         picture. An osquery input flows into its table and then into whichever
         enrichment views read that table; the Tetragon entry point flows into the
@@ -585,9 +613,10 @@ class Backend(QObject):
 
         # --- osquery inputs: input -> table -> views that read it ---
         view_specs = views.load_views()
+        inputs = pipeline.load_inputs()
         with self.store._lock:
             tables = set(self.store.tables())
-            for inp in pipeline.load_inputs():
+            for inp in inputs:
                 if str(inp.get("kind", "")) == "tetragon":
                     continue                    # handled below (a stream, not a query)
                 table = inp.get("table") or inp.get("name")
@@ -597,7 +626,7 @@ class Backend(QObject):
                     "detail": "osquery", "rows": -1,
                     "ref": "inputs/" + str(inp.get("name", table)),
                 }]
-                rows = self.store.row_count(table) if table in tables else 0
+                rows = self._cached_count(table, tables)
                 stages.append({
                     "kind": "table", "name": table, "title": table,
                     "detail": "DuckDB table", "rows": rows, "ref": "",
@@ -612,7 +641,7 @@ class Backend(QObject):
                             "kind": "view", "name": vn,
                             "title": v.get("title", vn),
                             "detail": "SQL view",
-                            "rows": self.store.row_count(vn) if vn in tables else 0,
+                            "rows": self._cached_count(vn, tables),
                             "ref": "views/" + str(vn),
                         })
                 st = self._status.get(table, {})
@@ -632,8 +661,7 @@ class Backend(QObject):
                 })
 
         # --- the Tetragon entry point: log tail -> raw -> normalize -> events ---
-        tet = next((i for i in pipeline.load_inputs()
-                    if str(i.get("kind", "")) == "tetragon"), None)
+        tet = next((i for i in inputs if str(i.get("kind", "")) == "tetragon"), None)
         if tet is not None:
             raw_n = ev_n = 0
             try:
