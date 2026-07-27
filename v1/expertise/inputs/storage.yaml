@@ -63,15 +63,18 @@ query: |
     -- the raw column is kept as the fallback. An unmounted partition stays empty,
     -- which is the truth rather than a guess.
     COALESCE(NULLIF(b.type, ''), m.type, '')      AS fs_type,
-    b.label,
-    b.uuid,
     m.path                                        AS mounted_at,
-    CASE WHEN m.path IS NULL THEN '' ELSE 'yes' END AS mounted,
-    e.encryption_status,
-    e.type                                        AS encryption_type
+    CASE WHEN m.path IS NULL THEN '' ELSE 'yes' END AS mounted
+    -- label, uuid, encryption_status and encryption_type USED TO BE HERE and were
+    -- empty in every row: osquery reads them by probing the raw device, which an
+    -- unprivileged process may not do. Four columns that are always empty read as
+    -- "this machine has no labels and no encryption", which is worse than not
+    -- offering them. The same facts are available WITHOUT root from what udev
+    -- already recorded, so they live in the `filesystems` table now — where this
+    -- machine's LUKS container shows as unlocked and its BitLocker partition as
+    -- locked.
   FROM block_devices b
   LEFT JOIN block_devices p ON p.name = b.parent
   LEFT JOIN block_devices g ON g.name = p.parent
-  LEFT JOIN disk_encryption e ON e.name = b.name
   LEFT JOIN mounts m ON m.device = b.name OR m.device_alias = b.name
   ORDER BY b.name

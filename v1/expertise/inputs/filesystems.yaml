@@ -1,0 +1,67 @@
+name: filesystems
+table: filesystems
+type: input
+kind: command
+version: 1.0.0
+title: Filesystems
+icon: drive-harddisk
+interval: 300
+priority: 285
+columns: [name, kind, fstype, label, uuid, size, mountpoint, encryption, parent]
+description: >-
+  What is actually ON each block device: filesystem type, label, UUID, where it
+  is mounted, and whether it sits inside an encrypted container.
+  WHY NOT osquery: its block_devices columns for exactly these fields require
+  probing the raw device, which an unprivileged process cannot do — they came
+  back empty, and four permanently empty columns read as "this machine has no
+  labels or encryption". lsblk answers the same questions WITHOUT root, because
+  it reads what udev already recorded when the device appeared.
+  ENCRYPTION IS STRUCTURAL, not a flag to trust: a device whose type is `crypt`
+  IS the opened mapping of an encrypted container, and its parent is the
+  container. Both are rows here, and `parent` links them.
+tsv_columns: [name, kind, fstype, label, uuid, size, mountpoint, encryption, parent]
+tests:
+  min_rows: 3
+  not_empty: [name, kind]
+  expect:
+    - name: filesystem types are recovered where osquery could not probe
+      where: "fstype <> ''"
+      min_rows: 1
+command: |
+  export LC_ALL=C
+  lsblk -P -o NAME,TYPE,FSTYPE,LABEL,UUID,SIZE,MOUNTPOINT,PKNAME 2>/dev/null |
+  python3 -c '
+  import re, sys
+  rows = []
+  for line in sys.stdin:
+      d = dict(re.findall(r'"'"'([A-Z]+)="([^"]*)"'"'"', line))
+      if d:
+          rows.append(d)
+  by_name = {r.get("NAME", ""): r for r in rows}
+  opened = {}
+  for r in rows:
+      if r.get("TYPE") == "crypt" and r.get("PKNAME"):
+          opened[r["PKNAME"]] = r.get("NAME", "")
+  for r in rows:
+      parent = r.get("PKNAME", "")
+      # a crypt mapping IS the opened form of its parent container; saying so
+      # here is a fact about the device tree, not an assessment. And a container
+      # is only "locked" when nothing was opened FROM it — calling the running
+      # root filesystem locked because its parent says crypto_LUKS would be
+      # exactly the kind of confident wrong answer this project does not ship.
+      enc = ""
+      name = r.get("NAME", "")
+      fstype = (r.get("FSTYPE") or "").lower()
+      if r.get("TYPE") == "crypt":
+          enc = "opened from " + (parent or "an encrypted container")
+      elif name in opened:
+          enc = "unlocked as " + opened[name]
+      elif by_name.get(parent, {}).get("TYPE") == "crypt":
+          enc = "inside " + parent
+      elif fstype in ("crypto_luks", "bitlocker"):
+          enc = r["FSTYPE"] + " (locked)"
+      print("\t".join((r.get("NAME", ""), r.get("TYPE", ""), r.get("FSTYPE", ""),
+                       r.get("LABEL", ""), r.get("UUID", ""), r.get("SIZE", ""),
+                       r.get("MOUNTPOINT", ""), enc, parent)))
+  '
+  true
