@@ -81,19 +81,46 @@ def select_only(sql: str) -> bool:
     return FORBIDDEN.search(stmts[0]) is None
 
 
+_YAML_CACHE: dict[str, tuple] = {}
+
+
 def load_yaml_dir(d: Path) -> list[dict]:
     """Load every *.yaml in a directory as a dict, each stamped with its _file
     path. A file that fails to parse becomes an empty dict rather than aborting
-    the whole load."""
+    the whole load.
+
+    CACHED ON THE FILES' OWN TIMESTAMPS. Fifty-five rules cost 67 ms to read and
+    parse, and this is on the path of everything that asks what the expertise
+    says — the flows page, the tab metadata, the engine card, every collection
+    cycle. The cache key is (name, mtime, size) for every file, so an edit — from
+    the editor, from a text editor, from git — invalidates it, while re-reading
+    unchanged rules costs one stat per file (measured: 0.5 ms). It is deliberately
+    NOT a time-based cache: a rule the user just saved must take effect on the
+    next run, not within a few seconds of it."""
+    if not d.is_dir():
+        return []
+    files = sorted(d.glob("*.yaml"))
+    try:
+        stamp = tuple((f.name, f.stat().st_mtime_ns, f.stat().st_size) for f in files)
+    except OSError:
+        stamp = None
+    key = str(d)
+    if stamp is not None:
+        hit = _YAML_CACHE.get(key)
+        if hit and hit[0] == stamp:
+            # a copy per call: callers add keys to these dicts (_err, the engine
+            # stamps its own), and a shared dict would carry that to the next one
+            return [dict(x) for x in hit[1]]
     out: list[dict] = []
-    if d.is_dir():
-        for f in sorted(d.glob("*.yaml")):
-            try:
-                spec = yaml.safe_load(f.read_text()) or {}
-            except Exception:  # noqa: BLE001 — one bad file must not kill the rest
-                spec = {}
-            spec["_file"] = str(f)
-            out.append(spec)
+    for f in files:
+        try:
+            spec = yaml.safe_load(f.read_text()) or {}
+        except Exception:  # noqa: BLE001 — one bad file must not kill the rest
+            spec = {}
+        spec["_file"] = str(f)
+        out.append(spec)
+    if stamp is not None:
+        _YAML_CACHE[key] = (stamp, [dict(x) for x in out])
     return out
 
 

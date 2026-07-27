@@ -19,6 +19,7 @@ Kirigami.Page {
     background: PageBackground {}
 
     property var flows: []
+    property var engine: ({})
     readonly property int failing: {
         var n = 0
         for (var i = 0; i < flows.length; i++)
@@ -26,7 +27,10 @@ Kirigami.Page {
         return n
     }
     property string filter: ""
-    function reload() { page.flows = backend.pipelineFlows() || [] }
+    function reload() {
+        page.flows = backend.pipelineFlows() || []
+        page.engine = backend.engineState() || ({})
+    }
 
     readonly property var shownFlows: {
         if (filter === "") return flows
@@ -66,6 +70,13 @@ Kirigami.Page {
                 anchors.fill: parent
                 anchors.margins: Kirigami.Units.smallSpacing
                 spacing: Kirigami.Units.smallSpacing
+
+                // THE ENGINE ITSELF, above the flows it runs: what is collecting,
+                // how far behind the stream is, what the databases cost on disk.
+                EngineCard {
+                    Layout.fillWidth: true
+                    state: page.engine
+                }
 
                 Kirigami.SearchField {
                     Layout.fillWidth: true

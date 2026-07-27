@@ -73,6 +73,19 @@ Kirigami.Page {
     ]
     property string editing: ""      // the relative path of the open file
     property var selEl: null         // the row shown in the detail sidebar
+    property var testResult: null    // what the rule's own tests just answered
+    readonly property int testsFailed: {
+        if (!testResult || !testResult.results) return 0
+        var n = 0
+        for (var i = 0; i < testResult.results.length; i++)
+            if (!testResult.results[i].passed) n++
+        return n
+    }
+    function runTests() {
+        if (!selEl) return
+        testResult = backend.ruleTests(String(selEl.name || selEl.id || ""))
+    }
+    onSelElChanged: testResult = null      // a result belongs to the rule it ran on
     property string detailContent: ""// its YAML content (read-only preview)
     property string saveError: ""    // set by the editor's Save button
 
@@ -336,6 +349,16 @@ Kirigami.Page {
                           ? (page.selEl.id + "  ·  " + page.selEl.type
                              + "  ·  v" + page.selEl.version) : ""
                 }
+                // RUN WHAT THE RULE CLAIMS, WHERE THE RULE IS EDITED. A rule
+                // that states what it must produce is only worth writing if the
+                // answer is one click from where it is written; otherwise the
+                // statement is decoration and drifts from the table.
+                QQC2.Button {
+                    text: "Tests"
+                    icon.name: "checkmark"
+                    enabled: page.selEl !== null
+                    onClicked: page.runTests()
+                }
                 QQC2.Button {
                     text: "Edit"
                     icon.name: "document-edit"
@@ -347,6 +370,62 @@ Kirigami.Page {
                         detailPanel.open = false
                     }
                 }
+            }
+
+            // the outcome, in the panel rather than a dialog: the rule stays on
+            // screen next to what it claimed
+            ColumnLayout {
+                Layout.fillWidth: true
+                visible: page.testResult !== null
+                spacing: 2
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Kirigami.Icon {
+                        source: page.testsFailed > 0 ? "dialog-error" : "dialog-ok"
+                        implicitWidth: Kirigami.Units.iconSizes.small
+                        implicitHeight: Kirigami.Units.iconSizes.small
+                    }
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        text: {
+                            var r = page.testResult
+                            if (!r) return ""
+                            if (r.error) return r.error
+                            if (r.note) return r.note
+                            return page.testsFailed > 0
+                                   ? page.testsFailed + " of " + (r.results || []).length
+                                     + " assertions fail"
+                                   : "all " + (r.results || []).length + " assertions hold"
+                        }
+                        color: page.testsFailed > 0 ? Kirigami.Theme.negativeTextColor
+                                                    : Kirigami.Theme.textColor
+                    }
+                }
+                // ONE label, not a Repeater over the results: the list is a
+                // dozen lines at most, and a Repeater here produced no rows at
+                // all — twice, silently, in two different panels. A joined text
+                // cannot fail that way and reads the same.
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    wrapMode: Text.WordWrap
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                    textFormat: Text.PlainText
+                    text: {
+                        var r = page.testResult
+                        if (!r || !r.results) return ""
+                        var out = []
+                        for (var i = 0; i < r.results.length; i++) {
+                            var x = r.results[i]
+                            out.push((x.passed ? "✓ " : "✗ ") + x.test
+                                     + (x.detail ? " — " + x.detail : ""))
+                        }
+                        return out.join("\n")
+                    }
+                }
+                Kirigami.Separator { Layout.fillWidth: true; Layout.topMargin: 4 }
             }
             QQC2.ScrollView {
                 Layout.fillWidth: true

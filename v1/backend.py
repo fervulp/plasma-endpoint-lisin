@@ -26,7 +26,7 @@ from pathlib import Path
 import yaml
 from PySide6.QtCore import QObject, Signal, Slot
 
-from core import eventstore, pipeline, remote, service, views
+from core import eventstore, pipeline, remote, ruletest, service, views
 from core.db import data_dir, ident, load_yaml_dir, select_only
 from core.eventstore import EventStore
 from core.store import Store
@@ -134,6 +134,9 @@ class Backend(QObject):
         # (the event ingest runs on its own thread) — without this, a stopped
         # stream stayed invisible until the next source happened to collect.
         self._status_rev = 0
+        self._cycle: dict = {}        # what the last collection cycle cost
+        self._compacted: dict = {}    # what the last file rewrite reclaimed
+        self._engine_cache: tuple = (0.0, {})
         self._flows_cache = None      # pipelineFlows is expensive to build
         self._flows_gen = (-1, -1)
         self._meta = self._load_meta()
@@ -255,6 +258,7 @@ class Backend(QObject):
             try:
                 r = db.compact()
                 if r.get("compacted"):
+                    self._compacted[name] = dict(r, at=_iso_now())
                     self._set_status(
                         "_compact_" + name,
                         f"reclaimed {r['freed_mb']} MB from the {name} database "
@@ -268,6 +272,7 @@ class Backend(QObject):
 
     def _run_all(self, force: bool = False):
         ran = []
+        _t0 = time.perf_counter()
         try:
             # NB: no lock here — run_all takes the store lock itself, only around
             # the writes. Holding it across the osquery subprocesses froze the UI
@@ -292,6 +297,13 @@ class Backend(QObject):
                     self._set_status(v["view"], v["error"])
         except Exception as e:  # noqa: BLE001
             self._set_status("_collector", str(e))
+        if ran:
+            # kept so the interface can say what a cycle COSTS, rather than the
+            # user having to guess from how the window feels
+            self._cycle = {"seconds": round(time.perf_counter() - _t0, 1),
+                           "sources": len(ran),
+                           "failing": sum(1 for x in ran if x.get("error")),
+                           "at": _iso_now()}
         # the tick is every few seconds but most of them collect nothing (each
         # input has its own interval) — pushing a snapshot then would just make
         # every open page re-read for no new data.
@@ -700,6 +712,133 @@ class Backend(QObject):
         for root in sorted(roots, key=lambda k: branch.get(k, 0), reverse=True):
             walk(root, 0, set())
         return out
+
+    # ---------- the engine's own state, so the machinery is not a black box ----
+    @Slot(result="QVariant")
+    def engineState(self):
+        """WHAT THE ENGINE IS DOING, in the interface rather than in the code.
+
+        Every mechanism here was invisible from the outside: a file being rewritten
+        because it was half empty, a stream whose normalization is behind by some
+        number of lines, a retention bound that decides how far back the history
+        goes, a process ends being folded onto their starts, and which process
+        owns the databases at all. Each of those has surprised me at least once
+        while building this, and the cost of not showing them is that the only way
+        to find out is to read the source.
+
+        Cached for a few seconds: it is drawn on a page that redraws whenever data
+        arrives, and it asks the databases for their sizes."""
+        now = time.time()
+        if now - self._engine_cache[0] < 4 and self._engine_cache[1]:
+            return self._engine_cache[1]
+
+        def db_facts(name, db):
+            out = {"name": name}
+            try:
+                free, total = db.waste()
+                out.update(file_mb=round(total / 1048576, 1),
+                           used_mb=round((total - free) / 1048576, 1),
+                           free_mb=round(free / 1048576, 1),
+                           free_share=round(free / total, 2) if total else 0)
+            except Exception as e:  # noqa: BLE001
+                out["error"] = str(e).splitlines()[0]
+            c = self._compacted.get(name) or {}
+            if c:
+                out["compacted_at"] = c.get("at", "")
+                out["reclaimed_mb"] = c.get("freed_mb", 0)
+                out["compact_seconds"] = c.get("seconds", 0)
+            return out
+
+        stream = {}
+        try:
+            stream["materialized"] = self.events.row_count("events")
+            stream["staged_raw"] = self.events.row_count("tetragon_raw")
+            hi = self.events.fetch(
+                "SELECT coalesce(max(seq), -1) FROM tetragon_raw")["rows"][0][0]
+            wm = self.events.fetch(
+                "SELECT coalesce(max(seq), -1) FROM events")["rows"][0][0]
+            stream["watermark"] = wm
+            # what has arrived but is not normalized yet — the number that tells
+            # you the difference between "quiet" and "stuck"
+            stream["backlog"] = max(int(hi) - int(wm), 0)
+            # AT TIME ZONE 'UTC', because the stream is stored in UTC and a bare
+            # now() is this machine's local time: compared against a naive UTC
+            # column that silently answered "nothing in the last five minutes" on
+            # a machine three hours ahead — a stopped stream and a busy one
+            # looking exactly alike, which is the failure this whole card exists
+            # to prevent.
+            r = self.events.fetch(
+                "SELECT max(ts)::VARCHAR, count(*) FILTER (WHERE ts > "
+                "(now() AT TIME ZONE 'UTC') - INTERVAL 5 MINUTE) FROM events"
+            )["rows"][0]
+            stream["last_event"] = r[0] or ""
+            stream["per_minute"] = round((r[1] or 0) / 5)
+            f = eventstore.load_event_views()
+            fold = (f[0].get("fold") if f else None) or {}
+            if fold:
+                folded = self.events.fetch(
+                    "SELECT count(*) FROM events WHERE lifetime_ms IS NOT NULL"
+                )["rows"][0][0]
+                stream["fold"] = {"when": fold.get("when", ""),
+                                  "onto": fold.get("onto", ""),
+                                  "key": fold.get("key", ""),
+                                  "rows": folded}
+            stream["retention_rows"] = eventstore.MAX_ROWS
+            stream["raw_window"] = eventstore.RAW_WINDOW
+            stream["batch_bytes"] = eventstore.BATCH_BYTES
+        except Exception as e:  # noqa: BLE001
+            stream["error"] = str(e).splitlines()[0]
+
+        inputs = [i for i in pipeline.load_inputs()
+                  if i.get("query") or i.get("command")]
+        state = {
+            "owner": self.owner,
+            "pid": os.getpid(),
+            "owner_pid": getattr(self, "_owner_pid", 0),
+            "socket": service.socket_path(),
+            "serving": bool(self.service and self.service._srv is not None),
+            "tetragon": {"log": self.reader.log,
+                         "readable": self.reader.available(),
+                         "cursor": str(self.reader.cursor),
+                         "cursor_error": self.reader.cursor_error},
+            "databases": [db_facts("state", self.store),
+                          db_facts("events", self.events)],
+            "stream": stream,
+            "collection": {
+                "sources": len(inputs),
+                "disabled": sum(1 for i in inputs if i.get("enabled") is False),
+                "last": self._cycle,
+                "failing": sum(1 for k, v in self._status.items()
+                               if v.get("error") and not k.startswith("_")),
+                "workers": pipeline.WORKERS,
+                "cadences": sorted({int(float(i.get("interval",
+                                                  pipeline.DEFAULT_INTERVAL)))
+                                    for i in inputs}),
+            },
+        }
+        self._engine_cache = (now, state)
+        return state
+
+    @Slot(str, result="QVariant")
+    def ruleTests(self, name):
+        """Run one rule's own tests, from the interface. The suite runs them too,
+        but a rule is edited HERE — and a rule that says what it must produce is
+        only worth writing if the answer is one click away from where it is
+        written."""
+        rules = pipeline.load_inputs() + views.load_views()
+        rule = next((r for r in rules
+                     if (r.get("name") == name or r.get("table") == name)), None)
+        if rule is None:
+            return {"error": f"no rule called {name}"}
+        if not rule.get("tests"):
+            return {"results": [], "note": "this rule declares no tests"}
+        try:
+            res = ruletest.run_one(self.store, rule)
+        except Exception as e:  # noqa: BLE001
+            return {"error": str(e).splitlines()[0]}
+        return {"results": res,
+                "passed": sum(1 for r in res if r["passed"]),
+                "failed": sum(1 for r in res if not r["passed"])}
 
     # ---------- Pipelines: the data flows, built from the expertise itself ----------
     @Slot(result="QVariant")

@@ -500,6 +500,63 @@ def check_compaction(backend):
                f"{round(total/1048576)} MB — below the rewrite threshold")
 
 
+def check_engine_visible(backend):
+    """THE MACHINERY MUST BE VISIBLE FROM THE INTERFACE, not only from the source.
+    Every mechanism in this engine has surprised me at least once while building
+    it — a file rewritten because it was half empty, a normalization that had
+    fallen behind, a retention bound deciding how far back the history goes,
+    process ends folded onto their starts, and which process owns the databases.
+    The card that says all that is only as good as the numbers behind it, so the
+    numbers are checked: present, and consistent with what the databases hold."""
+    section("engine card")
+    st = backend.engineState()
+    need = ["owner", "socket", "databases", "stream", "collection", "tetragon"]
+    missing = [k for k in need if k not in st]
+    if missing:
+        bad(f"the engine card would be missing: {', '.join(missing)}")
+        return
+    dbs = {d["name"]: d for d in st["databases"]}
+    if set(dbs) != {"state", "events"}:
+        bad(f"expected both databases, got {sorted(dbs)}")
+    for name, d in dbs.items():
+        if d.get("file_mb", 0) <= 0 or d.get("used_mb", -1) < 0:
+            bad(f"{name}: file {d.get('file_mb')} MB, used {d.get('used_mb')} MB")
+    stream = st["stream"]
+    real = backend.events.row_count("events")
+    if stream.get("materialized") != real:
+        bad(f"the card says {stream.get('materialized')} events, the table has {real}")
+    if stream.get("backlog", 0) < 0:
+        bad(f"a negative backlog: {stream.get('backlog')}")
+    # THE RATE IS THE ONE THAT LIES QUIETLY: the stream is stored in UTC and a
+    # bare now() is local time, which answered "nothing in the last five minutes"
+    # on a machine three hours ahead — a stopped stream and a busy one looking
+    # exactly alike.
+    if real > 1000 and stream.get("per_minute", 0) == 0:
+        recent = backend.events.fetch(
+            "SELECT count(*) FROM events WHERE ts > (now() AT TIME ZONE 'UTC')"
+            " - INTERVAL 60 MINUTE")["rows"][0][0]
+        if recent:
+            bad(f"the card says 0 events/min while {recent} arrived in the last hour")
+    ok(f"the card reports {stream.get('materialized'):,} events, "
+       f"{stream.get('per_minute')}/min, backlog {stream.get('backlog')}, "
+       f"{len(dbs)} databases, {st['collection'].get('sources')} sources")
+
+    # and a rule's own tests, run the way the Expertise page runs them
+    r = backend.ruleTests("scheduled")
+    if r.get("error"):
+        bad(f"running a rule's tests from the interface failed: {r['error']}")
+    elif not r.get("results"):
+        bad("a rule with tests returned no assertions")
+    else:
+        ok(f"a rule's tests run from the interface: {r['passed']} passed, "
+           f"{r['failed']} failed")
+    r2 = backend.ruleTests("memory")
+    if not r2.get("note"):
+        bad("a rule without tests should say so, not return an empty result")
+    else:
+        ok("a rule with no tests says so")
+
+
 def check_concurrency(backend):
     """A SECOND PROCESS MUST BE ABLE TO READ WHILE THIS ONE COLLECTS. DuckDB
     locks a file exclusively — measured: while a writer holds it, another process
@@ -742,6 +799,7 @@ def main() -> int:
             check_errors(be)
             check_ingest_visible(be)
             check_compaction(be)
+            check_engine_visible(be)
             check_concurrency(be)
         else:
             section("follower")
