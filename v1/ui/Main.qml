@@ -206,8 +206,12 @@ Kirigami.ApplicationWindow {
         ]
     }
 
-    pageStack.initialPage: placeholder
-
+    // NO initialPage. It used to hold the placeholder below, but the first
+    // section is pushed from Component.onCompleted, which clear()s the stack —
+    // so the placeholder page was built and thrown away before it was ever
+    // parented into the scene ("Created graphical object was not placed in the
+    // graphics scene"). The Component stays as the fallback for an unknown
+    // section name; nothing instantiates it at startup.
     Component { id: statePageComp; StatePage {} }
     Component { id: dashboardPageComp; DashboardPage {} }
     Component { id: pipelinesPageComp; PipelinesPage {} }
