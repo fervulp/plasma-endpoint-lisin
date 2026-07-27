@@ -225,7 +225,10 @@ class Backend(QObject):
                 filled = self.events.materialize()
                 if lines or filled:
                     self._push_state()  # refresh the Events tab count
-                self._clear_status("_events")
+                if self.reader.cursor_error:
+                    self._set_status("_events", self.reader.cursor_error)
+                else:
+                    self._clear_status("_events")
             except Exception as e:  # noqa: BLE001
                 # A STOPPED INGEST MUST BE VISIBLE, for the same reason a failing
                 # source is. This was `pass`, and it hid a real one: normalizing a

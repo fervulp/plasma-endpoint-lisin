@@ -42,6 +42,11 @@ class TetragonReader:
         self.cursor = Path(cursor_path) if cursor_path else _cursor_path()
         self.offset = 0
         self.inode = 0
+        # A cursor that cannot be written is not cosmetic: on the next start the
+        # reader begins from zero and re-reads the whole export, which is a
+        # duplicate of everything already stored. Kept so the caller can say so
+        # instead of the stream silently doubling.
+        self.cursor_error = ""
         self._load_cursor()
 
     def _load_cursor(self) -> None:
@@ -57,8 +62,10 @@ class TetragonReader:
             self.cursor.write_text(
                 json.dumps({"offset": self.offset, "inode": self.inode})
             )
-        except Exception:
-            pass
+            self.cursor_error = ""
+        except OSError as e:
+            self.cursor_error = f"cursor not saved ({e.strerror}): the export will"\
+                                " be re-read from the start after a restart"
 
     def available(self) -> bool:
         return os.access(self.log, os.R_OK)
