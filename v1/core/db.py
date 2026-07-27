@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import sys
 import threading
 from pathlib import Path
@@ -91,10 +92,38 @@ def load_yaml_dir(d: Path) -> list[dict]:
     return out
 
 
+# A read the interface makes must not cost more than a few frames. Above this,
+# the derivation is stored instead of recomputed (see apply_views).
+SLOW_VIEW_MS = 60
+
+
 def apply_views(con, specs: list[dict]) -> list[dict]:
     """CREATE OR REPLACE each {name, sql} view, in iterative passes so a view may
-    reference another created later. A view is CREATE OR REPLACE, so it is always
-    live and re-running is free. Returns per-view status (numbers, not prose)."""
+    reference another created later. Returns per-view status (numbers, not prose).
+
+    AN EXPENSIVE DERIVATION IS STORED, NOT RECOMPUTED. A view is recomputed on
+    every read, which is right for a join that costs nothing — but the dependency
+    footprint walks the package graph with a recursive CTE, and measured on this
+    machine that is 181 ms for a count and 171 ms for one page. Both run on the
+    GUI thread, on every tab switch and every snapshot push, which is the
+    stutter. So each derivation is TIMED as it is created, and a slow one is
+    stored as a table instead (177 ms, once per collection cycle, on the
+    collector's thread). No rule declares this and no name is special-cased: the
+    engine measures, because a derivation's cost depends on the machine's data,
+    not on what its author expected.
+
+    A stored derivation is exactly as fresh as its inputs — every base table here
+    is REPLACEd wholesale each cycle and the derivations are rebuilt right after,
+    in the same lock. If the swap fails (another view already depends on this
+    name), the view is kept and that is reported rather than hidden."""
+    # Which names WE stored as tables on an earlier pass. Needed because
+    # CREATE OR REPLACE VIEW refuses to replace a table, so a stored derivation
+    # has to be dropped before it can be re-created — and only ours may be
+    # dropped: a sensor's table must never be removed by the derivation layer,
+    # whatever a rule happens to be called.
+    con.execute("CREATE TABLE IF NOT EXISTS _derived (name VARCHAR PRIMARY KEY)")
+    ours = {r[0] for r in con.execute("SELECT name FROM _derived").fetchall()}
+
     status: list[dict] = []
     pending = list(specs)
     for _ in range(len(pending) + 1):
@@ -107,8 +136,46 @@ def apply_views(con, specs: list[dict]) -> list[dict]:
                 status.append({"view": name, "error": "not a single SELECT"})
                 continue
             try:
+                # A name that appears in the derivation rules is owned by this
+                # layer, so an existing table under it is our own earlier store
+                # and may be replaced. (That inputs and derivations never share a
+                # name is asserted in the tests, not assumed here.)
+                # (DROP TABLE IF EXISTS is not enough: on a VIEW of the same
+                # name DuckDB raises a type mismatch rather than skipping.)
+                if con.execute("SELECT 1 FROM duckdb_tables() WHERE table_name = ?",
+                               [name]).fetchone():
+                    con.execute(f"DROP TABLE {ident(name)}")
                 con.execute(f"CREATE OR REPLACE VIEW {ident(name)} AS {sql}")
-                status.append({"view": name, "error": ""})
+                t0 = time.perf_counter()
+                if name in ours:
+                    # already known to be slow: build the table straight away
+                    # rather than pay the measurement a second time every cycle
+                    ms, stored = None, True
+                else:
+                    ms = None
+                    rows = con.execute(
+                        f"SELECT count(*) FROM {ident(name)}"
+                    ).fetchone()[0]
+                    ms = (time.perf_counter() - t0) * 1000
+                    stored = ms >= SLOW_VIEW_MS
+                if stored:
+                    try:
+                        con.execute(f"DROP VIEW IF EXISTS {ident(name)}")
+                        con.execute(f"CREATE OR REPLACE TABLE {ident(name)} AS {sql}")
+                        con.execute("INSERT OR REPLACE INTO _derived VALUES (?)", [name])
+                    except Exception as e:  # noqa: BLE001 — a dependent object
+                        con.execute(f"CREATE OR REPLACE VIEW {ident(name)} AS {sql}")
+                        con.execute("DELETE FROM _derived WHERE name = ?", [name])
+                        status.append({"view": name, "error": "", "stored": False,
+                                       "note": f"cannot store: {e}"})
+                        continue
+                elif name in ours:
+                    con.execute("DELETE FROM _derived WHERE name = ?", [name])
+                rows = con.execute(f"SELECT count(*) FROM {ident(name)}").fetchone()[0]
+                build = (time.perf_counter() - t0) * 1000
+                status.append({"view": name, "error": "", "rows": rows,
+                               "ms": round(ms if ms is not None else build),
+                               "stored": stored})
             except Exception as e:  # noqa: BLE001 — maybe an unmet dependency
                 v["_err"] = str(e)
                 still.append(v)

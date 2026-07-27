@@ -93,6 +93,19 @@ def check_engine(store):
     st = pipeline.run_all(store, force=True)
     el = time.perf_counter() - t
     failed = [x for x in st["inputs"] if x["error"]]
+    # A DERIVATION MUST NOT SHARE A NAME WITH A SENSOR TABLE. The derivation
+    # layer replaces the object it owns (a slow one is stored as a table), so a
+    # collision would mean one rule silently destroying the other's data every
+    # cycle. Cheap to assert, impossible to notice otherwise.
+    from core import views as _views
+    from core import pipeline as _pl
+    dnames = {v.get("name") for v in _views.load_views()}
+    inames = {i.get("table") or i.get("name") for i in _pl.load_inputs()}
+    clash = sorted(n for n in dnames & inames if n)
+    if clash:
+        bad(f"a derivation and an input share a name: {', '.join(clash)}")
+    else:
+        ok(f"{len(dnames)} derivations, {len(inames)} inputs, no name collision")
     for x in failed:
         bad(f"input {x['table']}: {x['error'][:120]}")
     if not failed:
@@ -131,6 +144,7 @@ def check_data(store):
         cols_total += len(cols)
         dead_total += len(dead)
     ok(f"{dead_total} columns of {cols_total} are empty in every row")
+
     if empty_tables:
         ok(f"empty tables (may be legitimate, e.g. need root): {', '.join(empty_tables)}")
     # a source that produced rows before and produces none now is worth shouting
@@ -138,6 +152,30 @@ def check_data(store):
 
 
 # ---------------------------------------------------------------- paths
+def check_reads(backend):
+    """EVERY TABLE THE INTERFACE OFFERS MUST READ IN UNDER A FRAME. These calls
+    happen on the GUI thread: a tab whose page costs 170 ms is a window that
+    stops for 170 ms on every switch and every push. The dependency footprint
+    was exactly that (a recursive CTE recomputed per read) until the derivation
+    layer began storing slow derivations; this keeps it from coming back on any
+    tab, not just that one."""
+    section("reads")
+    import time as _t
+    snap = backend._snapshot()
+    slow = []
+    for tab in [x["name"] for x in snap["tabs"]]:
+        t0 = _t.perf_counter()
+        backend.tableRows(tab, 0, 50, "", "")
+        ms = (_t.perf_counter() - t0) * 1000
+        if ms > 60:
+            slow.append((tab, ms))
+    if slow:
+        for tab, ms in sorted(slow, key=lambda x: -x[1]):
+            bad(f"a page of {tab} costs {ms:.0f} ms on the GUI thread")
+    else:
+        ok(f"all {len(snap['tabs'])} tabs read a page in under 60 ms")
+
+
 def check_events(events):
     """The event pipeline has produced more defects than anything else — a
     watermark derived instead of stored (endless re-work), a counter inside the
@@ -389,6 +427,7 @@ def main() -> int:
     try:
         check_engine(be.store)
         check_data(be.store)
+        check_reads(be)
         check_events(be.events)
         check_errors(be)
         check_paths(be)
