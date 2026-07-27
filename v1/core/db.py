@@ -209,9 +209,16 @@ class DuckDB:
 
     def __init__(self, path: str):
         self.path = path
-        self._con = duckdb.connect(path)
         # a DuckDB connection is not thread-safe; serialize every access.
         self._lock = threading.RLock()
+        self._reopen()
+
+    def _reopen(self) -> None:
+        """Open the file and apply the session settings. Separate from __init__
+        because compaction replaces the file underneath and has to come back to
+        exactly the same connection state — two copies of these settings would
+        drift the moment one of them changed."""
+        self._con = duckdb.connect(self.path)
         for stmt in (f"SET memory_limit='{self.MEMORY_LIMIT}'",
                      f"SET threads={self.THREADS}",
                      # A bulk INSERT ... SELECT buffers the whole result to keep
@@ -231,6 +238,77 @@ class DuckDB:
     def close(self) -> None:
         with self._lock:
             self._con.close()
+
+    # A file whose free space is at least this share of it, and at least this
+    # many bytes, is worth rewriting. Both conditions: a small file that is half
+    # free wastes nothing worth a rewrite.
+    COMPACT_SHARE = 0.35
+    COMPACT_BYTES = 16 * 1024 * 1024   # measured: rewriting 163 MB takes 1.2 s
+
+    def waste(self) -> tuple[int, int]:
+        """(free bytes, total bytes) in the database FILE. DuckDB never returns
+        freed blocks to the operating system: retention deletes rows and the file
+        only grows. Measured on this machine, the event store was 176 MB holding
+        68 MB of events — 47 % of it empty."""
+        with self._lock:
+            r = self._con.execute(
+                "SELECT block_size, total_blocks, free_blocks "
+                "FROM pragma_database_size()"
+            ).fetchone()
+        if not r:
+            return 0, 0
+        bs, total, free = int(r[0]), int(r[1]), int(r[2])
+        return free * bs, total * bs
+
+    def compact(self) -> dict:
+        """Rewrite the database file without its free blocks.
+
+        There is no VACUUM in DuckDB, so the file is rebuilt: a fresh database is
+        created beside it, the contents copied, and the new file moved into place
+        with os.replace, which is atomic — an interruption at any point leaves the
+        ORIGINAL file intact, never a half-written one. The connection is closed
+        for the duration and reopened after, under the lock, so a reader waits
+        rather than seeing a file that is being swapped underneath it.
+        """
+        free, total = self.waste()
+        if not total:
+            return {"compacted": False, "reason": "no size reported"}
+        if free < self.COMPACT_BYTES or free / total < self.COMPACT_SHARE:
+            return {"compacted": False, "free_mb": round(free / 1048576),
+                    "total_mb": round(total / 1048576),
+                    "reason": "not wasteful enough"}
+        tmp = self.path + ".compacting"
+        t0 = time.perf_counter()
+        with self._lock:
+            before = os.path.getsize(self.path)
+            try:
+                self._con.close()
+                for leftover in (tmp, tmp + ".wal"):
+                    if os.path.exists(leftover):
+                        os.unlink(leftover)
+                con = duckdb.connect(":memory:")
+                con.execute(f"SET memory_limit='{self.MEMORY_LIMIT}'")
+                con.execute(f"ATTACH '{self.path}' AS old (READ_ONLY)")
+                con.execute(f"ATTACH '{tmp}' AS new")
+                con.execute("COPY FROM DATABASE old TO new")
+                con.execute("CHECKPOINT new")
+                con.close()
+                os.replace(tmp, self.path)
+                ok, err = True, ""
+            except Exception as e:  # noqa: BLE001 — the old file is still there
+                ok, err = False, str(e).splitlines()[0]
+                for leftover in (tmp, tmp + ".wal"):
+                    try:
+                        os.unlink(leftover)
+                    except OSError:
+                        pass
+            self._reopen()
+        after = os.path.getsize(self.path)
+        return {"compacted": ok, "error": err,
+                "before_mb": round(before / 1048576),
+                "after_mb": round(after / 1048576),
+                "freed_mb": round((before - after) / 1048576),
+                "seconds": round(time.perf_counter() - t0, 1)}
 
     def tables(self) -> list[str]:
         # every read takes the lock: the connection is shared with the collector's

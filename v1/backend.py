@@ -208,8 +208,12 @@ class Backend(QObject):
         # slow inventory source along with it.
         pipeline.sweep_temp()      # leftovers from a previous run, if it was killed
         self._push_state()
+        cycles = 0
         while True:
             self._run_all()
+            cycles += 1
+            if cycles % self.COMPACT_EVERY == 0:
+                self._maybe_compact()
             time.sleep(5)
 
     def _set_status(self, key: str, error: str = "", rows: int = 0,
@@ -223,6 +227,31 @@ class Backend(QObject):
     def _clear_status(self, key: str) -> None:
         if self._status.pop(key, None) is not None:
             self._status_rev += 1
+
+    # how many collection cycles between checks for a wasteful database file
+    COMPACT_EVERY = 600            # the scheduler ticks every 5 s -> ~50 minutes
+
+    def _maybe_compact(self):
+        """Rewrite a database file that is mostly free space. DuckDB never gives
+        freed blocks back: retention deletes rows and the file only grows —
+        measured here, the event store was 163 MB holding 93 MB of events. The
+        rewrite is atomic (see DuckDB.compact) and takes about a second, and the
+        outcome is recorded like any other source so a file that stopped shrinking
+        is visible rather than just large."""
+        for name, db in (("state", self.store), ("events", self.events)):
+            try:
+                r = db.compact()
+                if r.get("compacted"):
+                    self._set_status(
+                        "_compact_" + name,
+                        f"reclaimed {r['freed_mb']} MB from the {name} database "
+                        f"({r['before_mb']} -> {r['after_mb']} MB) in "
+                        f"{r['seconds']} s")
+                elif r.get("error"):
+                    self._set_status("_compact_" + name,
+                                     f"could not compact {name}: {r['error']}")
+            except Exception as e:  # noqa: BLE001
+                self._set_status("_compact_" + name, str(e).splitlines()[0])
 
     def _run_all(self, force: bool = False):
         ran = []

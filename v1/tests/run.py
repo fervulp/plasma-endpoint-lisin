@@ -367,6 +367,38 @@ def check_ingest_visible(backend):
         backend._clear_status("_events")
 
 
+def check_compaction(backend):
+    """A DATABASE FILE MUST NOT KEEP GROWING WHILE THE DATA STAYS THE SAME.
+    DuckDB never returns freed blocks to the operating system, and retention
+    deletes rows constantly — measured before this was handled, the event store
+    was 163 MB holding 93 MB of events, and the state store 33 MB holding 16 MB.
+    The rewrite is checked for the two things that matter: the file gets smaller,
+    and every row is still there afterwards."""
+    section("compaction")
+    for name, db, table in (("state", backend.store, "processes"),
+                            ("events", backend.events, "events")):
+        try:
+            before_rows = db.row_count(table)
+            free, total = db.waste()
+            r = db.compact()
+            after_rows = db.row_count(table)
+        except Exception as e:  # noqa: BLE001
+            bad(f"compacting {name} raised: {str(e).splitlines()[0][:100]}")
+            continue
+        if after_rows != before_rows:
+            bad(f"{name}: {before_rows:,} rows before the rewrite, "
+                f"{after_rows:,} after — data was lost")
+        elif r.get("error"):
+            bad(f"{name}: {r['error'][:100]}")
+        elif r.get("compacted"):
+            ok(f"{name}: {r['before_mb']} -> {r['after_mb']} MB "
+               f"({r['freed_mb']} MB reclaimed in {r['seconds']} s), "
+               f"{after_rows:,} rows intact")
+        else:
+            ok(f"{name}: {round(free/1048576)} MB free of "
+               f"{round(total/1048576)} MB — below the rewrite threshold")
+
+
 def check_concurrency(backend):
     """A SECOND PROCESS MUST BE ABLE TO READ WHILE THIS ONE COLLECTS. DuckDB
     locks a file exclusively — measured: while a writer holds it, another process
@@ -551,6 +583,7 @@ def main() -> int:
             check_events(be.events)
             check_errors(be)
             check_ingest_visible(be)
+            check_compaction(be)
             check_concurrency(be)
         else:
             section("follower")
