@@ -1,0 +1,33 @@
+name: vms
+table: vms
+type: input
+kind: command
+version: 1.0.0
+title: Virtual machines
+icon: computer
+interval: 300
+priority: 260
+columns: [name, state, id, disks, networks, autostart]
+description: >-
+  Virtual machines defined on this host, with the disks they are attached to and
+  the networks they sit on. A machine is a whole other endpoint that this one is
+  responsible for: its disk image is a file here, and its network interface is a
+  bridge here, so both belong in this inventory even though what runs inside is
+  not visible from outside.
+  Read through libvirt as this user; a hypervisor that needs privileges to query
+  simply produces nothing rather than a guess.
+tsv_columns: [name, state, id, disks, networks, autostart]
+command: |
+  export LC_ALL=C
+  command -v virsh >/dev/null || exit 0
+  for n in $(timeout 20 virsh list --all --name 2>/dev/null); do
+    [ -n "$n" ] || continue
+    state=$(timeout 10 virsh domstate "$n" 2>/dev/null | head -1)
+    id=$(timeout 10 virsh domid "$n" 2>/dev/null | tr -d ' ')
+    auto=$(timeout 10 virsh dominfo "$n" 2>/dev/null | awk -F: '/Autostart/ {gsub(/ /,"",$2); print $2}')
+    xml=$(timeout 10 virsh dumpxml "$n" 2>/dev/null)
+    disks=$(printf '%s' "$xml" | grep -o "source file='[^']*'" | sed "s/source file='//;s/'//" | tr '\n' ' ')
+    nets=$(printf '%s' "$xml" | grep -oE "(source (network|bridge|dev)='[^']*')" | sed "s/.*='//;s/'//" | tr '\n' ' ')
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$state" "$id" "$disks" "$nets" "$auto"
+  done
+  true

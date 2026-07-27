@@ -1,0 +1,27 @@
+name: flatpak_perms
+table: flatpak_perms
+type: input
+kind: command
+version: 1.0.0
+title: Flatpak permissions
+icon: security-medium
+interval: 900
+priority: 175
+columns: [table_name, object, app, permissions]
+description: >-
+  What each sandboxed application has been granted. A flatpak runs in a sandbox
+  precisely so that its access is enumerable — this is that enumeration: which
+  application may talk to which portal, reach which device, or read outside its
+  own directory. A permission granted once and forgotten is the interesting row.
+tsv_columns: [table_name, object, app, permissions]
+command: |
+  export LC_ALL=C
+  command -v flatpak >/dev/null || exit 0
+  # no header row on this flatpak: every line is a grant
+  timeout 20 flatpak permissions 2>/dev/null |
+    awk 'NF >= 3 {
+      perms = ""
+      for (i = 4; i <= NF; i++) perms = perms (perms == "" ? "" : " ") $i
+      printf "%s\t%s\t%s\t%s\n", $1, $2, $3, perms
+    }'
+  true
