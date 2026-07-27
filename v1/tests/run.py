@@ -146,7 +146,7 @@ def check_events(events):
     is invisible from the outside: events simply stop, or the file grows. So the
     invariants are asserted here."""
     section("events")
-    from core.eventstore import MAX_ROWS, RAW_WINDOW
+    from core.eventstore import MAX_ROWS, RAW_WINDOW, BATCH_BYTES
     raw = events.raw_count()
     hist = events._con.execute("SELECT count(*) FROM events").fetchone()[0]
     ok(f"{hist:,} events, {raw:,} raw lines staged")
@@ -180,6 +180,38 @@ def check_events(events):
         bad(f"history is {hist2:,} rows, above the {MAX_ROWS:,} bound")
     else:
         ok(f"history bounded to {hist2:,} (max {MAX_ROWS:,})")
+
+    # 4. A BURST OF LONG LINES MUST STILL NORMALIZE. Parsing raw JSON into the
+    # taxonomy costs roughly a hundred times the line itself, and that allocation
+    # counts against the memory cap while not showing up in duckdb_memory() — so
+    # a batch counted in ROWS silently became a 40x range of real work, and a run
+    # of long lines killed the ingest with OutOfMemory. The batch is budgeted in
+    # BYTES now; this stages several budgets' worth of the longest lines the
+    # sensor produces and requires the pass to survive. The synthetic rows are
+    # tagged and removed afterwards, so the history stays the machine's own.
+    import json as _json
+    tag = "lisin-selftest"
+    big = " ".join(f"--flag-{i}=/some/long/argument/path/{i}" for i in range(190))
+    line = _json.dumps({"process_exec": {
+        "process": {"binary": "/usr/bin/true", "pid": 999999, "uid": 0,
+                    "arguments": big, "start_time": "2026-01-01T00:00:00Z"},
+        "parent": {"binary": "/usr/bin/true", "pid": 1}},
+        "node_name": tag, "time": "2026-01-01T00:00:00Z"})
+    burst = max(1, (BATCH_BYTES * 3) // len(line))
+    mark = events._con.execute("SELECT coalesce(max(seq), -1) FROM tetragon_raw").fetchone()[0]
+    events.append([line] * burst)
+    try:
+        done = events.materialize()
+        if done < burst:
+            bad(f"{burst} long lines staged, only {done} normalized")
+        else:
+            ok(f"a burst of {burst} long lines ({burst * len(line) // 1024} KB, "
+               f"{burst * len(line) / BATCH_BYTES:.1f} batches) normalized")
+    except Exception as e:  # noqa: BLE001 — this is exactly the failure guarded
+        bad(f"a burst of long lines broke the ingest: {str(e).splitlines()[0]}")
+    finally:
+        events._con.execute("DELETE FROM tetragon_raw WHERE seq > ?", [mark])
+        events._con.execute("DELETE FROM events WHERE host = ?", [tag])
 
     # 4. the file must not carry the deleted pages
     import os as _os

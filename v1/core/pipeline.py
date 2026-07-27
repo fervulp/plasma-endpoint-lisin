@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import glob
 import os
+from concurrent import futures
 import tempfile
 import time
 from pathlib import Path
@@ -29,6 +30,8 @@ INPUTS_DIR = Path(__file__).resolve().parent.parent / "expertise" / "inputs"
 # re-reading as often as the process list, and with dozens of sources running
 # everything on the shortest interval would keep the machine busy for nothing.
 DEFAULT_INTERVAL = 30
+# how many sources are queried at once (they are external processes)
+WORKERS = int(os.environ.get("LISIN_COLLECT_WORKERS", "6"))
 _last_run: dict[str, float] = {}
 
 
@@ -70,9 +73,13 @@ def _due(inp: dict, now: float, force: bool) -> bool:
 def run_once(store: Store, force: bool = False) -> list[dict]:
     """Run every enabled input that is DUE. Returns per-input status (numbers,
     not prose, so a run can be verified against v0)."""
-    # phase 1: query — subprocesses, no lock held, the UI stays responsive
+    # phase 1: query — subprocesses, no lock held, the UI stays responsive.
+    # IN PARALLEL: every source is an external process (osqueryi, rpm, dnf), so
+    # the work is waiting, not computing — running them one after another made a
+    # full cycle the SUM of thirty-eight waits. Threads are the right tool here
+    # precisely because nothing runs in Python while they wait.
     now = time.monotonic()
-    collected = []
+    due = []
     for inp in load_inputs():
         if inp.get("enabled") is False:
             continue
@@ -85,17 +92,29 @@ def run_once(store: Store, force: bool = False) -> list[dict]:
             continue
         table = inp.get("table") or inp.get("name")
         _last_run[str(inp.get("name") or table)] = now
+        due.append((table, kind, inp))
+
+    def collect(item):
+        """Run ONE source. Returns (table, path, error, tsv_columns)."""
+        table, kind, inp = item
         try:
             # the result lands in a FILE; DuckDB reads it in phase 2. It never
             # becomes Python objects — that conversion was the whole cost of a
             # collection cycle (75 s -> 13 s once it was removed).
             if kind == "command":
-                collected.append((table, shell.run_to_file(inp["command"]),
-                                  "", list(inp.get("tsv_columns") or [])))
-                continue
-            collected.append((table, osquery.run_to_file(inp["query"]), "", None))
+                return (table, shell.run_to_file(inp["command"]), "",
+                        list(inp.get("tsv_columns") or []))
+            return (table, osquery.run_to_file(inp["query"]), "", None)
         except Exception as e:  # noqa: BLE001 — a bad rule must not kill the run
-            collected.append((table, None, str(e), None))
+            return (table, None, str(e), None)
+
+    collected = []
+    if due:
+        # a modest pool: these are subprocesses competing for the same disk and
+        # the same osquery tables, and the machine has other work to do
+        workers = min(WORKERS, len(due))
+        with futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            collected = list(pool.map(collect, due))
 
     # phase 2: write — under the lock, but only for the fast part
     status = []

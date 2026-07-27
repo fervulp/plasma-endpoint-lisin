@@ -44,16 +44,29 @@ EVENT_VIEWS_DIR = Path(__file__).resolve().parent.parent / "expertise" / "events
 # Beyond it, already-normalized events keep the normalization they were written
 # with — that is the honest trade and it is stated in the UI's rule description.
 MAX_ROWS = 300_000
-# Deliberately SMALL. The normalization view expands every raw row it can see
-# (a filter on the outer query does not push into its json_extract stage), so the
-# size of this window IS the memory a normalization pass costs — measured: 50 000
-# rows peaked at 1.6 GB, which is not a laptop agent. A few thousand rows is a few
-# minutes of events: enough to fix a rule and watch it re-read recent history,
-# and cheap enough that the steady state costs nothing.
+# Deliberately SMALL. Editing a normalization rule re-normalizes from raw, and
+# that can only reach as far back as raw still goes, so this window is what "fix
+# the rule and watch the last few minutes be re-read" costs — no more.
 RAW_WINDOW = 5_000
-# how many raw lines are normalized per statement — bounds the memory
-# one materialize() needs, whatever the backlog
-BATCH = 5_000
+# HOW MUCH RAW JSON ONE NORMALIZATION PASS PARSES, IN BYTES — not in rows.
+#
+# Measured on this machine: the seq filter DOES push into the scan (profiled: a
+# 500-row batch reads 500 rows, not the whole staging table), so the batch really
+# is the unit of work. But parsing one raw line into thirty-three columns costs
+# far more than the line: ~0.25 MB of transient JSON allocation per 2.8 KB line,
+# and that allocation is charged to the memory limit while being INVISIBLE to
+# duckdb_memory() — which is why the failure read as "487 MiB used" next to a
+# store reporting 1 MB.
+#
+# A batch counted in ROWS is therefore the wrong invariant: lines here range from
+# 200 bytes to 8 KB, so a fixed row count is a 40x range of actual work, and a run
+# of long lines hit the cap and stopped the ingest (OutOfMemory on INSERT). The
+# budget is bytes of raw JSON, which is what the cost is actually proportional to.
+# 1 MB of JSON ≈ a third of the cap at the measured expansion — room to spare, and
+# 11 500 lines of backlog still catch up in seconds.
+BATCH_BYTES = 1_000_000
+# a row ceiling as well, so a flood of tiny lines cannot make one statement huge
+BATCH_ROWS = 5_000
 
 NORM_VIEW = "events_norm"   # normalization view, from expertise
 EVENTS_TABLE = "events"     # materialized, queryable table (what the UI reads)
@@ -241,9 +254,15 @@ class EventStore(DuckDB):
             # i.e. a big enough backlog broke the pipeline permanently.
             while True:
                 nxt = self._con.execute(
-                    "SELECT max(seq) FROM (SELECT seq FROM tetragon_raw "
-                    "WHERE seq > ? ORDER BY seq LIMIT ?)",
-                    [self._watermark, BATCH],
+                    "WITH w AS (SELECT seq, sum(length(data)) OVER "
+                    "  (ORDER BY seq ROWS UNBOUNDED PRECEDING) AS run "
+                    "  FROM (SELECT seq, data FROM tetragon_raw WHERE seq > ? "
+                    "        ORDER BY seq LIMIT ?)) "
+                    # the second branch: a single line bigger than the whole
+                    # budget still has to be normalized, or the stream stalls
+                    "SELECT coalesce((SELECT max(seq) FROM w WHERE run <= ?), "
+                    "                (SELECT min(seq) FROM w))",
+                    [self._watermark, BATCH_ROWS, BATCH_BYTES],
                 ).fetchone()[0]
                 if nxt is None:
                     break
