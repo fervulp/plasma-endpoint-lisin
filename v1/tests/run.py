@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import glob
 import os
+import pathlib
 import subprocess
 import sys
 import time
@@ -551,6 +552,60 @@ def check_concurrency(backend):
         ok("a client may read, never write")
 
 
+def check_bindings():
+    """A PROPERTY MUST NOT BE BOTH BOUND AND ASSIGNED. Assigning to a property
+    that carries a declarative binding destroys the binding silently, and from
+    then on the value only changes where somebody remembered to assign it — which
+    is how the Expertise page came to show the previous catalog's rules after the
+    Refresh button had been pressed once. The pattern is detectable, so it is
+    checked rather than remembered.
+
+    An initial VALUE is not a binding: `property var x: []` or a multi-line object
+    literal of constants can be assigned freely. The two are told apart by whether
+    the right-hand side refers to anything — after the strings and the object keys
+    are removed, a literal has no identifiers left."""
+    section("bindings")
+    import re as _re
+
+    def rhs_of(src, at):
+        """The whole right-hand side, across lines, until the brackets balance."""
+        depth, out = 0, []
+        for ch in src[at:]:
+            if ch == "\n" and depth == 0:
+                break
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                depth -= 1
+            out.append(ch)
+        return "".join(out)
+
+    def is_literal(rhs):
+        s = _re.sub(r"//[^\n]*", " ", rhs)
+        s = _re.sub(r'"[^"]*"|\'[^\']*\'', " ", s)      # strings
+        s = _re.sub(r"\b\w+\s*:", " ", s)               # object keys
+        s = _re.sub(r"\b(true|false|null|undefined)\b", " ", s)
+        s = _re.sub(r"[-\d.]+", " ", s)                  # numbers
+        return not _re.search(r"[A-Za-z_]", s)
+
+    found = []
+    for f in sorted(pathlib.Path(V1, "ui").rglob("*.qml")):
+        src = f.read_text()
+        for m in _re.finditer(
+                r"^[ \t]*(?:readonly\s+)?property\s+\w+\s+(\w+)\s*:[ \t]*", src, _re.M):
+            name = m.group(1)
+            rhs = rhs_of(src, m.end())
+            if not rhs.strip() or is_literal(rhs):
+                continue                       # an initial value, not a binding
+            if _re.search(rf"(?<![.\w])(?<!var ){name}\s*=(?!=)", src):
+                found.append(f"{f.name}: {name}")
+    if found:
+        for x in found:
+            bad(f"a bound property is also assigned — {x}")
+    else:
+        ok("no property is both bound and assigned")
+
+
 def check_paths(backend):
     section("paths")
     from PySide6.QtGui import QGuiApplication
@@ -676,6 +731,7 @@ def main() -> int:
     # said out loud rather than quietly passing a shorter suite.
     try:
         check_sql_guard()
+        check_bindings()
         if be.owner:
             check_engine(be.store)
             check_contract(be.store)

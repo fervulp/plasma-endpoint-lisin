@@ -16,9 +16,16 @@ Kirigami.Page {
 
     background: PageBackground {}
 
-    property var dirs: backend.expertiseDirs()
+    // PLAIN STATE, NOT BINDINGS. These used to be bound (`allElements:
+    // backend.expertiseElements(curDir)`) AND assigned imperatively in three
+    // places. The first assignment destroys a binding, so after pressing Refresh
+    // once, choosing another catalog no longer changed the list — the previous
+    // catalog's rules stayed on screen. Reproduced before the change and after.
+    // One writer now: reload(), which the directory change also goes through.
+    property var dirs: []
     property string curDir: "inputs"
-    property var allElements: backend.expertiseElements(curDir)
+    property var allElements: []
+    onCurDirChanged: reload()
     property int typeFilter: 0    // 0 = all
     readonly property var typeNames: ["All types", "Inputs", "Normalization",
                                       "Enrichment", "Filters", "Correlation", "Outputs"]
@@ -80,9 +87,13 @@ Kirigami.Page {
             : collapsed.concat([path])
     }
 
+    function reload() {                 // the ONLY writer of allElements
+        allElements = backend.expertiseElements(curDir)
+    }
+
     function refresh() {
         dirs = backend.expertiseDirs()
-        allElements = backend.expertiseElements(curDir)
+        reload()
     }
 
     // A JUMP FROM A PIPELINE STAGE: root.expertiseFocus carries a rule ref like
@@ -92,10 +103,8 @@ Kirigami.Page {
         if (!f || !f.ref) return
         var ref = String(f.ref)
         var dir = ref.indexOf("/") > 0 ? ref.slice(0, ref.indexOf("/")) : ref
-        if (dir !== page.curDir) {
-            page.curDir = dir
-            page.allElements = backend.expertiseElements(dir)
-        }
+        if (dir !== page.curDir)
+            page.curDir = dir          // onCurDirChanged reloads the list
         for (var i = 0; i < page.allElements.length; i++) {
             if (page.allElements[i].rel === ref) {
                 page.selEl = page.allElements[i]
@@ -109,7 +118,7 @@ Kirigami.Page {
         target: root
         function onExpertiseFocusChanged() { page.applyFocus() }
     }
-    Component.onCompleted: applyFocus()
+    Component.onCompleted: { refresh(); applyFocus() }
 
     actions: [
         Kirigami.Action {
@@ -193,7 +202,7 @@ Kirigami.Page {
                     onClicked: {
                         page.curDir = modelData.path
                         page.editing = ""
-                        page.allElements = backend.expertiseElements(modelData.path)
+
                     }
                     contentItem: RowLayout {
                         spacing: 2
