@@ -21,6 +21,16 @@ description: >-
   files decide what this running service does", which is the question behind a
   configuration that was changed by hand.
 tsv_columns: [app, path, scope, kind, entries, origin, modified]
+tests:
+  min_rows: 100
+  not_empty: [app, path, scope]
+  expect:
+    - name: rpm %config files are read (a plain %{NAME} returns three rows)
+      where: "scope = 'system'"
+      min_rows: 100
+    - name: user configuration is found through XDG
+      where: "scope = 'user'"
+      min_rows: 5
 command: |
   export LC_ALL=C
   # rpm's own %config flag — inside an array iteration the package name must be

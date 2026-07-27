@@ -54,6 +54,18 @@ description: >-
 # Speed: 0.24-0.46 s measured, well inside the 30 s cycle.
 # Order: family, protocol, ports, addresses, path, then pid/fd/socket as a
 # unique tiebreak - fully deterministic, the table does not shuffle.
+tests:
+  min_rows: 5
+  not_empty: [kind, family_name]
+  expect:
+    - name: listening sockets are separated from connections
+      where: "kind = 'listening'"
+      min_rows: 1
+    # a unix socket has no IP protocol, so the invariant is about the ones that
+    # do — stated as "there must be none without it" rather than as a share
+    - name: every IP socket has its protocol decoded
+      where: "family_name IN ('ipv4','ipv6') AND (protocol_name IS NULL OR protocol_name = '')"
+      max_rows: 0
 query: |
   WITH s AS (
     SELECT pid, fd, socket, family, protocol,

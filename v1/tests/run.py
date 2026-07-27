@@ -125,6 +125,25 @@ def check_engine(store):
         ok("no temp files left behind")
 
 
+# ------------------------------------------------------------- rule tests
+def check_rule_tests(store):
+    """Run what each rule says about its own table. A source does not usually
+    FAIL when somebody else's output format changes — dnf5 prints a fixed-width
+    table where dnf4 printed pipes, osquery fills a column on one system and not
+    another — it collects fewer rows, or the same rows with an empty column, and
+    everything downstream carries on with less. That is what these catch."""
+    section("rule tests")
+    from core import pipeline as _pl, views as _v, ruletest
+    rules = _pl.load_inputs() + _v.load_views()
+    have = [r for r in rules if r.get("tests")]
+    results = ruletest.run_all(store, [r for r in _pl.load_inputs() if r.get("tests")])
+    failed = [r for r in results if not r["passed"]]
+    for r in failed:
+        bad(f"{r['rule']}: {r['test']} — {r['detail']}")
+    if not failed:
+        ok(f"{len(results)} assertions from {len(have)} rules, all hold")
+
+
 # --------------------------------------------------------------- contract
 def check_contract(store):
     """A RULE'S DECLARED COLUMNS MUST EXIST. `columns:` is the rule's contract
@@ -626,6 +645,7 @@ def main() -> int:
         if be.owner:
             check_engine(be.store)
             check_contract(be.store)
+            check_rule_tests(be.store)
             check_data(be.store)
             check_reads(be)
             check_events(be.events)
@@ -640,6 +660,7 @@ def main() -> int:
             print("  --    skipped (they write, and the owner is the only writer):"
                   " engine, data, events, errors, ingest")
             check_contract(be.store)
+            check_rule_tests(be.store)
             check_reads(be)
         check_paths(be)
     finally:

@@ -22,6 +22,16 @@ description: >-
   A script dropped into /etc/cron.daily runs without any crontab line naming it,
   so those directories are listed as entries in their own right.
 tsv_columns: [kind, name, scope, run_as, command, schedule, next_run, last_run, source]
+tests:
+  min_rows: 5
+  not_empty: [kind, name]
+  expect:
+    - name: systemd timers are collected, not only cron
+      where: "kind = 'timer'"
+      min_rows: 1
+    - name: a timer says when it fires next
+      where: "kind = 'timer' AND next_run <> ''"
+      min_rows: 1
 command: |
   export LC_ALL=C
   python3 - <<'PYSCHED' 2>/dev/null || true

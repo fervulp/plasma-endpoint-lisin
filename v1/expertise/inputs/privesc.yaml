@@ -21,6 +21,12 @@ description: >-
   Where the machine gives no answer without privileges (an unreadable
   /etc/sudoers), the section is simply empty — no guess is recorded.
 tsv_columns: [kind, name, detail, risk, changed, age_days, source]
+tests:
+  not_empty: [kind, name]
+  expect:
+    - name: a capability carries the age of its carrier
+      where: "kind <> 'capability' OR age_days <> ''"
+      min_rows: 1
 command: |
   export LC_ALL=C
   python3 - <<'PYPRIV' 2>/dev/null || true

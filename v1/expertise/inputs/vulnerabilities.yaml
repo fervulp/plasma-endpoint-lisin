@@ -25,6 +25,16 @@ description: >-
   hangs past its limit; the cache is refreshed by the system's own
   dnf-makecache.timer.
 tsv_columns: [status, severity, advisory, packages, cve, cve_count, issued, action]
+tests:
+  min_rows: 1
+  not_empty: [status, advisory, severity]
+  expect:
+    - name: an open advisory carries the command that installs it
+      where: "status <> 'open' OR action LIKE 'sudo dnf upgrade%'"
+      min_rows: 1
+    - name: advisories are folded to one row each, not one per package
+      where: "advisory LIKE 'FEDORA-%' OR advisory LIKE 'RHSA-%'"
+      min_rows: 1
 command: |
   export LC_ALL=C
   q() { timeout 25 dnf -q -C "$@" 2>/dev/null || timeout 25 dnf -q "$@" 2>/dev/null; }

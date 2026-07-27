@@ -29,6 +29,19 @@ description: >-
 tsv_columns: [kind, browser, profile, engine, ext_id, name, version, enabled,
               ext_type, source, installed, permissions, origins, update_url,
               path, url, title, visits, last_visit]
+tests:
+  min_rows: 20
+  not_empty: [kind, browser, profile]
+  expect:
+    - name: extensions are found, not just history
+      where: "kind = 'extension'"
+      min_rows: 5
+    - name: more than one browser family is looked at
+      where: "engine = 'chromium'"
+      min_rows: 1
+    - name: where an extension came from is recorded
+      where: "kind = 'extension' AND source <> ''"
+      min_rows: 5
 command: |
   export LC_ALL=C
   python3 - <<'PYBROWSERS' 2>/dev/null || true

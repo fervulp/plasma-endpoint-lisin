@@ -23,6 +23,13 @@ description: Running processes, point-in-time snapshot from osquery.
 #               `ps %cpu` (a snapshot cannot give an instantaneous rate);
 #   * elapsed_sec - process age; on_disk - 0 means the binary was DELETED while
 #               running (a real EDR signal); cwd - working directory.
+tests:
+  min_rows: 50
+  not_empty: [pid, name, user]
+  expect:
+    - name: the command line is available for most processes
+      where: "cmdline <> ''"
+      min_rows: 50
 query: |
   SELECT
     p.pid,

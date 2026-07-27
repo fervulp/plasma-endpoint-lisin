@@ -22,6 +22,13 @@ description: >-
   The nftables ruleset underneath needs root and is not read here; what firewalld
   reports is the configuration that produced it.
 tsv_columns: [zone, kind, value, target, interfaces, active, default_zone]
+tests:
+  min_rows: 1
+  not_empty: [zone, kind, value]
+  expect:
+    - name: the zone in charge of an interface is known
+      where: "kind = 'interface'"
+      min_rows: 1
 command: |
   export LC_ALL=C
   command -v firewall-cmd >/dev/null || exit 0

@@ -15,6 +15,13 @@ description: >-
   between "there is a compiler on this laptop" and "a compiler was installed at
   three in the morning".
 tsv_columns: [id, when, action, altered, command]
+tests:
+  min_rows: 5
+  not_empty: [id, when, action, command]
+  expect:
+    - name: the transaction verb was recovered from the command line
+      where: "action IN ('install','remove','upgrade','downgrade','reinstall')"
+      min_rows: 1
 command: |
   export LC_ALL=C
   # dnf5 prints a fixed-width table, not a pipe-separated one: the columns are
