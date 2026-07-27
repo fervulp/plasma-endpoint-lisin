@@ -195,6 +195,28 @@ Kirigami.Page {
     // changes (curName), not on every automatic data refresh - otherwise the user
     // loses the selected row and the position on every tick.
     property string curName: cur ? cur.name : ""
+    readonly property var src: cur && cur.source ? cur.source : null
+    readonly property bool srcFailed: !!(src && String(src.error || "") !== "")
+    // one sentence, in the order the question is asked: what made these rows,
+    // how, how often, and how old this copy is
+    readonly property string provenance: {
+        if (!src) return ""
+        if (srcFailed)
+            return "the last run of " + src.rule + " failed: " + src.error
+                   + (src.error_at ? " (" + Fmt.maybeLocal(src.error_at) + ")" : "")
+        var parts = ["rule " + src.rule + ", " + src.how]
+        if (src.interval > 0)
+            parts.push("every " + (src.interval >= 60
+                                   ? Math.round(src.interval / 60) + " min"
+                                   : src.interval + " s"))
+        if (cur && cur.collected_at)
+            parts.push("collected " + Fmt.localHM(cur.collected_at))
+        if (cur && cur.count !== undefined)
+            parts.push(cur.count + " rows")
+        if (src.tests) parts.push("has its own tests")
+        if (src.enabled === false) parts.push("disabled")
+        return parts.join(" · ")
+    }
     // ONE TABLE REBUILD PER TAB SWITCH. Each of these assignments feeds a binding
     // the table is built from (rows, columns), and every one of them used to
     // rebuild the delegates: loading first and resetting after cost three full
@@ -965,9 +987,50 @@ Kirigami.Page {
             }
 
             // table (the shared DataTable template - principle 15/17)
-            Item {
+            ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                spacing: 0
+
+                // WHERE THESE ROWS COME FROM. A table used to appear with no
+                // account of itself: which rule produced it, how that rule reads
+                // the machine, how often it runs, when this copy was collected,
+                // and whether the last run failed. All of that existed — in the
+                // Pipelines page, in the source — but not where the rows are
+                // read, which is where the question is asked.
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: Kirigami.Units.smallSpacing
+                    Layout.rightMargin: Kirigami.Units.smallSpacing
+                    Layout.bottomMargin: 2
+                    spacing: Kirigami.Units.smallSpacing
+                    visible: page.src !== null
+
+                    Kirigami.Icon {
+                        source: page.srcFailed ? "dialog-error" : "documentinfo"
+                        implicitWidth: Kirigami.Units.iconSizes.small
+                        implicitHeight: Kirigami.Units.iconSizes.small
+                    }
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                        opacity: page.srcFailed ? 1 : 0.65
+                        color: page.srcFailed ? Kirigami.Theme.negativeTextColor
+                                              : Kirigami.Theme.textColor
+                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        text: page.provenance
+                    }
+                    QQC2.ToolButton {
+                        visible: page.src !== null && String(page.src.ref) !== ""
+                        text: "The rule"
+                        icon.name: "document-properties"
+                        display: QQC2.AbstractButton.TextBesideIcon
+                        onClicked: root.openExpertise(page.src.ref)
+                        QQC2.ToolTip.visible: hovered
+                        QQC2.ToolTip.text: "Open the rule that produced this table"
+                    }
+                }
+
                 DataTable {
                     id: dtable
                     anchors.fill: parent

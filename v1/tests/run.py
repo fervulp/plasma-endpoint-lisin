@@ -500,6 +500,36 @@ def check_compaction(backend):
                f"{round(total/1048576)} MB — below the rewrite threshold")
 
 
+def check_provenance(backend):
+    """EVERY TABLE MUST ACCOUNT FOR ITSELF. Rows used to appear with no statement
+    of where they came from: which rule produced them, how that rule reads the
+    machine, how often it runs, when this copy was collected. All of it existed
+    in the Pipelines page and in the source — but not where the rows are read,
+    which is where the question gets asked."""
+    section("provenance")
+    tabs = backend._snapshot()["tabs"]
+    missing = [t["name"] for t in tabs if not (t.get("source") or {}).get("rule")]
+    if missing:
+        bad(f"{len(missing)} tabs cannot say what produced them: "
+            f"{', '.join(missing[:6])}")
+        return
+    unknown = [t["name"] for t in tabs if not (t["source"].get("how") or "")]
+    if unknown:
+        bad(f"tabs that do not say HOW they are collected: {', '.join(unknown[:6])}")
+    # the rule a table names must be a rule that exists — a dead link here is
+    # worse than no link, because it looks like an answer
+    from core import pipeline as _pl, views as _vw
+    known = {f"inputs/{i.get('name')}" for i in _pl.load_inputs()}
+    known |= {f"views/{v.get('name')}" for v in _vw.load_views()}
+    known |= {"events/normalize"}
+    broken = [(t["name"], t["source"]["ref"]) for t in tabs
+              if t["source"].get("ref") and t["source"]["ref"] not in known]
+    if broken:
+        bad(f"tabs pointing at a rule that does not exist: {broken[:4]}")
+    else:
+        ok(f"all {len(tabs)} tabs name the rule that produced them, and it exists")
+
+
 def check_engine_visible(backend):
     """THE MACHINERY MUST BE VISIBLE FROM THE INTERFACE, not only from the source.
     Every mechanism in this engine has surprised me at least once while building
@@ -799,6 +829,7 @@ def main() -> int:
             check_errors(be)
             check_ingest_visible(be)
             check_compaction(be)
+            check_provenance(be)
             check_engine_visible(be)
             check_concurrency(be)
         else:

@@ -204,16 +204,34 @@ class Backend(QObject):
         m = {}
         for inp in pipeline.load_inputs():
             t = inp.get("table") or inp.get("name")
+            # WHERE A TABLE COMES FROM travels with it, so the page showing the
+            # rows can say which rule produced them, how it reads the machine and
+            # how often — instead of the rows arriving from nowhere.
             m[t] = {"title": inp.get("title", t), "icon": inp.get("icon", "table"),
                     "hidden": bool(inp.get("hidden")),
                     "columns": inp.get("columns") or [],
-                    "priority": inp.get("priority")}
+                    "priority": inp.get("priority"),
+                    "rule": inp.get("name", t),
+                    "ref": "inputs/" + str(inp.get("name", t)),
+                    "how": ("a command" if str(inp.get("kind", "")) == "command"
+                            else "the Tetragon stream"
+                            if str(inp.get("kind", "")) == "tetragon"
+                            else "an osquery query"),
+                    "interval": inp.get("interval", pipeline.DEFAULT_INTERVAL),
+                    "tests": bool(inp.get("tests")),
+                    "enabled": inp.get("enabled") is not False}
         for v in views.load_views():
             n = v.get("name")
             m[n] = {"title": v.get("title", n), "icon": v.get("icon", "table"),
                     "hidden": bool(v.get("hidden")),
                     "columns": v.get("columns") or [],
-                    "priority": v.get("priority")}
+                    "priority": v.get("priority"),
+                    "rule": n,
+                    "ref": "views/" + str(n),
+                    "how": "a SQL view over other tables",
+                    "interval": 0,
+                    "tests": bool(v.get("tests")),
+                    "enabled": True}
         return m
 
     # ---------- collection ----------
@@ -375,9 +393,16 @@ class Backend(QObject):
             cols = list(_EVENTS_COLUMNS)
         shown = [c for c in _EVENTS_COLUMNS if c in cols]
         hidden = [c for c in cols if c not in shown]
+        est = self._status.get("_events") or {}
         return {
             "name": "events", "title": "Events", "icon": "view-calendar-list",
             "builtin": True, "priority": 10,   # the stream comes first
+            # the stream accounts for itself like every other table does
+            "source": {"rule": "events/normalize", "ref": "events/normalize",
+                       "how": "the Tetragon eBPF stream, normalized by a SQL view",
+                       "interval": 0, "tests": True, "enabled": True,
+                       "error": est.get("error", ""),
+                       "error_at": est.get("at", "")},
             # curated first, then the rest — the default order reads as a phrase
             "columns": shown + hidden,
             "count": cnt, "collected_at": self._events_at,
@@ -458,7 +483,16 @@ class Backend(QObject):
                     order = []
                 cached = (key, cols, self.store.row_count(name), hidden, order)
                 self._tab_cache[name] = cached
+            st = self._status.get(name, {})
             tabs.append({
+                "source": {"rule": meta.get("rule", name),
+                           "ref": meta.get("ref", ""),
+                           "how": meta.get("how", ""),
+                           "interval": meta.get("interval", 0),
+                           "tests": bool(meta.get("tests")),
+                           "enabled": meta.get("enabled", True),
+                           "error": st.get("error", ""),
+                           "error_at": st.get("at", "")},
                 "name": name,
                 "title": meta.get("title", name),
                 "icon": meta.get("icon", "table"),
