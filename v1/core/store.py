@@ -1,58 +1,87 @@
-"""DuckDB store for v1 — one embedded columnar database.
+"""DuckDB state store — one embedded columnar database.
 
-State tables are REPLACED wholesale on every collection (osquery returns the
-full current state, so a snapshot is a whole-table replace, not an upsert diff).
-The UI reads through read-only SQL. Enrichment is intended to be SQL VIEWS over
-these base tables (declarative joins, no Python lookup tables) — that mechanism
-is designed separately and is NOT implemented here yet.
-
-DuckDB is vendored in v1/vendor so it stays importable under PYTHONNOUSERSITE=1
-(that flag only disables the automatic user-site; an explicit sys.path entry
-still works). Paths are resolved relative to the install root / env, never a
-hardcoded $HOME — the RPM build and a root deployment (LISIN_DATA_DIR=
-/var/lib/lisin) reuse the same code.
+State tables are REPLACED wholesale on every collection (osquery returns the full
+current state, so a snapshot is a whole-table replace, not an upsert diff). The
+UI reads through read-only SQL. Enrichment is SQL VIEWS over these base tables
+(see core/views.py). The shared connection plumbing lives in core/db.py.
 """
 from __future__ import annotations
 
 import os
-import sys
-import threading
 from pathlib import Path
 
-# Vendored duckdb: add explicitly so it loads even with PYTHONNOUSERSITE=1.
-_VENDOR = Path(__file__).resolve().parent.parent / "vendor"
-if _VENDOR.is_dir() and str(_VENDOR) not in sys.path:
-    sys.path.insert(0, str(_VENDOR))
-import duckdb  # noqa: E402
+from .db import DuckDB, data_dir, ident
 
 
 def data_path() -> Path:
-    """Where the DuckDB file lives. Dev: XDG; root/RPM: LISIN_DATA_DIR."""
-    base = os.environ.get("LISIN_DATA_DIR") or os.path.expanduser(
-        "~/.local/share/lisin"
-    )
-    p = Path(base)
-    p.mkdir(parents=True, exist_ok=True)
-    return p / "v1.duckdb"
+    return data_dir() / "v1.duckdb"
 
 
-def _ident(name: str) -> str:
-    """Quote an identifier; strip stray quotes (names come from our YAML, but
-    never trust a string in SQL text)."""
-    return '"' + str(name).replace('"', "") + '"'
-
-
-class Store:
+class Store(DuckDB):
     def __init__(self, path: str | None = None):
-        self.path = path or str(data_path())
-        self._con = duckdb.connect(self.path)
-        # A DuckDB connection is not thread-safe; the background collector writes
-        # while the UI reads, so serialize every access on one lock.
-        self._lock = threading.RLock()
+        super().__init__(path or str(data_path()))
 
-    def close(self) -> None:
-        with self._lock:
-            self._con.close()
+    def replace_table_from_json(self, name: str, path: str) -> int:
+        """Replace a state table straight from an osquery JSON result FILE.
+
+        DuckDB parses the JSON itself, so a result never becomes Python objects:
+        measured 26 ms against ~4 s for the row-by-row insert of the same 4000
+        rows. Everything is read as VARCHAR — osquery emits every value as a
+        string, and a column that silently became a number would break the
+        text filters the UI writes.
+
+        An empty result ([]) legitimately empties the table: a source that went
+        quiet must read empty, not keep yesterday's rows.
+        """
+        q = ident(name)
+        # An empty result is NOT a special case to be clever about: osquery
+        # prints "[\n\n]" for it, which is a valid array of no records — and
+        # read_json refuses that ("expected records, but got non-record JSON").
+        # Detect it by content, not by size.
+        head = ""
+        try:
+            with open(path, "r") as f:
+                head = f.read(4096)
+        except OSError:
+            pass
+        if head.strip() in ("", "[]", "[\n\n]") or not head.strip().startswith("["):
+            self._con.execute(f"CREATE OR REPLACE TABLE {q} (empty VARCHAR)")
+            return 0
+        if head.strip().lstrip("[").strip() == "]":     # "[  ]" in any spelling
+            self._con.execute(f"CREATE OR REPLACE TABLE {q} (empty VARCHAR)")
+            return 0
+        self._con.execute(
+            f"CREATE OR REPLACE TABLE {q} AS "
+            f"SELECT * FROM read_json(?, format='array', records=true, "
+            f"auto_detect=true, sample_size=-1, "
+            f"map_inference_threshold=-1, field_appearance_threshold=0)",
+            [path],
+        )
+        return self.row_count(name)
+
+    def replace_table_from_tsv(self, name: str, path: str,
+                               columns: list[str]) -> int:
+        """Replace a state table from a TAB-SEPARATED file (a `kind: command`
+        input). Same fast path as the JSON one — DuckDB reads the file itself —
+        with the column names taken from the rule, since a command's output has
+        no header. Everything is VARCHAR for the same reason as elsewhere."""
+        q = ident(name)
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = 0
+        if size == 0 or not columns:
+            self._con.execute(f"CREATE OR REPLACE TABLE {q} (empty VARCHAR)")
+            return 0
+        spec = ", ".join(f"'{c}': 'VARCHAR'" for c in columns
+                         if c.replace("_", "").isalnum())
+        self._con.execute(
+            f"CREATE OR REPLACE TABLE {q} AS SELECT * FROM read_csv(?, "
+            f"delim='\t', header=false, columns={{{spec}}}, quote='', escape='', "
+            f"nullstr='', ignore_errors=true)",
+            [path],
+        )
+        return self.row_count(name)
 
     def replace_table(self, name: str, rows: list[dict]) -> int:
         """Replace a state table with the full current snapshot.
@@ -60,9 +89,8 @@ class Store:
         Columns are inferred from the row keys (osquery returns every value as a
         string, so all columns are VARCHAR — no type guessing). An empty result
         legitimately empties the table (a table that went empty must read empty,
-        not keep stale rows).
-        """
-        q = _ident(name)
+        not keep stale rows)."""
+        q = ident(name)
         if not rows:
             self._con.execute(f"CREATE OR REPLACE TABLE {q} (empty VARCHAR)")
             self._con.execute(f"DELETE FROM {q}")
@@ -75,37 +103,9 @@ class Store:
                 if k not in seen:
                     seen.add(k)
                     cols.append(k)
-        coldefs = ", ".join(f"{_ident(c)} VARCHAR" for c in cols)
+        coldefs = ", ".join(f"{ident(c)} VARCHAR" for c in cols)
         self._con.execute(f"CREATE OR REPLACE TABLE {q} ({coldefs})")
         placeholders = ", ".join(["?"] * len(cols))
         data = [[r.get(c) for c in cols] for r in rows]
-        self._con.executemany(
-            f"INSERT INTO {q} VALUES ({placeholders})", data
-        )
+        self._con.executemany(f"INSERT INTO {q} VALUES ({placeholders})", data)
         return len(rows)
-
-    def tables(self) -> list[str]:
-        return [
-            r[0]
-            for r in self._con.execute(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'main' ORDER BY table_name"
-            ).fetchall()
-        ]
-
-    def row_count(self, name: str) -> int:
-        return self._con.execute(f"SELECT count(*) FROM {_ident(name)}").fetchone()[0]
-
-    def query(self, sql: str, params=None, max_rows: int = 1000):
-        """Run a read query for the UI. Returns (columns, rows, truncated).
-
-        SELECT-only enforcement lives at the API boundary (as in v0); this method
-        stays generic so enrichment views can also be created through a dedicated
-        path later.
-        """
-        cur = self._con.cursor()
-        cur.execute(sql, params or [])
-        cols = [d[0] for d in cur.description]
-        fetched = cur.fetchmany(max_rows + 1)
-        truncated = len(fetched) > max_rows
-        return cols, [list(r) for r in fetched[:max_rows]], truncated

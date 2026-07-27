@@ -1,9 +1,15 @@
 name: listening_ports
 table: listening_ports
 type: input
-version: 1.0.0
+version: 1.1.0
 title: Listening ports
 icon: network-connect
+# Hidden as a Data tab: it is the RAW feed for the ports_owned view (which adds
+# the owning process). The view is what an analyst reads; the raw base table
+# would just be a duplicate without the owner. Still collected, still queryable
+# in SQL — just not shown as its own tab.
+hidden: true
+interval: 30
 description: Listening sockets (raw). The owning process is attached by the
   ports_owned enrichment view, not here — enrichment joins across tables that
   may come from different inputs, so it belongs in the derivation layer.

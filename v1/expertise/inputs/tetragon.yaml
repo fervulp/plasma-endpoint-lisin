@@ -1,0 +1,20 @@
+name: tetragon_events
+type: input
+version: 1.0.0
+title: Tetragon runtime events
+icon: security-high
+kind: tetragon
+# The runtime event ENTRY POINT. Unlike the osquery inputs, this source is not a
+# SELECT the collector runs on a 30 s tick — it is a continuous stream from the
+# Tetragon eBPF sensor (a root systemd service). The reader tails the JSON export
+# by cursor and lands raw lines in tetragon_raw; the `events` normalization view
+# (Normalization category) maps them to the taxonomy. Marked enabled:false so the
+# osquery runner skips it — the event reader thread drives it instead.
+enabled: false
+source: /var/log/tetragon/tetragon.log
+description: >
+  Runtime security events from Tetragon (eBPF). exec/exit are built in; connect
+  and file come from tracing policies dropped into /etc/tetragon/tetragon.tp.d.
+  Transport is the JSON export tail (durable buffer, survives app restart via a
+  byte cursor); the bridge from the root service to this user app is the log's
+  world-readable permission (export-file-perm=644).

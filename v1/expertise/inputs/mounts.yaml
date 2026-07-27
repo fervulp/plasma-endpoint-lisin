@@ -1,0 +1,78 @@
+name: mounts
+table: mounts
+type: input
+version: 1.0.0
+title: Mounts
+icon: drive-multipartition
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 290
+# DROPPING THE KERNEL PSEUDO FILESYSTEMS — `WHERE m.blocks > 0`.
+#
+# v0 carried a hand-written list of type names to skip (proc, sysfs, cgroup,
+# cgroup2, devpts, debugfs, tracefs, securityfs, bpf, pstore, mqueue, hugetlbfs,
+# configfs, fusectl, binfmt_misc, autofs, efivarfs, ramfs, none). That list is
+# exactly the kind of baked-in data the v1 principles forbid: it has to be
+# extended by hand every time the kernel grows another pseudo filesystem, and it
+# was already missing rpc_pipefs and devtmpfs on this machine.
+#
+# The structural test replaces it: a kernel pseudo filesystem has no storage, so
+# statfs reports zero blocks. Anything with capacity is a real filesystem. This
+# needs no maintenance and it drops the two types v0's list did not know about.
+# Measured on this machine: 30 mounts -> 12, and the 18 dropped rows are exactly
+# the pseudo filesystems.
+#
+# It deliberately KEEPS tmpfs (v0 kept it too — its skip list never had tmpfs).
+# /tmp, /dev/shm and /run/user/<uid> are real, writable, usually exec-allowed
+# surfaces; they are the whole point of the "writable and not noexec" finding,
+# and dropping them would delete the evidence. Note the filter is on capacity,
+# NOT on the path — /run/user/1000 is kept because it has blocks, not because
+# anybody wrote "/run" anywhere.
+#
+# Two honest edge cases of the structural test, on this machine:
+#   * efivarfs SURVIVES (it reports 151464 blocks of 1 byte — the EFI variable
+#     store really does have a size). v0's list dropped it. Keeping it is
+#     arguably better: it is a firmware persistence surface.
+#   * fuse.portal (the xdg-desktop-portal document fuse mount) is DROPPED,
+#     because it reports zero blocks. It is a userspace filesystem, not a kernel
+#     pseudo one, so this is a genuine, if small, loss.
+#
+# Analyst columns produced here, not later:
+#   * size/used/free in GiB and used_pct, computed the way df does it — used is
+#     against blocks_free, but the percentage and free_gb use blocks_AVAILABLE,
+#     the space an unprivileged process can actually take (the two differ by the
+#     root reserve).
+#   * noexec / nosuid / nodev / read_only as their own 0-or-1 columns, parsed
+#     out of the flags string so they can be filtered and sorted on directly.
+#     flags is kept whole alongside them, nothing is hidden.
+description: >
+  Mounted filesystems with capacity, usage and the hardening flags
+  (noexec/nosuid/nodev/read-only) as separate columns. Kernel pseudo
+  filesystems are dropped by a structural test — zero blocks means no storage —
+  rather than by a hand-written list of type names; tmpfs is kept on purpose,
+  since /tmp, /dev/shm and /run/user/<uid> are real writable surfaces. Side
+  effect of that test: efivarfs is kept (it reports a real size) and the
+  fuse.portal document mount is dropped (it reports none).
+query: |
+  SELECT
+    m.path,
+    m.device,
+    m.device_alias,
+    m.type,
+    round(m.blocks * m.blocks_size / 1073741824.0, 2)                    AS size_gb,
+    round((m.blocks - m.blocks_free) * m.blocks_size / 1073741824.0, 2)  AS used_gb,
+    round(m.blocks_available * m.blocks_size / 1073741824.0, 2)          AS free_gb,
+    round((m.blocks - m.blocks_free) * 100.0 /
+          nullif(m.blocks - m.blocks_free + m.blocks_available, 0), 1)   AS used_pct,
+    CASE WHEN m.flags LIKE '%noexec%' THEN 1 ELSE 0 END                  AS noexec,
+    CASE WHEN m.flags LIKE '%nosuid%' THEN 1 ELSE 0 END                  AS nosuid,
+    CASE WHEN m.flags LIKE '%nodev%'  THEN 1 ELSE 0 END                  AS nodev,
+    CASE WHEN m.flags LIKE 'ro,%' OR m.flags LIKE '%,ro,%'
+              OR m.flags LIKE '%,ro' OR m.flags = 'ro' THEN 1 ELSE 0 END AS read_only,
+    m.inodes,
+    m.inodes_free,
+    m.flags
+  FROM mounts m
+  WHERE m.blocks > 0
+  ORDER BY m.path

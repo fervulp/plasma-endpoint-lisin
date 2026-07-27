@@ -1,0 +1,130 @@
+type: event_view
+name: events_norm
+title: Events (normalization view)
+version: 1.2.0
+# NORMALIZATION IS SQL (v1 principle): the reader lands raw Tetragon JSON in
+# tetragon_raw; this view maps it to the taxonomy with json_extract. No Python
+# in the middle. Editable here without touching code.
+#
+# Tetragon emits one event object per line; the top-level key names the kind
+# (process_exec / process_exit / process_kprobe ...). Each carries a `process`
+# and a `parent` object with the same fields, so the process/parent columns are
+# coalesced across kinds.
+#
+# process_kprobe covers connect and file (from the tracing policies): the kind is
+# refined by function_name — tcp_connect -> 'connect' (object = the destination
+# socket, args[0].sock_arg), security_file_permission -> 'file' (object = the
+# path, args[0].file_arg; args[1].int_arg is the access mask 4/2/1 = read/write/
+# exec). json_valid() guards a rare mid-write partial line.
+sql: |
+  WITH raw AS (
+    SELECT seq, ingested_at, data
+    FROM tetragon_raw
+    WHERE json_valid(data)
+  ),
+  ev AS (
+    SELECT
+      seq, ingested_at, data,
+      CASE
+        WHEN json_extract(data,'$.process_exec') IS NOT NULL THEN 'exec'
+        WHEN json_extract(data,'$.process_exit') IS NOT NULL THEN 'exit'
+        WHEN json_extract(data,'$.process_kprobe') IS NOT NULL THEN
+          CASE json_extract_string(data,'$.process_kprobe.function_name')
+            WHEN 'tcp_connect'              THEN 'connect'
+            WHEN 'security_file_permission' THEN 'file'
+            ELSE 'kprobe' END
+        WHEN json_extract(data,'$.process_tracepoint') IS NOT NULL THEN 'tracepoint'
+        ELSE 'other'
+      END AS event_kind,
+      json_extract_string(data,'$.time')      AS ts_raw,
+      json_extract_string(data,'$.node_name') AS host,
+      COALESCE(
+        json_extract(data,'$.process_exec.process'),
+        json_extract(data,'$.process_exit.process'),
+        json_extract(data,'$.process_kprobe.process')
+      ) AS proc,
+      COALESCE(
+        json_extract(data,'$.process_exec.parent'),
+        json_extract(data,'$.process_exit.parent'),
+        json_extract(data,'$.process_kprobe.parent')
+      ) AS par
+    FROM raw
+  )
+  SELECT
+    seq,
+    TRY_CAST(ts_raw AS TIMESTAMP)                                   AS ts,
+    event_kind,
+    CASE event_kind
+      WHEN 'exec' THEN 'process' WHEN 'exit' THEN 'process'
+      WHEN 'connect' THEN 'network' WHEN 'file' THEN 'file'
+      ELSE 'other' END                                             AS event_category,
+    CASE event_kind
+      WHEN 'exec' THEN 'process_started'
+      WHEN 'exit' THEN 'process_exited'
+      WHEN 'connect' THEN 'connection'
+      WHEN 'file' THEN 'file_access'
+      ELSE event_kind END                                          AS event_action,
+    ''                                                             AS event_outcome,
+    host,
+    json_extract_string(proc,'$.pid')                              AS process_pid,
+    json_extract_string(proc,'$.binary')                           AS process_binary,
+    regexp_replace(json_extract_string(proc,'$.binary'),'^.*/','') AS process_name,
+    json_extract_string(proc,'$.arguments')                        AS process_args,
+    json_extract_string(proc,'$.uid')                              AS process_uid,
+    json_extract_string(proc,'$.cwd')                              AS process_cwd,
+    json_extract_string(proc,'$.exec_id')                          AS process_exec_id,
+    json_extract_string(proc,'$.start_time')                       AS process_start,
+    json_extract_string(proc,'$.flags')                            AS process_flags,
+    json_extract_string(proc,'$.auid')                             AS process_auid,
+    json_extract_string(par,'$.pid')                               AS parent_pid,
+    json_extract_string(par,'$.binary')                            AS parent_binary,
+    regexp_replace(json_extract_string(par,'$.binary'),'^.*/','')  AS parent_name,
+    json_extract_string(par,'$.exec_id')                           AS parent_exec_id,
+    -- network object (connect): args[0].sock_arg
+    json_extract_string(data,'$.process_kprobe.args[0].sock_arg.saddr')   AS source_ip,
+    json_extract_string(data,'$.process_kprobe.args[0].sock_arg.sport')   AS source_port,
+    json_extract_string(data,'$.process_kprobe.args[0].sock_arg.daddr')   AS dest_ip,
+    json_extract_string(data,'$.process_kprobe.args[0].sock_arg.dport')   AS dest_port,
+    lower(replace(json_extract_string(data,'$.process_kprobe.args[0].sock_arg.protocol'),
+                  'IPPROTO_',''))                                  AS protocol,
+    CASE WHEN event_kind = 'connect' THEN
+      CASE WHEN regexp_matches(
+             COALESCE(json_extract_string(data,'$.process_kprobe.args[0].sock_arg.daddr'),''),
+             '^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)')
+           THEN 'internal' ELSE 'external' END
+      ELSE '' END                                                  AS direction,
+    -- file object: args[0].file_arg.path, args[1].int_arg mask
+    json_extract_string(data,'$.process_kprobe.args[0].file_arg.path')    AS file_path,
+    CASE WHEN event_kind = 'file' THEN
+      CASE WHEN (COALESCE(TRY_CAST(json_extract_string(
+                  data,'$.process_kprobe.args[1].int_arg') AS INTEGER),0) & 2) <> 0 THEN 'write'
+           WHEN (COALESCE(TRY_CAST(json_extract_string(
+                  data,'$.process_kprobe.args[1].int_arg') AS INTEGER),0) & 1) <> 0 THEN 'exec'
+           ELSE 'read' END
+      ELSE '' END                                                  AS file_op,
+    -- subject -> object
+    regexp_replace(json_extract_string(proc,'$.binary'),'^.*/','') AS subject_name,
+    CASE event_kind
+      WHEN 'exec' THEN 'process' WHEN 'exit' THEN 'process'
+      WHEN 'connect' THEN 'socket' WHEN 'file' THEN 'file'
+      ELSE '' END                                                  AS object_type,
+    CASE event_kind
+      WHEN 'exec' THEN json_extract_string(proc,'$.binary')
+      WHEN 'connect' THEN json_extract_string(data,'$.process_kprobe.args[0].sock_arg.daddr')
+                          || ':' || json_extract_string(data,'$.process_kprobe.args[0].sock_arg.dport')
+      WHEN 'file' THEN json_extract_string(data,'$.process_kprobe.args[0].file_arg.path')
+      ELSE '' END                                                  AS object_name,
+    CASE event_kind
+      WHEN 'exec' THEN trim(regexp_replace(json_extract_string(proc,'$.binary'),'^.*/','')
+                           || ' ' || COALESCE(json_extract_string(proc,'$.arguments'),''))
+      WHEN 'exit' THEN regexp_replace(json_extract_string(proc,'$.binary'),'^.*/','') || ' exited'
+      WHEN 'connect' THEN 'connected to '
+                          || json_extract_string(data,'$.process_kprobe.args[0].sock_arg.daddr')
+                          || ':' || json_extract_string(data,'$.process_kprobe.args[0].sock_arg.dport')
+      WHEN 'file' THEN json_extract_string(data,'$.process_kprobe.args[0].file_arg.path')
+      ELSE event_kind END                                          AS message
+  FROM ev
+tests:
+  expect_columns: [ts, event_kind, event_action, process_pid, process_name,
+                   parent_name, subject_name, dest_ip, file_path, message]
+  min_rows: 1

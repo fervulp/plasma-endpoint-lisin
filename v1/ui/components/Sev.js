@@ -11,17 +11,6 @@ var HIGH     = "#e74c3c"   // red
 var MEDIUM   = "#e67e22"   // orange
 var LOW      = "#f1c40f"   // amber
 
-// a canonical level name -> its colour
-function colorOf(level) {
-    switch (level) {
-    case "critical": return CRITICAL
-    case "high":     return HIGH
-    case "medium":   return MEDIUM
-    case "low":      return LOW
-    }
-    return ""
-}
-
 // a 0-100 event-severity SCORE -> colour, on the shared 70/45/25 tiers
 function byScore(n) {
     var s = Number(n)

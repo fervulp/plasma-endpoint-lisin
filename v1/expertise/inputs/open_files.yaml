@@ -1,0 +1,100 @@
+name: open_files
+table: open_files
+type: input
+version: 1.0.0
+title: Open files
+icon: document-open
+# Volatile like the process list — a descriptor lives and dies inside one cycle,
+# so this is collected on the short interval.
+interval: 30
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 40
+# The fields worth reading FIRST in this table; everything else the
+# source produces stays available in the Columns panel.
+columns: [process, pid, user, kind, path, deleted, file_owner, size]
+description: >-
+  What every process is holding open right now, one row per file descriptor
+  (/proc/PID/fd). pid joins straight to the processes table.
+  HONEST LIMIT 1 — this is a SNAPSHOT of what is open, not a log of what was
+  read: a program that opens a file and closes it between two cycles never
+  appears here. Real read/write events need kernel audit or Tetragon.
+  HONEST LIMIT 2 — /proc/PID/fd is readable only for the collector's own user,
+  so without root you see the descriptors of your own processes only (measured
+  on this machine: 136 of 457 processes). The rest are not missing data, they
+  are not permitted; nothing is invented to fill them.
+  HONEST LIMIT 3 — osquery itself does not report sockets, pipes or anon_inode
+  descriptors in this table, so no filter is needed to hide them and none of
+  those kinds can appear. Live sockets come from the ports inputs instead.
+# Collection belongs to the input, so everything an analyst reads is produced
+# HERE by SQL rather than derived later:
+#   * deleted    - the kernel marks a descriptor whose file is gone with a
+#                  " (deleted)" suffix. It is split off into its own flag and
+#                  stripped from path, so the path stays joinable. A deleted
+#                  but still-open file is the classic EDR signal ("the binary
+#                  was replaced/unlinked while running", "the payload deleted
+#                  itself but the handle is alive"). Note that /memfd: objects
+#                  are ALWAYS flagged deleted by the kernel - that is normal
+#                  anonymous memory, which is why kind separates them out.
+#   * kind       - readable class, derived from the row's own path and stat
+#                  result (kernel namespaces and file type), not from any list
+#                  of interesting names.
+#   * dir        - parent directory, so the table groups by location; the last
+#                  '/' is found with rtrim(path, <path without slashes>)
+#                  because SQLite has no right-hand instr().
+#   * process/user - the holder, joined from processes/users (osquery gives a
+#                  bare pid here and a bare uid there).
+#   * file_type/size/mode/file_owner - what the held object actually is, from
+#                  stat. NULL when the file no longer exists (deleted, memfd)
+#                  or vanished between the two reads - left NULL, not guessed.
+# Timing measured with the real binary: 1.9 s for 3782 rows, well inside the
+# 3 s budget, so nothing is narrowed away.
+query: |
+  WITH raw AS (
+    SELECT
+      CAST(pid AS INTEGER) AS pid,
+      CAST(fd  AS INTEGER) AS fd,
+      CASE WHEN path LIKE '%(deleted)'
+           THEN substr(path, 1, length(path) - 10)
+           ELSE path END   AS path,
+      CASE WHEN path LIKE '%(deleted)' THEN 1 ELSE 0 END AS deleted
+    FROM process_open_files
+  ),
+  split AS (
+    SELECT pid, fd, path, deleted,
+           rtrim(path, replace(path, '/', '')) AS dirslash
+    FROM raw
+  )
+  SELECT
+    s.pid,
+    s.fd,
+    s.path,
+    substr(s.path, length(s.dirslash) + 1)                     AS filename,
+    CASE WHEN length(s.dirslash) > 1
+         THEN substr(s.dirslash, 1, length(s.dirslash) - 1)
+         ELSE s.dirslash END                                   AS dir,
+    CASE
+      WHEN s.path LIKE '/memfd:%'          THEN 'memory'
+      WHEN s.path LIKE '/dev/shm/%'        THEN 'shared memory'
+      WHEN s.path LIKE '/dev/%'            THEN 'device'
+      WHEN s.path LIKE '/proc/%'           THEN 'system state'
+      WHEN s.path LIKE '/sys/%'            THEN 'system state'
+      WHEN f.type = 'directory'            THEN 'directory'
+      WHEN f.type = 'fifo'                 THEN 'pipe'
+      WHEN f.type IN ('character','block') THEN 'device'
+      ELSE 'file'
+    END                                                        AS kind,
+    s.deleted,
+    p.name                                                     AS process,
+    p.path                                                     AS process_path,
+    u.username                                                 AS user,
+    f.type                                                     AS file_type,
+    f.size,
+    f.mode,
+    fu.username                                                AS file_owner
+  FROM split s
+  LEFT JOIN processes p ON p.pid = s.pid
+  LEFT JOIN users     u ON u.uid = p.uid
+  LEFT JOIN file      f ON f.path = s.path
+  LEFT JOIN users    fu ON fu.uid = f.uid
+  ORDER BY s.pid, s.fd

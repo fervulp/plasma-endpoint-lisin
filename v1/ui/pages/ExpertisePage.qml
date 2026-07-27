@@ -14,11 +14,7 @@ Kirigami.Page {
     title: "Expertise"
     padding: 0
 
-    background: Rectangle {
-        Kirigami.Theme.colorSet: Kirigami.Theme.Window
-        Kirigami.Theme.inherit: false
-        color: Kirigami.Theme.backgroundColor
-    }
+    background: PageBackground {}
 
     property var dirs: backend.expertiseDirs()
     property string curDir: "inputs"
@@ -40,32 +36,39 @@ Kirigami.Page {
         (fltVersion === "" || e.version.includes(fltVersion)) &&
         (fltTitle === "" || (e.title + " " + e.name).toLowerCase()
                               .includes(fltTitle.toLowerCase())))
+    // click-to-sort, like the Data table
+    property string sortField: ""
+    property bool sortDesc: false
+    function setSort(f) {
+        if (sortField === f) sortDesc = !sortDesc
+        else { sortField = f; sortDesc = false }
+    }
+    property var sortedElements: {
+        if (sortField === "") return elements
+        var arr = elements.slice(), f = sortField, d = sortDesc ? -1 : 1
+        arr.sort(function (a, b) {
+            var av = String(a[f] === undefined ? "" : a[f])
+            var bv = String(b[f] === undefined ? "" : b[f])
+            return (av < bv ? -1 : av > bv ? 1 : 0) * d
+        })
+        return arr
+    }
     property int pageCount: Math.max(1, Math.ceil(elements.length / pageLimit))
-    property var pagedElements: elements.slice(pageIndex * pageLimit,
-                                               (pageIndex + 1) * pageLimit)
+    property var pagedElements: sortedElements.slice(pageIndex * pageLimit,
+                                                     (pageIndex + 1) * pageLimit)
     onElementsChanged: pageIndex = 0
     // columns for the shared DataTable (same as Data's tables)
     readonly property var expColumns: [
-        { k: "id", t: "ID", w: 10, mono: true },
+        { k: "id", t: "ID", w: 10 },
         { k: "title", t: "Title", fill: true },
         { k: "type", t: "Type", w: 8 },
         { k: "version", t: "Version", w: 6, right: true }
     ]
     property string editing: ""      // the relative path of the open file
-    // "Run now" and "Tests" for the open rule
-    property var runResult: null
-    function refOf(rel) { return rel.slice(-5) === ".yaml" ? rel.slice(0, -5) : rel }
-    property string saveError: ""
+    property var selEl: null         // the row shown in the detail sidebar
+    property string detailContent: ""// its YAML content (read-only preview)
+    property string saveError: ""    // set by the editor's Save button
 
-    // the columns of the object table: visibility and widths (resized by dragging)
-    property var colW: ({ id: 90, type: 160, version: 60 })
-    property var colHide: ({ id: false, type: false, version: false })
-    function setW(c, w) {
-        const o = Object.assign({}, colW); o[c] = Math.max(50, w); colW = o
-    }
-    function toggleC(c) {
-        const o = Object.assign({}, colHide); o[c] = !o[c]; colHide = o
-    }
 
     property var collapsed: []          // collapsed directories
     function hasChildren(path) {
@@ -82,60 +85,44 @@ Kirigami.Page {
         allElements = backend.expertiseElements(curDir)
     }
 
+    // A JUMP FROM A PIPELINE STAGE: root.expertiseFocus carries a rule ref like
+    // "inputs/processes" — open that catalog and show the rule in the sidebar.
+    function applyFocus() {
+        var f = root ? root.expertiseFocus : null
+        if (!f || !f.ref) return
+        var ref = String(f.ref)
+        var dir = ref.indexOf("/") > 0 ? ref.slice(0, ref.indexOf("/")) : ref
+        if (dir !== page.curDir) {
+            page.curDir = dir
+            page.allElements = backend.expertiseElements(dir)
+        }
+        for (var i = 0; i < page.allElements.length; i++) {
+            if (page.allElements[i].rel === ref) {
+                page.selEl = page.allElements[i]
+                page.detailContent = backend.readExpertise(ref)
+                detailPanel.open = true
+                return
+            }
+        }
+    }
+    Connections {
+        target: root
+        function onExpertiseFocusChanged() { page.applyFocus() }
+    }
+    Component.onCompleted: applyFocus()
+
     actions: [
         Kirigami.Action {
             icon.name: "view-filter"; text: "Filter"
             checkable: true
             checked: filterPanel.open
             onTriggered: filterPanel.open = checked
-        },
-        Kirigami.Action {
-            icon.name: "view-table-of-contents-ltr"; text: "Columns"
-            onTriggered: colMenu.popup()
-        },
-        Kirigami.Action {
-            icon.name: "folder-new"; text: "Folder…"
-            onTriggered: { dirName.text = ""; dirDialog.open() }
-        },
-        Kirigami.Action {
-            icon.name: "edit-delete"; text: "Delete folder"
-            visible: page.curDir !== "fedora"
-            onTriggered: delDirDialog.open()
-        },
-        Kirigami.Action {
-            icon.name: "document-new"; text: "Element…"
-            onTriggered: { createName.text = ""; createError.text = ""; createDialog.open() }
-        },
-        Kirigami.Action {
-            icon.name: "media-playback-start"; text: "Run"
-            tooltip: "Run the rule against live input and show the result"
-            visible: page.editing !== ""
-            onTriggered: {
-                page.runResult = backend.ruleRun(page.refOf(page.editing), "")
-                runSheet.open()
-            }
-        },
-        Kirigami.Action {
-            icon.name: "checkbox"; text: "Tests"
-            tooltip: "Run the tests: section inside the rule"
-            visible: page.editing !== ""
-            onTriggered: {
-                page.runResult = backend.ruleTests(page.refOf(page.editing))
-                runSheet.open()
-            }
-        },
-        Kirigami.Action {
-            icon.name: "document-import"; text: "Import…"
-            onTriggered: importDialog.open()
-        },
-        Kirigami.Action {
-            icon.name: "document-export"; text: "Export"
-            visible: page.editing !== ""
-            onTriggered: {
-                exportDialog.currentFile = "file:///" + page.editing.split("/").pop()
-                exportDialog.open()
-            }
         }
+        // A "Columns" chooser (colMenu) was inert here — the catalog columns are a
+        // fixed set — so it was removed. Folder / Element / Import / Export / Run /
+        // Tests were v0 authoring actions wired to backend slots that do not exist
+        // in v1; viewing and editing existing expertise works (row -> sidebar ->
+        // Edit -> Save), authoring will return when its backend is built.
     ]
 
     footer: QQC2.ToolBar {
@@ -255,10 +242,15 @@ Kirigami.Page {
                 resizable: true
                 columns: page.expColumns
                 rows: page.pagedElements
+                sortCol: page.sortField
+                sortDesc: page.sortDesc
+                onSortRequested: function (field, desc) { page.setSort(field) }
                 onRowClicked: function (row, index, mods) {
-                    page.editing = row.rel
-                    page.saveError = ""
-                    editor.text = backend.readExpertise(row.rel)
+                    // a click SHOWS the element in the sidebar (as in Data);
+                    // editing starts from the Edit button there.
+                    page.selEl = row
+                    page.detailContent = backend.readExpertise(row.rel)
+                    detailPanel.open = true
                 }
             }
             }
@@ -316,6 +308,51 @@ Kirigami.Page {
                 }
         }
 
+        // -------- element detail sidebar (content + Edit) --------
+        SidePanel {
+            id: detailPanel
+            title: page.selEl ? (page.selEl.title || page.selEl.id) : "Element"
+            iconName: "dialog-information"
+            panelWidth: Kirigami.Units.gridUnit * 26
+            onCloseRequested: open = false
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    opacity: 0.7
+                    elide: Text.ElideRight
+                    text: page.selEl
+                          ? (page.selEl.id + "  ·  " + page.selEl.type
+                             + "  ·  v" + page.selEl.version) : ""
+                }
+                QQC2.Button {
+                    text: "Edit"
+                    icon.name: "document-edit"
+                    enabled: page.selEl !== null
+                    onClicked: {
+                        page.editing = page.selEl.rel
+                        page.saveError = ""
+                        editor.text = backend.readExpertise(page.selEl.rel)
+                        detailPanel.open = false
+                    }
+                }
+            }
+            QQC2.ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                QQC2.TextArea {
+                    text: page.detailContent
+                    readOnly: true
+                    font.family: "monospace"
+                    font.pointSize: Kirigami.Theme.smallFont.pointSize
+                    wrapMode: TextEdit.NoWrap
+                }
+            }
+        }
+
         // -------- the code editor --------
         FloatCard {
             visible: page.editing !== ""
@@ -369,208 +406,5 @@ Kirigami.Page {
         }
     }
 
-    // -------- dialogs --------
-    Kirigami.PromptDialog {
-        id: dirDialog
-        title: "New folder"
-        subtitle: "Will be created inside “" + page.curDir + "”"
-        standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
-        onAccepted: {
-            if (dirName.text.trim()) {
-                backend.createExpertiseDir(page.curDir, dirName.text)
-                page.refresh()
-            }
-        }
-        QQC2.TextField { id: dirName; placeholderText: "folder_name" }
-    }
 
-    Kirigami.PromptDialog {
-        id: delDirDialog
-        title: "Delete folder?"
-        subtitle: "“" + page.curDir + "” and all elements in it will be removed permanently"
-        standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
-        onAccepted: {
-            const err = backend.deleteExpertiseDir(page.curDir)
-            if (err === "") { page.curDir = "fedora"; page.refresh() }
-            else page.saveError = err
-        }
-    }
-
-    QQC2.Menu {
-        id: colMenu
-        QQC2.MenuItem {
-            text: "ID"; checkable: true
-            checked: !page.colHide.id
-            onTriggered: page.toggleC("id")
-        }
-        QQC2.MenuItem {
-            text: "Type"; checkable: true
-            checked: !page.colHide.type
-            onTriggered: page.toggleC("type")
-        }
-        QQC2.MenuItem {
-            text: "Version"; checkable: true
-            checked: !page.colHide.version
-            onTriggered: page.toggleC("version")
-        }
-    }
-
-    Kirigami.Dialog {
-        id: createDialog
-        title: "New element in “" + page.curDir + "”"
-        standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
-        padding: Kirigami.Units.largeSpacing
-        preferredWidth: Kirigami.Units.gridUnit * 20
-
-        property var cats: ["inputs", "normalize", "enrich", "filters", "correlation", "outputs"]
-
-        onAccepted: {
-            const err = backend.createExpertise(page.curDir,
-                            cats[createType.currentIndex], createName.text)
-            if (err) { createError.text = err; open() }
-            else page.refresh()
-        }
-        Kirigami.FormLayout {
-            QQC2.ComboBox {
-                id: createType
-                Kirigami.FormData.label: "Element type"
-                model: ["Input", "Normalization", "Filter", "Correlation", "Output"]
-            }
-            QQC2.TextField {
-                id: createName
-                Kirigami.FormData.label: "File name"
-                placeholderText: "my_source"
-            }
-            QQC2.Label { id: createError; color: Kirigami.Theme.negativeTextColor }
-        }
-    }
-
-    FileDialog {
-        id: importDialog
-        title: "Import YAML into “" + page.curDir + "”"
-        nameFilters: ["YAML (*.yaml *.yml)"]
-        onAccepted: {
-            const err = backend.importExpertise(page.curDir, selectedFile.toString())
-            if (err === "") page.refresh()
-            else page.saveError = err
-        }
-    }
-    FileDialog {
-        id: exportDialog
-        title: "Export YAML"
-        fileMode: FileDialog.SaveFile
-        nameFilters: ["YAML (*.yaml *.yml)"]
-        onAccepted: {
-            const err = backend.exportExpertise(page.editing, selectedFile.toString())
-            if (err !== "") page.saveError = err
-        }
-    }
-
-    // ---- the result of "Run" / "Tests" ----
-    Kirigami.Dialog {
-        id: runSheet
-        title: "Rule run"
-        preferredWidth: Kirigami.Units.gridUnit * 40
-        preferredHeight: Kirigami.Units.gridUnit * 28
-        standardButtons: Kirigami.Dialog.Close
-        QQC2.ScrollView {
-            anchors.fill: parent
-            clip: true
-            ColumnLayout {
-                width: runSheet.preferredWidth - Kirigami.Units.gridUnit * 3
-                spacing: Kirigami.Units.smallSpacing
-
-                Kirigami.InlineMessage {
-                    Layout.fillWidth: true
-                    visible: page.runResult && (page.runResult.error || "") !== ""
-                    type: Kirigami.MessageType.Error
-                    text: page.runResult ? (page.runResult.error || "") : ""
-                }
-                QQC2.Label {
-                    Layout.fillWidth: true
-                    visible: page.runResult && (page.runResult.hint || "") !== ""
-                    wrapMode: Text.WordWrap
-                    opacity: 0.75
-                    text: page.runResult ? (page.runResult.hint || "") : ""
-                }
-
-                // --- the Run result ---
-                QQC2.Label {
-                    Layout.fillWidth: true
-                    visible: page.runResult && page.runResult.count !== undefined
-                    wrapMode: Text.WordWrap
-                    text: page.runResult
-                          ? "Input: " + (page.runResult.source || "") + "   ·   input lines: "
-                            + (page.runResult.input_lines || 0)
-                            + "\nParsed rows: " + (page.runResult.count || 0)
-                            + "   ·   columns: " + ((page.runResult.columns || []).length)
-                          : ""
-                }
-                QQC2.Label {
-                    Layout.fillWidth: true
-                    visible: page.runResult && (page.runResult.columns || []).length > 0
-                    wrapMode: Text.WordWrap
-                    font.family: "monospace"
-                    font.pointSize: Kirigami.Theme.smallFont.pointSize
-                    text: page.runResult ? "columns: " + (page.runResult.columns || []).join(", ") : ""
-                }
-                Repeater {
-                    model: page.runResult && page.runResult.rows ? page.runResult.rows.slice(0, 15) : []
-                    QQC2.Label {
-                        Layout.fillWidth: true
-                        wrapMode: Text.WrapAnywhere
-                        font.family: "monospace"
-                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        text: JSON.stringify(modelData)
-                    }
-                }
-
-                // --- the Tests result ---
-                QQC2.Label {
-                    Layout.fillWidth: true
-                    visible: page.runResult && page.runResult.total !== undefined
-                    font.bold: true
-                    text: page.runResult
-                          ? "Tests passed: " + (page.runResult.passed || 0)
-                            + " of " + (page.runResult.total || 0) : ""
-                }
-                Repeater {
-                    model: page.runResult && page.runResult.tests ? page.runResult.tests : []
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: Kirigami.Units.smallSpacing
-                        Rectangle {
-                            Layout.preferredWidth: Kirigami.Units.gridUnit * 3
-                            Layout.preferredHeight: Kirigami.Units.gridUnit
-                            radius: 3
-                            color: modelData.passed ? "#27ae60" : "#e74c3c"
-                            QQC2.Label {
-                                anchors.centerIn: parent
-                                text: modelData.passed ? "PASS" : "FAIL"
-                                color: "#ffffff"
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            }
-                        }
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 0
-                            QQC2.Label {
-                                Layout.fillWidth: true
-                                text: modelData.name + "   (rows: " + modelData.got + ")"
-                                elide: Text.ElideRight
-                            }
-                            QQC2.Label {
-                                Layout.fillWidth: true
-                                visible: !modelData.passed
-                                text: modelData.detail
-                                wrapMode: Text.WordWrap
-                                color: Kirigami.Theme.negativeTextColor
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

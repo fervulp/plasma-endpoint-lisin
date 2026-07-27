@@ -31,6 +31,19 @@ Item {
     property var fields: []
     // the fields the table shows NOW - the selection starts with them
     property var defaultSelect: []
+    // NEVER undefined: the owner binds defaultSelect to a computed list
+    // (visibleCols) that is transiently undefined during init, which would make
+    // defaultSelect.slice()/.length throw at load. Use _defSel everywhere.
+    readonly property var _defSel: defaultSelect || []
+    // ...and read it through THIS, never directly. A readonly property with a
+    // binding is `undefined` until that binding first runs, and
+    // onDefaultSelectChanged can fire before it does — which threw
+    // "Cannot call method 'slice' of undefined" during load and left the
+    // selection uninitialised.
+    function defSel() {
+        var d = _defSel !== undefined ? _defSel : defaultSelect
+        return (d && d.slice) ? d : []
+    }
     // the current query specification
     // where: [{field, op, value, join}] - join binds it to the PREVIOUS condition
     // (AND by default; OR / AND NOT / OR NOT). orderBy: [{field, desc}] - there
@@ -42,19 +55,6 @@ Item {
     property bool builderMode: true      // click it together (default) or type it
     property string manualText: ""       // what was typed by hand
     property string placeholder: "SELECT * WHERE field = 'value'"
-    // JOIN (owner-driven): the owner supplies the joinable tables and holds the
-    // current join; the bar only shows the picker and emits the choices.
-    property var joinTables: []          // [{name, columns}]
-    property string joinTable: ""
-    property string joinLeft: ""
-    property string joinRight: ""
-    signal joinTableChosen(string t)
-    signal joinFieldsChosen(string l, string r)
-    function joinTableCols() {
-        for (var i = 0; i < joinTables.length; i++)
-            if (joinTables[i].name === joinTable) return joinTables[i].columns || []
-        return []
-    }
 
     signal applied(var spec, string sql)
     // the "…" menu — the owner shows the popups / dialog / sidebar
@@ -71,74 +71,22 @@ Item {
 
     // there are unsaved edits - Run is highlighted
     property bool dirty: false
-    // a snapshot of the original query: reset returns to it
-    property var initialQuery: null
-    function snapshot() {
-        var w = []
-        for (var i = 0; i < spec.where.length; i++) {
-            var c = spec.where[i]
-            // for a relative bound we compare the offset, not the date itself
-            w.push(c.ago ? { field: c.field, op: c.op, join: c.join, ago: c.ago }
-                         : c)
-        }
-        return JSON.stringify({ w: w, s: spec.select, g: spec.groupBy,
-                                o: spec.orderBy, d: spec.distinct,
-                                c: spec.computed, cl: clauses, m: manualText,
-                                q: quickText })
-    }
-    function markBaseline() { initialQuery = snapshot() }
-
-    // the whole state of the query - for keeping it between navigations
-    function exportState() {
-        return JSON.stringify({ w: spec.where, s: spec.select, g: spec.groupBy,
-                                o: spec.orderBy, d: spec.distinct,
-                                c: spec.computed, cl: clauses,
-                                m: manualText, b: builderMode, q: quickText,
-                                init: initialQuery })
-    }
-    function importState(text) {
-        if (!text) return false
-        var st
-        try { st = JSON.parse(text) } catch (e) { return false }
-        if (!st || !st.s || !st.s.length) return false
-        spec = { where: st.w || [], select: st.s || [], groupBy: st.g || [],
-                 orderBy: st.o || [], distinct: !!st.d, computed: st.c || [] }
-        clauses = st.cl || []
-        manualText = st.m || ""
-        quickText = st.q || ""
-        builderMode = st.b !== false
-        initialQuery = st.init || null
-        dirty = false
-        apply()                 // we are back - the query has already run
-        return true
-    }
-
-    // the query differs from the original - then and only then is there something to reset
+    // the query differs from its default - then and only then is there something
+    // to reset. (Query state used to be snapshotted/exported to survive
+    // navigation; pages now live in Main's pageCache, so that machinery is gone.)
     readonly property bool changed: {
-        // the fields are listed explicitly so that the binding recomputes when they are edited
+        // the fields are listed explicitly so the binding recomputes when edited
         var _ = [spec.where.length, spec.select.length, spec.groupBy.length,
                  spec.orderBy.length, spec.distinct, spec.computed.length,
                  clauses.length, manualText, quickText]
-        if (initialQuery !== null) return snapshot() !== initialQuery
         if (spec.where.length || clauses.length || manualText !== "") return true
-        if (spec.select.length !== defaultSelect.length) return true
+        var ds = defSel()
+        if (spec.select.length !== ds.length) return true
         for (var i = 0; i < spec.select.length; i++)
-            if (spec.select[i] !== defaultSelect[i]) return true
+            if (spec.select[i] !== ds[i]) return true
         return false
     }
     property bool editingCalc: false
-    // for verification by rendering: how many conditions the query holds.
-    // It used to read repWhere.count, but that Repeater was removed together with
-    // the chips - the binding stayed and threw a ReferenceError at runtime on
-    // every load. Compiling QML does not catch that; loading the window does.
-    readonly property int chipCount: spec.where.length
-
-    // The fields RELATIVE to which the filter, the grouping and the sorting are
-    // built: the ones in the selection; if the selection is empty - all of them.
-    readonly property var activeFields: {
-        if (spec.select.length) return spec.select
-        return fields.map(function (f) { return f.name })
-    }
 
     // THE PSEUDO FIELD "all" - search in every field at once
     readonly property string anyField: "all fields"
@@ -159,16 +107,10 @@ Item {
             if (out.indexOf(all[i]) < 0) out.push(all[i])
         return out
     }
-    // the field chosen in the filter row
-    property string filterField: ""
     // QUICK SEARCH ACROSS ALL FIELDS: the main action of the bar. It is an
     // ordinary condition "all fields MATCH ...", it simply has its own input -
     // that way "find anything" requires neither the builder nor knowing SQL.
     property string quickText: ""
-    // THE HEIGHT OF TWO ROWS OF CHIPS: a long list does not stretch the panel -
-    // what did not fit is opened in a separate popup with the "..." button.
-    readonly property int twoRows: Kirigami.Units.gridUnit * 4
-                                   + Kirigami.Units.smallSpacing
     // which list is open in the "show all" popup
     property string moreKind: ""
     // the buttons of the page owner (history, save, saved) - on the left of the
@@ -191,12 +133,20 @@ Item {
                 parts.push(condSql(fields[i].name, op, value))
             return parts.length ? "(" + parts.join(" OR ") + ")" : ""
         }
-        if (noValue(op)) return '"' + field + '" ' + op
-        if (op === "MATCH")
-            return '"' + field + '" LIKE ' + quote("%" + value + "%")
-        if (op === "NOT MATCH")
-            return '"' + field + '" NOT LIKE ' + quote("%" + value + "%")
-        return '"' + field + '" ' + op + " " + quote(value)
+        var col = '"' + field + '"'
+        if (noValue(op)) return col + ' ' + op
+        // TEXT MATCHING WORKS ON ANY COLUMN, not just the text ones. Columns are
+        // no longer all strings — a view computes round(...) as a DOUBLE, a count
+        // as a BIGINT, an event timestamp is a TIMESTAMP — and LIKE against those
+        // is a binder error ("No function matches ~~(DOUBLE, VARCHAR)"), which is
+        // what made the free-text search fail on those tables. Casting to text
+        // asks the question the user actually asked: does this VALUE contain that.
+        var text = 'CAST(' + col + ' AS VARCHAR)'
+        if (op === "MATCH")     return text + ' LIKE ' + quote("%" + value + "%")
+        if (op === "NOT MATCH") return text + ' NOT LIKE ' + quote("%" + value + "%")
+        if (op === "LIKE")      return text + ' LIKE ' + quote(value)
+        if (op === "NOT LIKE")  return text + ' NOT LIKE ' + quote(value)
+        return col + ' ' + op + " " + quote(value)
     }
     readonly property var joiners: ["AND", "OR", "AND NOT", "OR NOT"]
 
@@ -269,10 +219,16 @@ Item {
         return d.toISOString().replace(/\.\d+Z$/, "Z")
     }
 
-    // The selection starts with what the table shows right now.
-    onDefaultSelectChanged: if (!spec.select.length) resetSelect()
+    // THE SELECTION IS THE TABLE'S SHOWN COLUMNS, ALWAYS — and it cannot outlive
+    // the table it was made for. This used to reset only when the selection was
+    // empty, which meant that on a tab switch the bar kept the PREVIOUS table's
+    // columns: the page clears the bar before the new table's column list has
+    // been recomputed, so the "default" read at that moment was still the old one.
+    // Resetting whenever the shown columns change fixes both the switch and a
+    // column toggled in the Columns panel.
+    onDefaultSelectChanged: resetSelect()
     Component.onCompleted: {
-        if (!spec.select.length && defaultSelect.length) resetSelect()
+        if (!spec.select.length && defSel().length) resetSelect()
         apply()          // hand the default selection to the table
     }
 
@@ -383,28 +339,19 @@ Item {
         dirty = true
     }
 
-    // ---- the selection ----
-    function resetSelect() {
-        spec.select = defaultSelect.slice()
+    // Set the selection explicitly, when the owner knows the table's columns are
+    // settled. Relying on the defaultSelect binding alone made the order of two
+    // recomputations decide what the SELECT held.
+    function setSelection(list) {
+        spec.select = (list && list.slice) ? list.slice() : []
         touch()
     }
-    // A FIELD IS CHANGED IN PLACE: in the selection, in the grouping and in the sorting.
-    function replaceSelect(i, name) {
-        var sl = spec.select.slice()
-        if (i < 0 || i >= sl.length || sl.indexOf(name) >= 0) return
-        sl[i] = name; spec.select = sl; touch()
-    }
-    function replaceGroup(i, name) {
-        var g = spec.groupBy.slice()
-        if (i < 0 || i >= g.length || g.indexOf(name) >= 0) return
-        g[i] = name; spec.groupBy = g; touch()
-    }
-    function replaceOrder(i, name) {
-        var o = spec.orderBy.slice()
-        if (i < 0 || i >= o.length) return
-        o[i] = { field: name, desc: o[i].desc }; spec.orderBy = o; touch()
-    }
 
+    // ---- the selection ----
+    function resetSelect() {
+        spec.select = defSel().slice()
+        touch()
+    }
     // THE ORDER OF THE FIELDS IN THE SELECTION = the order of the columns in the
     // table, so it must be changeable rather than only re-typed.
     function moveSelectTo(from, to) {
@@ -416,15 +363,6 @@ Item {
         spec.select = sl
         touch()
     }
-    function moveSelect(i, delta) {
-        var sl = spec.select.slice()
-        var j = i + delta
-        if (i < 0 || i >= sl.length || j < 0 || j >= sl.length) return
-        var t = sl[i]; sl[i] = sl[j]; sl[j] = t
-        spec.select = sl
-        touch()
-    }
-
     function toggleField(name) {
         var sl = spec.select.slice()
         var i = sl.indexOf(name)
@@ -453,7 +391,6 @@ Item {
         if (kind === "calc") spec.computed = []
         touch()
     }
-    function hasClause(kind) { return clauses.indexOf(kind) >= 0 }
 
     // add a condition from outside (the "+" button on a table cell)
     // ---- appending to the TYPED TEXT (SQL mode) ----
@@ -468,34 +405,6 @@ Item {
         var rest = tail ? " " + tail[0] : ""
         if (/\bWHERE\b/i.test(head)) return head + " AND " + frag + rest
         return head + " WHERE " + frag + rest
-    }
-    function appendOrder(text, field, desc) {
-        var t = String(text || "").trim()
-        var piece = field + (desc ? " DESC" : "")
-        if (t === "") return "SELECT * ORDER BY " + piece
-        if (/\bORDER\s+BY\b/i.test(t))
-            return t.replace(/(\bORDER\s+BY\b)([\s\S]*?)(\bLIMIT\b[\s\S]*)?$/i,
-                             function (m, kw, cols, lim) {
-                                 return kw + cols.replace(/\s+$/, "") + ", " + piece
-                                        + (lim ? " " + lim : "")
-                             })
-        return t + " ORDER BY " + piece
-    }
-
-    // sorting from outside (a click on a column header)
-    function addSort(field, desc) {
-        if (!builderMode) {
-            manualText = appendOrder(manualText, field, !!desc)
-            dirty = true
-            return
-        }
-        addClause("order")
-        var o = spec.orderBy.slice()
-        for (var i = 0; i < o.length; i++)
-            if (o[i].field === field) { o[i] = { field: field, desc: !!desc }; spec.orderBy = o; touch(); return }
-        o.push({ field: field, desc: !!desc })
-        spec.orderBy = o
-        touch()
     }
 
     // By default conditions are joined with AND - that is what people expect.
@@ -521,31 +430,9 @@ Item {
         addClause("where")
         touch()
     }
-    // QUICK TIME WINDOW: keep exactly ONE ago-condition on `field` (e.g. ts) and
-    // let buildSql render it like any other WHERE condition - so a time filter is
-    // a first-class part of the query, not a string glued on by the caller.
-    // agoMs<=0 removes it. Applies immediately (a quick picker, not the builder).
-    function setTimeWindow(field, agoMs, iso) {
-        var w = []
-        for (var i = 0; i < spec.where.length; i++)
-            if (!(spec.where[i].field === field && spec.where[i].ago))
-                w.push(spec.where[i])
-        if (agoMs > 0)
-            w.push({ field: field, op: ">=", value: String(iso),
-                     join: "AND", ago: agoMs })
-        spec.where = w
-        builderMode = true
-        if (w.length) addClause("where")
-        touch()
-        apply()
-    }
     // which condition is being edited (-1 - none)
     property int editIndex: -1
     function editCondition(i) { editIndex = i; condPopup.open() }
-    function closeCondEditor() { condPopup.close() }
-    function showMore(kind) { moreKind = kind; morePopup.open() }
-    // for verification by rendering
-    function openCalendar(which) { calPopup.target = which; calPopup.open() }
 
     // editing one condition: field / operator / value
     function setCond(i, key, v) {
@@ -572,23 +459,7 @@ Item {
     }
 
     function clearAll() {
-        if (initialQuery !== null) {
-            var b = JSON.parse(initialQuery)
-            // relative time bounds are recomputed from NOW
-            for (var i = 0; i < b.w.length; i++)
-                if (b.w[i].ago)
-                    b.w[i] = { field: b.w[i].field, op: b.w[i].op,
-                               join: b.w[i].join, ago: b.w[i].ago,
-                               value: agoIso(b.w[i].ago) }
-            spec = { where: b.w, select: b.s, groupBy: b.g, orderBy: b.o,
-                     distinct: b.d, computed: b.c }
-            clauses = b.cl
-            manualText = b.m
-            builderMode = true
-            apply()          // a reset is applied at once: it is a return to the start
-            return
-        }
-        spec = { where: [], select: defaultSelect.slice(), groupBy: [],
+        spec = { where: [], select: defSel().slice(), groupBy: [],
                  orderBy: [], distinct: false, computed: [] }
         clauses = []
         manualText = ""
@@ -1041,6 +912,24 @@ Item {
                     font.pointSize: Kirigami.Theme.smallFont.pointSize
                 }
                 Item { Layout.fillWidth: true }
+                // A GROUPING IS NOT ALWAYS A BARE FIELD. "How many per hour",
+                // "by the first path segment", "by major version" are all
+                // expressions, so besides picking a field one can type one:
+                // anything the database understands as a GROUP BY term.
+                QQC2.TextField {
+                    id: groupExpr
+                    visible: bar.moreKind === "group" || bar.moreKind === "order"
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 14
+                    placeholderText: "or type an expression: substr(path,1,12)"
+                    onAccepted: {
+                        var e = text.trim()
+                        if (e === "") return
+                        morePopup.addField(e)
+                        text = ""
+                    }
+                    QQC2.ToolTip.text: "A function or any SQL expression, then Enter"
+                    QQC2.ToolTip.visible: hovered
+                }
                 FieldPicker {
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 8
                     Layout.preferredHeight: Kirigami.Units.gridUnit * 2
@@ -1344,63 +1233,8 @@ Item {
                             bar.moreKind = "order"; morePopup.open()
                         }
                     }
-                    // ---- THE JOIN ----
-                    QQC2.ToolButton {
-                        icon.name: "network-connect"
-                        visible: bar.joinTables.length > 0
-                        text: bar.joinTable !== "" ? bar.joinTable : ""
-                        display: bar.joinTable !== "" ? QQC2.AbstractButton.TextBesideIcon
-                                                      : QQC2.AbstractButton.IconOnly
-                        highlighted: bar.joinTable !== ""
-                        QQC2.ToolTip.text: bar.joinTable !== ""
-                            ? ("Joined with " + bar.joinTable + " on " + bar.joinLeft
-                               + " = " + bar.joinRight)
-                            : "Join another table"
-                        QQC2.ToolTip.visible: hovered
-                        onClicked: joinPopup.open()
-                        QQC2.Popup {
-                            id: joinPopup
-                            y: parent.height
-                            padding: Kirigami.Units.smallSpacing
-                            closePolicy: QQC2.Popup.CloseOnEscape | QQC2.Popup.CloseOnPressOutside
-                            contentItem: ColumnLayout {
-                                spacing: Kirigami.Units.smallSpacing
-                                RowLayout {
-                                    QQC2.Label { text: "Join table:"; opacity: 0.7 }
-                                    QQC2.ComboBox {
-                                        Layout.preferredWidth: Kirigami.Units.gridUnit * 11
-                                        model: [""].concat(bar.joinTables.map(
-                                            function (t) { return t.name }))
-                                        displayText: currentText === "" ? "(no join)" : currentText
-                                        currentIndex: Math.max(0, model.indexOf(bar.joinTable))
-                                        onActivated: bar.joinTableChosen(currentText)
-                                    }
-                                    QQC2.ToolButton {
-                                        visible: bar.joinTable !== ""
-                                        icon.name: "edit-clear"
-                                        onClicked: { bar.joinTableChosen(""); joinPopup.close() }
-                                    }
-                                }
-                                RowLayout {
-                                    visible: bar.joinTable !== ""
-                                    QQC2.Label { text: "on"; opacity: 0.7 }
-                                    QQC2.ComboBox {
-                                        Layout.preferredWidth: Kirigami.Units.gridUnit * 9
-                                        model: bar.allFieldNames
-                                        currentIndex: Math.max(0, model.indexOf(bar.joinLeft))
-                                        onActivated: bar.joinFieldsChosen(currentText, bar.joinRight)
-                                    }
-                                    QQC2.Label { text: "=" }
-                                    QQC2.ComboBox {
-                                        Layout.preferredWidth: Kirigami.Units.gridUnit * 9
-                                        model: bar.joinTableCols()
-                                        currentIndex: Math.max(0, model.indexOf(bar.joinRight))
-                                        onActivated: bar.joinFieldsChosen(bar.joinLeft, currentText)
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    // (a table-JOIN builder was removed in the v1 cleanup: state
+                    // tables are related through SQL / the graph, not a join UI)
                     // ---- UNIQUE (DISTINCT) + a calculated field, direct buttons
                     // on the LEFT with the other functions (no "…" menu) ----
                     QQC2.ToolButton {

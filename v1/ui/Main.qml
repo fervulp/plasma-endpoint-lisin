@@ -25,35 +25,27 @@ Kirigami.ApplicationWindow {
         open("state")             // the first section goes through the cache too
     }
 
-    // The "explore in state" jump: an event -> the right State table, filtered by
-    // the value. The counter n is needed so that clicking the same value again
-    // also changes the property and the handler fires.
+    // The "explore in state" jump: a value -> the right Data tab, filtered. The
+    // counter n makes a repeat click on the same value still change the property
+    // so the handler fires. Set by focusEvents; read by StatePage.applyFocus.
     property var stateFocus: null
-    function focusState(table, col, val) {
-        stateFocus = { table: table, col: col, val: String(val),
-                       n: (stateFocus ? stateFocus.n + 1 : 1) }
-        open("state")
-    }
 
-    // A jump into the Events TAB (now part of Data) with a ready WHERE condition.
-    // Events is no longer a separate section - it is the first Data tab - so this
-    // reuses the state-focus mechanism with the "events" table and a raw WHERE.
+    // A jump into the Events tab with a ready WHERE condition (e.g. from a
+    // dashboard) — reuses the state-focus mechanism with the "events" table.
     function focusEvents(where) {
         stateFocus = { table: "events", raw: String(where),
                        n: (stateFocus ? stateFocus.n + 1 : 1) }
         open("state")
     }
 
-    // SHOW AN ENTITY IN THE GRAPH. From an event (or anywhere) to the dashboard
-    // with this entity at the centre. The graph engine anchors on any kind -
-    // process, address, application, port, user, config, open_file - so an event
-    // can be looked at by its process OR by the address it talked to. The n
-    // counter makes a repeat click on the same value still fire the handler.
-    property var graphFocus: null
-    function focusGraph(kind, val) {
-        graphFocus = { kind: String(kind), val: String(val),
-                       n: (graphFocus ? graphFocus.n + 1 : 1) }
-        open("dashboards")
+    // Open a rule in Expertise (from a pipeline stage). Same counter trick so a
+    // repeat click on the same rule still fires the handler.
+    property var expertiseFocus: null
+    function openExpertise(ref) {
+        if (!ref) return
+        expertiseFocus = { ref: String(ref),
+                           n: (expertiseFocus ? expertiseFocus.n + 1 : 1) }
+        open("expertise")
     }
     // A SECTION IS BUILT ON EVERY NAVIGATION, from its Component.
     //
@@ -76,8 +68,7 @@ Kirigami.ApplicationWindow {
     property var pageCache: ({})
     property var pageComps: ({
         state: statePageComp, dashboards: dashboardPageComp,
-        sql: sqlPageComp, pipeline: pipelinePageComp, expertise: expertisePageComp,
-        settings: settingsPageComp })
+        pipelines: pipelinesPageComp, expertise: expertisePageComp })
     function pageFor(name) {
         if (pageCache[name] === undefined) {
             var comp = pageComps[name] || placeholder
@@ -197,24 +188,21 @@ Kirigami.ApplicationWindow {
                 onTriggered: root.open("state")
             },
             Kirigami.Action {
+                text: "Pipelines"
+                icon.name: "distribute-graph-directed"
+                checked: root.section === "pipelines"
+                onTriggered: root.open("pipelines")
+            },
+            Kirigami.Action {
                 text: "Expertise"
                 icon.name: "document-edit"
                 checked: root.section === "expertise"
                 onTriggered: root.open("expertise")
-            },
-            Kirigami.Action {
-                text: "Pipelines"
-                icon.name: "distribute-graph-directed"
-                checked: root.section === "pipeline"
-                onTriggered: root.open("pipeline")
-            },
-            Kirigami.Action { separator: true },
-            Kirigami.Action {
-                text: "Settings"
-                icon.name: "configure"
-                checked: root.section === "settings"
-                onTriggered: root.open("settings")
             }
+            // Settings (with the SQL and Errors sub-views) was a v0 page copied
+            // whole but never wired to the v1 backend — every button called a slot
+            // that does not exist. It returns when built for v1; the reference
+            // implementation still lives under v0/.
         ]
     }
 
@@ -222,23 +210,21 @@ Kirigami.ApplicationWindow {
 
     Component { id: statePageComp; StatePage {} }
     Component { id: dashboardPageComp; DashboardPage {} }
-    Component { id: sqlPageComp; SqlPage {} }
-    Component { id: pipelinePageComp; PipelinePage {} }
-
+    Component { id: pipelinesPageComp; PipelinesPage {} }
     Component { id: expertisePageComp; ExpertisePage {} }
-    Component { id: settingsPageComp; SettingsPage {} }
 
+    // shown for a moment at startup before open("state") swaps in the first
+    // section (also the fallback for an unknown page name)
     Component {
         id: placeholder
         Kirigami.Page {
-            id: ph
-            title: "Events"
+            title: "LiSin"
             Kirigami.PlaceholderMessage {
                 anchors.centerIn: parent
                 width: parent.width - Kirigami.Units.gridUnit * 4
-                icon.name: "applications-development"
-                text: ph.title
-                explanation: "Under construction"
+                icon.name: "view-visible"
+                text: "LiSin"
+                explanation: "Loading…"
             }
         }
     }

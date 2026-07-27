@@ -1,0 +1,64 @@
+name: services
+table: services
+type: input
+version: 1.0.0
+title: Services
+icon: system-run
+interval: 60
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 50
+# Collection belongs to the input, so the three facts an analyst reads first are
+# produced HERE by SQL instead of being re-derived per view:
+#   * kind   - the unit suffix (service/timer/socket/device/...). systemd_units
+#              returns EVERY unit type, not only .service; without this column the
+#              tab is 589 rows the analyst cannot tell apart. Taken as the text
+#              after the LAST dot, because unit ids legitimately contain dots
+#              (dbus-:1.2-org.freedesktop.problems@0.service) - verified on those.
+#   * origin - where the unit fragment lives, per the systemd.unit(5) search-path
+#              precedence: /etc and /usr/local = local (admin- or attacker-added),
+#              /run = runtime/transient, otherwise vendor (shipped by a package),
+#              none = a unit with no fragment file (device/generated targets).
+#              A .service dropped into /etc/systemd/system is the classic
+#              persistence spot (MITRE T1543.002), so this is the EDR signal of
+#              the table. Live now: 384 vendor / 194 none / 8 runtime / 3 local.
+#   * run_as - the unit's User= setting; empty means it runs as root.
+# Raw state stays raw on purpose: load_state, active_state, sub_state and
+# unit_file_state are what systemd reports and each answers a different question
+# (loaded? running? what exactly? enabled at boot?).
+# The fields worth reading FIRST in this table; everything else the
+# source produces stays available in the Columns panel.
+columns: [id, kind, active_state, sub_state, unit_file_state, origin, run_as, description]
+description: >
+  All units of the systemd SYSTEM manager, over D-Bus. Per-user units
+  (systemctl --user) are NOT here - osquery talks to the system manager only,
+  so a desktop session's own units are invisible to this input; verified, no
+  user-session unit appears in the result. Every unit type is kept, not only
+  .service - the kind column separates them (250 service, 142 device, 69 socket,
+  67 target, 21 slice, 19 mount, 11 timer here). Timers are the answer to
+  "what runs on a schedule" on Fedora, so look for kind = 'timer' here rather
+  than in the cron-based scheduled table.
+query: |
+  SELECT
+    id,
+    description,
+    CASE WHEN instr(id, '.') > 0
+         THEN replace(id, rtrim(id, replace(id, '.', '')), '')
+         ELSE '' END                                           AS kind,
+    load_state,
+    active_state,
+    sub_state,
+    unit_file_state,
+    CASE
+      WHEN fragment_path = ''                THEN 'none'
+      WHEN fragment_path LIKE '/etc/%'       THEN 'local'
+      WHEN fragment_path LIKE '/usr/local/%' THEN 'local'
+      WHEN fragment_path LIKE '/run/%'       THEN 'runtime'
+      ELSE 'vendor' END                                        AS origin,
+    user                                                       AS run_as,
+    fragment_path,
+    source_path,
+    following,
+    object_path
+  FROM systemd_units
+  ORDER BY id

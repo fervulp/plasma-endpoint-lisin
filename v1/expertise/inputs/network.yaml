@@ -1,0 +1,73 @@
+name: network
+table: network
+type: input
+version: 1.0.0
+title: Network interfaces
+icon: network-card
+interval: 60
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 220
+# The fields worth reading FIRST in this table; everything else the
+# source produces stays available in the Columns panel.
+columns: [interface, kind, state, mac, ipv4, ipv6, mtu, promisc]
+description: >-
+  One readable row per interface address (interface_details joined to
+  interface_addresses). An interface that has no address still appears once,
+  with an empty address, so nothing is hidden by the join. Needs no root.
+  HONEST LIMITATION: osquery's own `type` column is a TRUNCATED ARPHRD value
+  (loopback 772 arrives as 4, none 65534 as 254), so it cannot be read as a
+  device class — it is kept raw as type_id and nothing is derived from it.
+  The readable kind/state/promisc columns are decoded HERE from the IFF_* flags
+  bitmask instead, which is exact. promisc=yes means the interface is in
+  promiscuous mode — a sniffing signal, kept from v0.
+# Collection belongs to the input (v1 principle), so the facts v0 read out of
+# `ip -o -d link` are produced HERE by osquery SQL:
+#   * kind    - loopback / point-to-point / broadcast / no-arp, from the flags
+#               bitmask rather than from the interface NAME. Guessing a tunnel
+#               from a "tun"/"veth" name prefix would be a hand-written list;
+#               the kernel flags are the authoritative answer for any name.
+#   * state   - down / up (no carrier) / up, from UP plus RUNNING.
+#   * promisc - the sniffing signal, IFF_PROMISC.
+#   * family  - ipv4/ipv6, from the address itself.
+#   * flags_text - the raw bitmask spelled out, so the number is checkable.
+# The IFF_* constants below are the meaning of the bitmask (a kernel ABI
+# constant, like a protocol number), not a whitelist of interesting values.
+query: |
+  SELECT
+    d.interface,
+    d.mac,
+    d.mtu,
+    d.link_speed,
+    CASE WHEN d.flags & 8   THEN 'loopback'
+         WHEN d.flags & 16  THEN 'point-to-point'
+         WHEN d.flags & 2   THEN 'broadcast'
+         WHEN d.flags & 128 THEN 'no-arp'
+         ELSE 'other' END                                                AS kind,
+    CASE WHEN (d.flags & 1) = 0 THEN 'down'
+         WHEN d.flags & 64      THEN 'up'
+         ELSE 'up (no carrier)' END                                      AS state,
+    CASE WHEN d.flags & 256 THEN 'yes' ELSE '' END                       AS promisc,
+    CASE WHEN a.address IS NULL         THEN ''
+         WHEN instr(a.address, ':') > 0 THEN 'ipv6'
+         ELSE 'ipv4' END                                                 AS family,
+    a.address,
+    a.mask,
+    a.broadcast,
+    d.type  AS type_id,
+    d.flags,
+    trim(
+      CASE WHEN d.flags & 1     THEN 'UP '          ELSE '' END ||
+      CASE WHEN d.flags & 2     THEN 'BROADCAST '   ELSE '' END ||
+      CASE WHEN d.flags & 8     THEN 'LOOPBACK '    ELSE '' END ||
+      CASE WHEN d.flags & 16    THEN 'POINTOPOINT ' ELSE '' END ||
+      CASE WHEN d.flags & 64    THEN 'RUNNING '     ELSE '' END ||
+      CASE WHEN d.flags & 128   THEN 'NOARP '       ELSE '' END ||
+      CASE WHEN d.flags & 256   THEN 'PROMISC '     ELSE '' END ||
+      CASE WHEN d.flags & 512   THEN 'ALLMULTI '    ELSE '' END ||
+      CASE WHEN d.flags & 4096  THEN 'MULTICAST '   ELSE '' END ||
+      CASE WHEN d.flags & 65536 THEN 'LOWER_UP '    ELSE '' END
+    )                                                                    AS flags_text
+  FROM interface_details d
+  LEFT JOIN interface_addresses a ON a.interface = d.interface
+  ORDER BY d.interface, family, a.address

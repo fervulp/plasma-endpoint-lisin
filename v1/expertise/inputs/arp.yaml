@@ -1,0 +1,31 @@
+name: arp
+table: arp
+type: input
+version: 1.0.0
+title: ARP neighbours
+icon: network-workgroup
+interval: 60
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 250
+description: >-
+  The kernel ARP cache — which MAC address this machine currently believes is
+  behind which neighbouring IP. Needs no root. Two addresses claiming one MAC,
+  or the gateway's MAC changing, is how ARP spoofing looks from the endpoint.
+  HONEST LIMITATION: the cache holds only neighbours this machine has actually
+  talked to recently and entries expire, so this is NOT an inventory of the
+  subnet and a short table is normal — it says nothing about who else is there.
+# Collection belongs to the input: is_gateway is resolved HERE by checking the
+# neighbour's address against the routing table, so the analyst sees which entry
+# is the router without joining anything later. It is a join against the live
+# routes table, not a hand-written list of gateway addresses.
+query: |
+  SELECT
+    a.address,
+    a.mac,
+    a.interface,
+    CASE WHEN a.permanent = '1' THEN 'yes' ELSE '' END                   AS permanent,
+    CASE WHEN EXISTS (SELECT 1 FROM routes r WHERE r.gateway = a.address)
+         THEN 'yes' ELSE '' END                                          AS is_gateway
+  FROM arp_cache a
+  ORDER BY a.interface, a.address

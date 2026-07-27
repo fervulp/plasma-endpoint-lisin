@@ -1,69 +1,36 @@
-"""Declarative derivation layer: enrichment VIEWS, filters (WHERE inside a
-view) and graph EDGES — all SQL over the base tables, no Python middle.
+"""Declarative derivation layer: enrichment VIEWS, filters (WHERE inside a view)
+and graph EDGES — all SQL over the base tables, no Python middle.
 
-Approved contract:
+Contract:
 - A view attaches columns by JOINing base tables. It is CREATE OR REPLACE VIEW,
-  so it is live (never stale) and re-running is free; base rows are never
-  mutated.
+  so it is live (never stale) and re-running is free; base rows are never mutated.
 - The JOIN source must be a real table (from a sensor/input), never a literal
   list in YAML — that is what structurally prevents hardcoded lookups.
-- An edge declares a fact relation between two real key columns and is valid
-  ONLY if both columns exist. The graph reads declared edges; it never guesses
-  from value overlap.
-- Genuine computation (CVSS, ASN, …) belongs in an INPUT that produces a table;
-  this layer only joins.
+- An edge declares a fact relation between two real key columns and is valid ONLY
+  if both columns exist. The graph reads declared edges; it never guesses.
+- Genuine computation (CVSS, ASN, a process tree) belongs in an INPUT or a
+  view-model that produces a table; this layer only joins.
+
+The identifier quoting, the SELECT-only guard, the YAML loader and the iterative
+view engine are shared from core/db.py.
 """
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-import yaml
+from .db import apply_views, ident, load_yaml_dir, select_only
 
 _EXP = Path(__file__).resolve().parent.parent / "expertise"
 VIEWS_DIR = _EXP / "views"
 EDGES_DIR = _EXP / "edges"
 
-# Views are trusted expertise, but guard the body anyway: one SELECT, no DDL/DML.
-_FORBIDDEN = re.compile(
-    r"\b(attach|detach|copy|install|load|pragma|insert|update|delete|drop|"
-    r"alter|create|call|export|import)\b",
-    re.I,
-)
-
-
-def _ident(name: str) -> str:
-    return '"' + str(name).replace('"', "") + '"'
-
-
-def _select_only(sql: str) -> bool:
-    body = re.sub(r"--[^\n]*", "", sql)  # strip line comments
-    stmts = [s for s in body.split(";") if s.strip()]
-    if len(stmts) != 1:
-        return False
-    head = stmts[0].strip().lower()
-    if not (head.startswith("select") or head.startswith("with")):
-        return False
-    return _FORBIDDEN.search(stmts[0]) is None
-
-
-def _load_dir(d: Path) -> list[dict]:
-    out = []
-    if not d.is_dir():
-        return out
-    for f in sorted(d.glob("*.yaml")):
-        spec = yaml.safe_load(f.read_text()) or {}
-        spec["_file"] = str(f)
-        out.append(spec)
-    return out
-
 
 def load_views() -> list[dict]:
-    return _load_dir(VIEWS_DIR)
+    return load_yaml_dir(VIEWS_DIR)
 
 
 def load_edges() -> list[dict]:
-    return _load_dir(EDGES_DIR)
+    return load_yaml_dir(EDGES_DIR)
 
 
 def _col_exists(con, table: str, col: str) -> bool:
@@ -79,7 +46,7 @@ def _col_exists(con, table: str, col: str) -> bool:
 
 def validate_view(store, sql: str) -> dict:
     """Dry-run a view body: columns + row count, or the error. No install."""
-    if not _select_only(sql):
+    if not select_only(sql):
         return {"columns": [], "rows": 0, "error": "not a single SELECT"}
     try:
         cur = store._con.cursor()
@@ -89,36 +56,6 @@ def validate_view(store, sql: str) -> dict:
         return {"columns": cols, "rows": n, "error": ""}
     except Exception as e:  # noqa: BLE001
         return {"columns": [], "rows": 0, "error": str(e)}
-
-
-def _apply_views(store) -> list[dict]:
-    con = store._con
-    status: list[dict] = []
-    pending = load_views()
-    # iterative passes: a view may reference another view created later.
-    for _ in range(len(pending) + 1):
-        if not pending:
-            break
-        still = []
-        for v in pending:
-            name, sql = v.get("name"), v.get("sql", "")
-            if not _select_only(sql):
-                status.append({"view": name, "error": "not a single SELECT"})
-                continue
-            try:
-                con.execute(f"CREATE OR REPLACE VIEW {_ident(name)} AS {sql}")
-                status.append({"view": name, "error": ""})
-            except Exception as e:  # noqa: BLE001 — maybe an unmet dependency
-                v["_err"] = str(e)
-                still.append(v)
-        if len(still) == len(pending):  # no progress → report and stop
-            status.extend(
-                {"view": v.get("name"), "error": v.get("_err", "unresolved")}
-                for v in still
-            )
-            break
-        pending = still
-    return status
 
 
 def _rebuild_edges(store) -> list[dict]:
@@ -151,9 +88,13 @@ def _rebuild_edges(store) -> list[dict]:
 
 
 def apply(store) -> dict:
-    """Create/replace all enrichment views, then rebuild the validated edge
-    table. Returns per-object status (numbers, not prose)."""
-    return {"views": _apply_views(store), "edges": _rebuild_edges(store)}
+    """Create/replace all enrichment views, then rebuild the validated edge table.
+    Returns per-object status (numbers, not prose). The caller holds store._lock
+    (pipeline.run_all runs inside it)."""
+    return {
+        "views": apply_views(store._con, load_views()),
+        "edges": _rebuild_edges(store),
+    }
 
 
 def run_tests(store) -> list[dict]:

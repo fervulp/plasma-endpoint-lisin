@@ -1,27 +1,52 @@
 name: processes
 table: processes
 type: input
-version: 1.0.0
+version: 2.0.0
 title: Processes
 icon: utilities-system-monitor
+# how often this source is re-collected (seconds). The process list is the most
+# volatile thing on the machine, so it runs on the short interval; an inventory
+# that changes weekly declares a long one instead of dragging every cycle.
+interval: 30
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 20
+# The fields worth reading FIRST in this table; everything else the
+# source produces stays available in the Columns panel.
+columns: [name, pid, ppid, user, cpu_pct, mem_pct, rss, elapsed_sec, state, cmdline, path, on_disk]
 description: Running processes, point-in-time snapshot from osquery.
-# osquery returns clean typed columns; cgroup_path carries the systemd unit,
-# parent is the ppid — both are facts we will join on, not guess.
+# Collection belongs to the input (v1 principle), so the human-facing facts that
+# v0 got from `ps` are produced HERE by osquery SQL, not guessed later:
+#   * user   - the username, joined from the users table (osquery gives only uid);
+#   * mem_pct - resident_size as a share of total RAM (memory_info);
+#   * cpu_pct - lifetime CPU%, (user_time+system_time)/uptime, same meaning as
+#               `ps %cpu` (a snapshot cannot give an instantaneous rate);
+#   * elapsed_sec - process age; on_disk - 0 means the binary was DELETED while
+#               running (a real EDR signal); cwd - working directory.
 query: |
   SELECT
-    pid,
-    parent        AS ppid,
-    name,
-    path,
-    cmdline,
-    state,
-    uid,
-    gid,
-    euid,
-    resident_size AS rss,
-    start_time,
-    threads,
-    nice,
-    cgroup_path
-  FROM processes
-  ORDER BY pid
+    p.pid,
+    p.parent          AS ppid,
+    p.name,
+    p.path,
+    p.cmdline,
+    u.username        AS user,
+    p.uid,
+    p.gid,
+    p.euid,
+    p.state,
+    p.resident_size   AS rss,
+    round(p.resident_size * 100.0 / m.memory_total, 1)                       AS mem_pct,
+    round((p.user_time + p.system_time) / 100.0 /
+          nullif((strftime('%s','now') - p.start_time), 0) * 100, 2)         AS cpu_pct,
+    (strftime('%s','now') - p.start_time)                                    AS elapsed_sec,
+    p.start_time,
+    p.on_disk,
+    p.cwd,
+    p.threads,
+    p.nice,
+    p.cgroup_path
+  FROM processes p
+  LEFT JOIN users u ON p.uid = u.uid
+  CROSS JOIN (SELECT memory_total FROM memory_info) m
+  ORDER BY p.pid

@@ -1,0 +1,34 @@
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "sensitive-files"
+spec:
+  # NOT all file I/O (that would flood): only access to a short list of
+  # credential / persistence files. These are rarely touched, so ANY access is a
+  # high-signal, low-volume event — "who read /etc/shadow", "who wrote a cron or
+  # an ld.so.preload". Paths are system-wide (home-agnostic), matched by prefix.
+  kprobes:
+  - call: "security_file_permission"
+    syscall: false
+    args:
+    - index: 0
+      type: "file"      # resolved to the file's path
+    - index: 1
+      type: "int"       # access mask (MAY_READ 4 / MAY_WRITE 2 / MAY_EXEC 1)
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "Prefix"
+        values:
+        - "/etc/shadow"
+        - "/etc/gshadow"
+        - "/etc/sudoers"
+        - "/etc/ssh"
+        - "/root/.ssh"
+        - "/etc/ld.so.preload"
+        - "/etc/ld.so.conf.d"
+        - "/etc/crontab"
+        - "/etc/cron.d"
+        - "/etc/cron.daily"
+        - "/etc/cron.hourly"
+        - "/etc/systemd/system"

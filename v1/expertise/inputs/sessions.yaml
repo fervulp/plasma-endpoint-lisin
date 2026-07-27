@@ -1,0 +1,59 @@
+name: sessions
+table: sessions
+type: input
+version: 1.0.0
+title: Sessions
+icon: system-users
+interval: 30
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 90
+# The fields worth reading FIRST in this table; everything else the
+# source produces stays available in the Columns panel.
+columns: [user, tty, type, origin, login_utc, elapsed_sec, pid_name, host]
+description: >
+  Who is logged in now, read from utmp. Not only live sessions: utmp also carries
+  the boot record (type boot_time) and entries whose session ended without being
+  cleaned up (type dead). Nothing is filtered out — the type column says which is
+  which, and a stale record is itself a fact.
+# Collection belongs to the input, so a session row answers "who, from where, and
+# what is it" without a second lookup:
+#   * uid          - the account name resolved back to its uid (JOIN users);
+#   * origin       - local console / X display / remote, derived from the row's own
+#                    host field: empty means a local tty, a leading ':' is an X
+#                    display, anything else is the host the login came from. Blanked
+#                    for non-user records, because there utmp reuses the host field
+#                    for something else entirely (the boot record stores the kernel
+#                    release there — reading it as a hostname would be a false fact);
+#   * login_utc    - the epoch rendered readable; login_time keeps the raw value so
+#                    it stays sortable and comparable in SQL;
+#   * elapsed_sec  - seconds since that timestamp (age of the record, which for a
+#                    live session is its duration);
+#   * pid_name / pid_cmdline / pid_alive - the session leader looked up in processes.
+#                    This is what turns a bare tty into something readable, and
+#                    pid_alive = 0 next to type 'user' is exactly the mismatch that
+#                    marks a session record outliving its process.
+query: |
+  SELECT
+    l.type,
+    l.user,
+    u.uid,
+    l.tty,
+    l.host,
+    CASE
+      WHEN l.type <> 'user'              THEN ''
+      WHEN l.host = '' OR l.host IS NULL THEN 'local'
+      WHEN l.host LIKE ':%'              THEN 'display'
+      ELSE 'remote'
+    END                                        AS origin,
+    l.time                                     AS login_time,
+    datetime(l.time, 'unixepoch')              AS login_utc,
+    (strftime('%s','now') - l.time)            AS elapsed_sec,
+    l.pid,
+    p.name                                     AS pid_name,
+    p.cmdline                                  AS pid_cmdline,
+    CASE WHEN p.pid IS NULL THEN 0 ELSE 1 END  AS pid_alive
+  FROM logged_in_users l
+  LEFT JOIN users u     ON u.username = l.user
+  LEFT JOIN processes p ON p.pid = l.pid
+  ORDER BY l.time, l.tty, l.pid

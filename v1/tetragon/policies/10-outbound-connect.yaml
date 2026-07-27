@@ -1,0 +1,16 @@
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "outbound-connect"
+spec:
+  # One event per new OUTBOUND TCP connection (who talked to which address).
+  # tcp_connect fires at connection initiation with the destination already set
+  # in the socket, so the `sock` arg carries saddr/daddr/sport/dport/family.
+  # This is the core EDR network signal (exfiltration / C2 beaconing) at moderate
+  # volume — one event per connect, not per packet.
+  kprobes:
+  - call: "tcp_connect"
+    syscall: false
+    args:
+    - index: 0
+      type: "sock"

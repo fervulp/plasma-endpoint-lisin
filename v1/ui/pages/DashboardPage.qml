@@ -14,13 +14,9 @@ Kirigami.Page {
     padding: 0
 
     // grey canvas so the panels read as floating cards above it
-    background: Rectangle {
-        Kirigami.Theme.colorSet: Kirigami.Theme.Window
-        Kirigami.Theme.inherit: false
-        color: Kirigami.Theme.backgroundColor
-    }
+    background: PageBackground {}
 
-    property string current: "state"
+    property string current: "process"
 
     RowLayout {
         anchors.fill: parent
@@ -37,7 +33,7 @@ Kirigami.Page {
                 anchors.margins: Kirigami.Units.smallSpacing
                 ListView {
                     clip: true
-                    model: [{ id: "state", title: "State", icon: "computer" }]
+                    model: [{ id: "process", title: "Process", icon: "utilities-system-monitor" }]
                     delegate: QQC2.ItemDelegate {
                         width: ListView.view.width
                         highlighted: page.current === modelData.id
@@ -72,7 +68,7 @@ Kirigami.Page {
                 // the view provides its own smallSpacing inset; no extra margin
                 // here, so its search bar sits at the same height as Data's
                 active: page.current !== ""
-                source: page.current === "state" ? Qt.resolvedUrl("../views/DashboardView.qml") : ""
+                source: page.current === "process" ? Qt.resolvedUrl("../views/DashboardView.qml") : ""
             }
         }
     }

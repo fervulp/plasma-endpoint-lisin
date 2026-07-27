@@ -1,0 +1,64 @@
+name: users
+table: users
+type: input
+version: 1.0.0
+title: Users
+icon: system-users
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 100
+# The fields worth reading FIRST in this table; everything else the
+# source produces stays available in the Columns panel.
+columns: [username, uid, kind, can_login, primary_group, shell, home, uid_shared, home_exists]
+description: >
+  Local accounts (/etc/passwd via osquery). One row per account. Password state
+  is NOT collected: osquery's shadow table cannot read /etc/shadow as a normal
+  user and reports every account as "locked", which would be a false fact — when
+  the root agent lands, that column can be added and will be real.
+# Collection belongs to the input, so the facts an analyst reads are produced HERE
+# instead of being re-derived later:
+#   * primary_group - the gid resolved to a name (JOIN groups), not a bare number;
+#   * kind          - root / system / regular, from the account's own uid using the
+#                     Linux UID_MIN convention (login.defs: system accounts below
+#                     1000; 65534 is the kernel overflow/nobody uid). A threshold,
+#                     not a list of names;
+#   * can_login     - 0 when the login shell is nologin/false/empty, i.e. the
+#                     account exists but cannot start a session;
+#   * uid_shared    - how many accounts share this uid. >1 means two names map to
+#                     the same identity; for uid 0 that is the classic hidden-root
+#                     backdoor. Counted over the table's own rows;
+#   * home_exists / home_type / home_mode / home_owner - the home directory as it
+#                     really is on disk (JOIN file, owner resolved back through
+#                     users). A missing home, or one owned by somebody else, is a
+#                     fact worth seeing next to the account.
+query: |
+  SELECT
+    u.uid,
+    u.username,
+    u.gid,
+    g.groupname                          AS primary_group,
+    u.description                        AS gecos,
+    u.directory                          AS home,
+    u.shell,
+    CASE
+      WHEN u.uid = 0        THEN 'root'
+      WHEN u.uid < 1000     THEN 'system'
+      WHEN u.uid >= 65534   THEN 'system'
+      ELSE 'regular'
+    END                                  AS kind,
+    CASE
+      WHEN u.shell IS NULL OR u.shell = ''                     THEN 0
+      WHEN u.shell LIKE '%/nologin' OR u.shell LIKE '%/false'  THEN 0
+      ELSE 1
+    END                                  AS can_login,
+    count(*) OVER (PARTITION BY u.uid)   AS uid_shared,
+    CASE WHEN f.type IS NULL THEN 0 ELSE 1 END AS home_exists,
+    f.type                               AS home_type,
+    f.mode                               AS home_mode,
+    hu.username                          AS home_owner
+  FROM users u
+  LEFT JOIN groups g  ON g.gid  = u.gid
+  LEFT JOIN file   f  ON f.path = u.directory
+  LEFT JOIN users  hu ON hu.uid = f.uid
+  ORDER BY u.uid, u.username

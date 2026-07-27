@@ -1,0 +1,48 @@
+name: user_groups
+table: user_groups
+type: input
+version: 1.0.0
+title: Group membership
+icon: system-users
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 110
+description: >
+  Which account belongs to which group — one row per membership, group name
+  resolved. Verified against `id` for a real account: osquery returns the primary
+  group plus every secondary one, same set, no difference.
+# Collection belongs to the input, so a membership row is readable on its own
+# instead of being three joins away:
+#   * groupname / username - the gid and uid resolved to names (JOIN groups, users);
+#   * membership   - primary when the gid matches the account's own passwd gid,
+#                    secondary when the account was ADDED to the group later. The
+#                    distinction is the interesting one: a secondary membership is
+#                    a grant somebody made;
+#   * user_kind    - root / system / regular, same UID_MIN convention as the users
+#                    input, so "which groups does the human account hold" is one
+#                    filter and not a mental join;
+#   * group_members - how many accounts share this group, counted over the table's
+#                    own rows. A privileged group with one member reads differently
+#                    from one with ten.
+# Deliberately NOT here: any verdict on which group is "admin". That would be a
+# hand-written list of names; who is privileged is decided by polkit rules and
+# socket ownership, which are their own sources.
+query: |
+  SELECT
+    ug.uid,
+    u.username,
+    ug.gid,
+    g.groupname,
+    CASE WHEN ug.gid = u.gid THEN 'primary' ELSE 'secondary' END AS membership,
+    CASE
+      WHEN u.uid = 0      THEN 'root'
+      WHEN u.uid < 1000   THEN 'system'
+      WHEN u.uid >= 65534 THEN 'system'
+      ELSE 'regular'
+    END                                        AS user_kind,
+    count(*) OVER (PARTITION BY ug.gid)        AS group_members
+  FROM user_groups ug
+  LEFT JOIN users  u ON u.uid = ug.uid
+  LEFT JOIN groups g ON g.gid = ug.gid
+  ORDER BY ug.uid, ug.gid

@@ -22,12 +22,10 @@ ColumnLayout {
     spacing: 1
     visible: String(value === undefined || value === null ? "" : value) !== ""
 
-    // format ISO timestamps exactly as the tables do (Fmt.local); anything else
-    // is shown as-is
-    readonly property string shown: {
-        var s = String(value === undefined || value === null ? "" : value)
-        return /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(s) ? Fmt.local(s) : s
-    }
+    // format ISO timestamps exactly as the tables do (Fmt.maybeLocal); anything
+    // else is shown as-is
+    readonly property string shown:
+        String(Fmt.maybeLocal(value === undefined || value === null ? "" : value))
 
     RowLayout {
         Layout.fillWidth: true

@@ -1,0 +1,53 @@
+name: ssh_keys
+table: ssh_keys
+type: input
+version: 1.0.0
+title: SSH private keys
+icon: dialog-password
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 150
+# NEVER the key content — only the FACT of a private key (v0's rule, kept).
+# osquery's user_ssh_keys has NO column carrying key material at all: it parses
+# each candidate file and exposes only metadata (uid, path, encrypted, key_type,
+# key_length, key_security_bits). Verified against the live schema before writing.
+#
+# Collection belongs to the input, so the facts an analyst reads are produced HERE:
+#   * username      - joined from users; osquery gives only a bare uid.
+#   * passphrase    - `encrypted` read out loud. A private key with NO passphrase
+#                     is usable the moment the file is copied; that is the signal.
+#   * named_public  - the file is named *.pub yet osquery listed it in a table of
+#                     PRIVATE keys, i.e. the name lies about the contents. Derived
+#                     from the row's own path, no list of filenames anywhere.
+#   * strength      - from osquery's own key_security_bits, using the 112-bit floor
+#                     of NIST SP 800-57 Part 1 Rev.5 (Table 2). Cited methodology,
+#                     not an opinion. IMPORTANT: osquery reports -1 when it cannot
+#                     compute the bits (it does this for ed25519, which is strong),
+#                     so -1 maps to 'unknown' and NEVER to 'weak'.
+#
+# LIMITATION (honest): a user-run collector reads only the home directories it has
+# permission to enter — in practice its own. Keys belonging to other users, and
+# root's, are invisible until the collector runs as root. Nothing is substituted.
+description: Private SSH keys found in readable home directories — the fact and the
+  metadata of each key, never its content (osquery exposes no key material here).
+  Running unprivileged, this sees only home directories the collector may read, so
+  other users' and root's keys are absent rather than reported as none.
+query: |
+  SELECT
+    k.uid,
+    u.username,
+    k.path,
+    replace(k.path, rtrim(k.path, replace(k.path, '/', '')), '')    AS filename,
+    k.encrypted,
+    CASE k.encrypted WHEN 1 THEN 'yes' WHEN 0 THEN 'no' END         AS passphrase,
+    nullif(k.key_type, '')                                          AS key_type,
+    nullif(k.key_length, -1)                                        AS key_bits,
+    nullif(k.key_security_bits, -1)                                 AS security_bits,
+    CASE WHEN k.key_security_bits < 0   THEN 'unknown'
+         WHEN k.key_security_bits < 112 THEN 'weak'
+         ELSE 'ok' END                                              AS strength,
+    CASE WHEN lower(k.path) LIKE '%.pub' THEN 1 ELSE 0 END          AS named_public
+  FROM users u
+  JOIN user_ssh_keys k ON k.uid = u.uid
+  ORDER BY u.username, k.path

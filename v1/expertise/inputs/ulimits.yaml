@@ -1,0 +1,53 @@
+name: ulimits
+table: ulimits
+type: input
+version: 1.0.0
+title: Resource Limits
+icon: preferences-system-performance
+# Resource limits are fixed at process start and never change while it runs, so
+# there is nothing to gain from re-reading them on the short cadence.
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 300
+description: >-
+  POSIX resource limits (getrlimit) in effect for the collector. HONEST LIMITS:
+  this is scoped to ONE process - the osquery collector itself - and NOT to the
+  machine. The values are whatever the collector inherited from the thing that
+  launched it, so a desktop session, a login shell and a systemd unit can each
+  show different numbers for the same host. It is therefore the EFFECTIVE result
+  for one process, not the system policy: /etc/security/limits.conf and the
+  systemd Limit* settings are the configuration, and they are not read here. It
+  also does not report any other process's limits. Read the tab as "what this
+  collector was given", and compare it against the intended policy yourself.
+  Units differ per resource (bytes for stack/memlock/data, counts for
+  nofile/nproc, seconds for cpu); the raw getrlimit value is passed through
+  unconverted rather than being relabelled from a hand-written table.
+# Collection belongs to the input, so the two things that make the raw table hard
+# to use are fixed HERE, both derived only from the row's own values:
+#   * soft_value / hard_value - soft_limit and hard_limit are TEXT carrying the
+#     sentinel 'unlimited', so they sort and compare as strings ('9' > '1048576')
+#     and cannot be aggregated. These give the numeric form, left NULL for
+#     'unlimited' rather than substituting a fake maximum - an absent number is
+#     honest, a made-up one would silently rank as the largest value;
+#   * raisable - whether the soft limit is below the hard limit, meaning the
+#     process can raise its own ceiling with no privilege at all. Where soft and
+#     hard are equal the limit is a real boundary. This is the question an
+#     analyst actually has about a limit, and it is computed, not listed.
+#     Verified against the kernel: stack is the only raisable limit here (soft
+#     8388608 bytes, hard unlimited), matching `ulimit -Ss` / `ulimit -Hs`.
+query: |
+  SELECT
+    l.type,
+    l.soft_limit,
+    l.hard_limit,
+    CASE WHEN l.soft_limit = 'unlimited' THEN NULL
+         ELSE CAST(l.soft_limit AS BIGINT) END AS soft_value,
+    CASE WHEN l.hard_limit = 'unlimited' THEN NULL
+         ELSE CAST(l.hard_limit AS BIGINT) END AS hard_value,
+    CASE WHEN l.soft_limit = 'unlimited' THEN ''
+         WHEN l.hard_limit = 'unlimited' THEN 'yes'
+         WHEN CAST(l.hard_limit AS BIGINT) > CAST(l.soft_limit AS BIGINT) THEN 'yes'
+         ELSE '' END                           AS raisable
+  FROM ulimit_info l
+  ORDER BY l.type

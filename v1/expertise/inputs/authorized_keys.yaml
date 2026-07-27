@@ -1,0 +1,47 @@
+name: authorized_keys
+table: authorized_keys
+type: input
+version: 1.0.0
+title: Authorized keys
+icon: user-identity
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 160
+# The inbound side of SSH: who may log in to THIS machine without a password.
+# Unlike ssh_keys, the `key` column here is safe to keep — an authorized_keys entry
+# is a PUBLIC key, open by definition (same reasoning v0 used for its `key` column).
+#
+# Collection belongs to the input:
+#   * username   - joined from users; osquery gives only a bare uid.
+#   * key_file   - WHICH file grants the access; a key added to a second, less
+#                  obvious AuthorizedKeysFile is worth seeing separately.
+#   * options    - kept raw. This is where a forced command, a from= source
+#                  restriction or port-forward permissions live; the analyst reads
+#                  the actual text rather than a verdict of ours.
+#   * restricted - whether the entry carries ANY option at all, derived from the
+#                  row's own `options` value. An unrestricted key is full shell
+#                  access for whoever holds the private half.
+#
+# LIMITATION (honest): osquery enumerates authorized_keys per user home, so an
+# unprivileged collector sees only the homes it may read. It also reads the default
+# key files, not a custom AuthorizedKeysFile path set in sshd_config. On a host
+# where nobody has installed an authorized key this table is legitimately EMPTY —
+# empty means "none found in what we could read", not "none exist".
+description: Public keys that grant passwordless SSH login, per user, with the
+  options attached to each entry. Reads only home directories the collector may
+  enter and only the default key files, so it is empty when no such key is present
+  or when other users' homes are unreadable.
+query: |
+  SELECT
+    a.uid,
+    u.username,
+    a.key_file,
+    a.algorithm,
+    a.key,
+    a.options,
+    a.comment,
+    CASE WHEN a.options = '' THEN 'no' ELSE 'yes' END AS restricted
+  FROM users u
+  JOIN authorized_keys a ON a.uid = u.uid
+  ORDER BY u.username, a.key_file, a.algorithm, a.key

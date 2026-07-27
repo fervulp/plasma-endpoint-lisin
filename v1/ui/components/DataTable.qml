@@ -32,7 +32,16 @@ Item {
     property var columns: []
     property var rows: []
     property var selected: null
-    property int rowHeight: Kirigami.Units.gridUnit * 2.4
+    // ONE natural row height for EVERY table that uses this template, computed the
+    // same way (a hidden ItemDelegate built like a row: default padding + a
+    // default-font Label), so Data, Expertise and the group panel cannot drift.
+    // A caller may still override it.
+    property real rowHeight: _rowProbe.implicitHeight
+    QQC2.ItemDelegate {
+        id: _rowProbe
+        visible: false
+        contentItem: QQC2.Label { text: "Ag" }
+    }
 
     // ---- optional rich-table hooks (null/off by default) ----
     // multi-selection: if set, the row highlight uses isSelected(row) instead of
@@ -49,21 +58,16 @@ Item {
     // draggable column edges (the value column of kind text)
     property bool resizable: false
 
-    // the keys of the hidden columns and the order - the state of the view
-    property var hidden: []
-    property var order: []
     // an optional formatter: function(row, key) -> string
     property var formatter: null
     // an optional accent colour on the left: function(row) -> color | ""
     property var accent: null
 
-    signal rowActivated(var row)
     // a click carrying the row index and the keyboard modifiers, for Ctrl/Shift
     // multi-selection managed by the owner
     signal rowClicked(var row, int index, int modifiers)
     // a right click on a row - the owner may open a context menu
     signal rowRightClicked(var row, int index)
-    signal valueCopied(string value)
     signal headerCheckClicked()
     signal checkToggled(var row, int index)
     signal columnResized(string key, real w)
@@ -108,16 +112,27 @@ Item {
     readonly property real contentW: hasFill ? Math.max(viewportW, fixedW + fillW)
                                              : Math.max(viewportW, fixedW)
 
-    readonly property var shownCols: {
-        var byKey = {}, out = []
-        for (var i = 0; i < columns.length; i++) byKey[columns[i].k] = columns[i]
-        var seq = order.length ? order : columns.map(function (c) { return c.k })
-        for (var j = 0; j < seq.length; j++) {
-            var c = byKey[seq[j]]
-            if (c && hidden.indexOf(c.k) < 0) out.push(c)
-        }
-        return out
-    }
+    // the columns to draw. Owners pass an already-ordered, already-filtered list
+    // (Data computes its visible columns in its own Columns sidebar), so this is
+    // simply the columns as given.
+    // theme values resolved ONCE for the table instead of per cell (a cell is a
+    // plain Text, so it needs them handed down)
+    readonly property color textColor: Kirigami.Theme.textColor
+    readonly property color separatorColor: Kirigami.Theme.textColor
+    readonly property string fontFamily: Kirigami.Theme.defaultFont.family
+    readonly property real fontSize: Kirigami.Theme.defaultFont.pointSize
+
+    readonly property var shownCols: columns
+    // the leading special columns (checkbox / type icon) and the ordinary value
+    // columns, split once for the row delegate — so a value cell is one Label and
+    // pays nothing for machinery it does not use. Special columns are leading, so
+    // lead + text keeps the shownCols order (widths/hit-testing stay valid).
+    readonly property var leadCols: columns.filter(function (c) {
+        return (c.kind || "text") !== "text"
+    })
+    readonly property var textCols: columns.filter(function (c) {
+        return (c.kind || "text") === "text"
+    })
     function cellText(row, key) {
         // A FORMATTER HANDLES ONLY THE COLUMNS IT CARES ABOUT. Returning
         // undefined means "show the raw value" - otherwise every view would have
@@ -134,28 +149,39 @@ Item {
     function copyValue(v) {
         if (v === undefined || v === null || v === "") return
         clip.text = String(v); clip.selectAll(); clip.copy()
-        table.valueCopied(String(v))
     }
     TextEdit { id: clip; visible: false }
 
-    function toggleColumn(k) {
-        var h = hidden.slice()
-        var i = h.indexOf(k)
-        if (i >= 0) h.splice(i, 1); else h.push(k)
-        hidden = h
-    }
-    function moveColumn(k, delta) {
-        var seq = (order.length ? order : columns.map(function (c) { return c.k })).slice()
-        var i = seq.indexOf(k)
-        if (i < 0) return
-        var j = i + delta
-        if (j < 0 || j >= seq.length) return
-        seq.splice(i, 1); seq.splice(j, 0, k)
-        order = seq
-    }
     function rowSelected(row) {
         return table.isSelected ? table.isSelected(row) : (table.selected === row)
     }
+
+    // ---- ONE hover overlay for the whole table (instead of per-cell objects) ----
+    property var hoverRow: null       // the row under the cursor
+    property int hoverColIdx: -1      // which column
+    property real hoverRowY: 0        // its y inside the list content
+    // x of a column's right edge in content coordinates (guarded: the index can
+    // outlive a column set that shrank, and a binding evaluates even when hidden)
+    function colRight(idx) {
+        var x = Kirigami.Units.smallSpacing
+        var n = Math.min(idx, shownCols.length - 1)
+        for (var i = 0; i <= n; i++)
+            x += colW(shownCols[i]) + Kirigami.Units.smallSpacing
+        return x - Kirigami.Units.smallSpacing
+    }
+    function colIndexAt(cx) {
+        var x = cx - Kirigami.Units.smallSpacing
+        for (var i = 0; i < shownCols.length; i++) {
+            var w = colW(shownCols[i])
+            if (x < w) return i
+            x -= w + Kirigami.Units.smallSpacing
+        }
+        return -1
+    }
+    function setHover(rowData, rowY, cx) {
+        hoverRow = rowData; hoverRowY = rowY; hoverColIdx = colIndexAt(cx)
+    }
+    function clearHover() { hoverRow = null; hoverColIdx = -1 }
 
     // A VERTICAL SCROLLBAR FIXED AT THE RIGHT EDGE. The rows live in a
     // content-wide ListView inside a horizontal Flickable, so a scrollbar
@@ -299,10 +325,12 @@ Item {
                 height: hflick.height
                 model: table.rows
                 reuseItems: true
-                add: Transition {
-                    OpacityAnimator { from: 0; to: 1; duration: Kirigami.Units.shortDuration }
-                }
-                cacheBuffer: Kirigami.Units.gridUnit * 40
+                // NO `add:` transition. The rows are replaced wholesale on every
+                // data refresh, so every row counted as "added" and ~50 opacity
+                // animations ran at once — the table blinked on a timer.
+                // a modest look-ahead: a big cacheBuffer creates delegates far off
+                // screen, which is paid in full on every rebuild (tab switch)
+                cacheBuffer: Kirigami.Units.gridUnit * 8
                 // vertical scrollbar is a fixed bar at the table's right edge
                 // (see vbar) — not one that rides along the horizontal scroll
 
@@ -326,18 +354,25 @@ Item {
                         Behavior on color {
                             ColorAnimation { duration: Kirigami.Units.shortDuration }
                         }
-                        Kirigami.Separator {
+                        // a plain Rectangle, not Kirigami.Separator: this is created
+                        // once per row and a Kirigami type costs more to build
+                        Rectangle {
                             anchors.bottom: parent.bottom
                             width: parent.width
+                            height: 1
+                            color: table.separatorColor
                             opacity: 0.35
                         }
-                        // the severity/type accent stripe on the left
+                        // the severity/type accent stripe on the left (computed
+                        // ONCE per row: it used to call accent() twice, and that
+                        // function walks a dozen fields)
                         Rectangle {
                             anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
                             width: 4
-                            visible: table.accent && table.accent(row.modelData) !== ""
-                            color: table.accent ? (table.accent(row.modelData) || "transparent")
-                                                : "transparent"
+                            readonly property string accentColor:
+                                table.accent ? String(table.accent(row.modelData) || "") : ""
+                            visible: accentColor !== ""
+                            color: accentColor !== "" ? accentColor : "transparent"
                             opacity: 0.9
                         }
                     }
@@ -351,15 +386,19 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        // NB: this MouseArea lives inside the ListView, which is the
+                        // Flickable's CONTENT item — so m.x is already a content
+                        // coordinate. Adding contentX here shifted every hit test
+                        // right by the scroll amount: once scrolled, "+" inserted a
+                        // condition on a different column and a double click copied
+                        // a different cell.
                         function colAt(px) {
-                            var x = px + hflick.contentX - Kirigami.Units.smallSpacing
-                            for (var i = 0; i < table.shownCols.length; i++) {
-                                var w = table.colW(table.shownCols[i])
-                                if (x < w) return table.shownCols[i]
-                                x -= w + Kirigami.Units.smallSpacing
-                            }
-                            return null
+                            var i = table.colIndexAt(px)
+                            return i < 0 ? null : table.shownCols[i]
                         }
+                        // feed the single hover overlay (no per-cell hover objects)
+                        onPositionChanged: m => table.setHover(row.modelData, row.y, m.x)
+                        onExited: table.clearHover()
                         onClicked: m => {
                             if (m.button === Qt.RightButton) {
                                 table.selected = row.modelData
@@ -368,7 +407,6 @@ Item {
                             }
                             table.selected = row.modelData
                             table.rowClicked(row.modelData, row.index, m.modifiers)
-                            table.rowActivated(row.modelData)
                         }
                         onDoubleClicked: m => {
                             var cd = colAt(m.x)
@@ -377,146 +415,147 @@ Item {
                         }
                     }
 
+                    // ONE OBJECT PER CELL. A cell used to be an Item wrapping a
+                    // Loader, a Label and a HoverHandler (plus a CheckBox and a
+                    // Kirigami.Icon in EVERY cell, merely hidden) — with 21 columns
+                    // that is ~1500 objects per page, and the table is rebuilt
+                    // several times per tab switch, which cost seconds.
+                    // Now: the leading special columns (checkbox / type icon) are
+                    // their own small Repeater, and an ordinary value cell is just
+                    // a Label. Hover actions come from one table-level overlay.
                     Row {
                         anchors.fill: parent
                         anchors.leftMargin: Kirigami.Units.smallSpacing
                         spacing: Kirigami.Units.smallSpacing
                         Repeater {
-                            model: table.shownCols
+                            model: table.leadCols
                             delegate: Item {
-                                id: cell
+                                id: lead
                                 required property var modelData
-                                property var colDef: modelData
                                 readonly property string kind: modelData.kind || "text"
-                                width: table.colW(colDef)
+                                width: table.colW(modelData)
                                 height: table.rowHeight
-                                property string val: kind === "text"
-                                    ? table.cellText(row.modelData, colDef.k) : ""
-
-                                // checkbox (driven by the owner; MouseArea on top
-                                // so the box's own toggle does not break the
-                                // binding to isChecked)
                                 QQC2.CheckBox {
                                     anchors.verticalCenter: parent.verticalCenter
-                                    visible: cell.kind === "check"
-                                    checked: table.isChecked ? table.isChecked(row.modelData) : false
+                                    visible: lead.kind === "check"
+                                    checked: table.isChecked
+                                             ? table.isChecked(row.modelData) : false
                                     MouseArea {
                                         anchors.fill: parent
                                         onClicked: table.checkToggled(row.modelData, row.index)
                                     }
                                 }
-                                // leading type icon
-                                Kirigami.Icon {
-                                    anchors.centerIn: parent
-                                    visible: cell.kind === "icon"
-                                    width: Kirigami.Units.iconSizes.small
-                                    height: Kirigami.Units.iconSizes.small
-                                    source: (cell.kind === "icon" && table.iconFor)
-                                            ? table.iconFor(row.modelData) : ""
-                                    QQC2.ToolTip.text: (cell.kind === "icon" && table.iconTip)
-                                                       ? table.iconTip(row.modelData) : ""
-                                    QQC2.ToolTip.visible: iconHov.hovered
-                                                          && QQC2.ToolTip.text !== ""
-                                    HoverHandler { id: iconHov }
-                                }
-                                // value cell
-                                QQC2.Label {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: Kirigami.Units.smallSpacing
-                                    anchors.rightMargin: cellHover.hovered
-                                                         ? 34 : Kirigami.Units.smallSpacing
-                                    visible: cell.kind === "text"
-                                    verticalAlignment: Text.AlignVCenter
-                                    horizontalAlignment: colDef.right === true
-                                        ? Text.AlignRight : Text.AlignLeft
-                                    text: cell.val
-                                    elide: Text.ElideRight
-                                    opacity: text === "" ? 0 : 0.9
-                                    font.family: colDef.mono === true
-                                        ? "monospace" : Kirigami.Theme.defaultFont.family
-                                }
-                                HoverHandler { id: cellHover; enabled: cell.kind === "text" }
-                                // the cell +/- actions are built LAZILY: creating
-                                // them for every cell means thousands of objects and
-                                // a stall on refresh.
                                 Loader {
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    active: cell.kind === "text" && cellHover.hovered
-                                            && cell.val !== ""
-                                    visible: active
-                                    sourceComponent: Row {
-                                        spacing: 1
-                                        QQC2.ToolButton {
-                                            implicitWidth: Kirigami.Units.gridUnit
-                                            implicitHeight: Kirigami.Units.gridUnit
-                                            text: "+"
-                                            QQC2.ToolTip.text: "Add to the query"
-                                            QQC2.ToolTip.visible: hovered
-                                            onClicked: table.conditionRequested(
-                                                colDef.k, "=", cell.val)
-                                        }
-                                        QQC2.ToolButton {
-                                            implicitWidth: Kirigami.Units.gridUnit
-                                            implicitHeight: Kirigami.Units.gridUnit
-                                            text: "−"
-                                            QQC2.ToolTip.text: "Exclude from the query"
-                                            QQC2.ToolTip.visible: hovered
-                                            onClicked: table.conditionRequested(
-                                                colDef.k, "<>", cell.val)
-                                        }
+                                    anchors.fill: parent
+                                    active: lead.kind === "icon"
+                                    // ASYNC: a Kirigami.Icon costs a theme lookup,
+                                    // and there is one per row. Loading it off the
+                                    // critical path lets the table appear at once —
+                                    // the icons fill in a frame later.
+                                    asynchronous: true
+                                    sourceComponent: Kirigami.Icon {
+                                        anchors.centerIn: parent
+                                        width: Kirigami.Units.iconSizes.small
+                                        height: Kirigami.Units.iconSizes.small
+                                        source: table.iconFor ? table.iconFor(row.modelData) : ""
+                                        QQC2.ToolTip.text: table.iconTip
+                                                           ? table.iconTip(row.modelData) : ""
+                                        QQC2.ToolTip.visible: iconHov.hovered
+                                                              && QQC2.ToolTip.text !== ""
+                                        HoverHandler { id: iconHov }
                                     }
                                 }
+                            }
+                        }
+                        Repeater {
+                            model: table.textCols
+                            // a plain Text, not a QQC2.Label: Label carries the
+                            // control/palette machinery, and this is the single
+                            // most-created object in the app (columns x rows). The
+                            // colour/font come from the table-level cached values.
+                            delegate: Text {
+                                required property var modelData
+                                width: table.colW(modelData)
+                                height: table.rowHeight
+                                leftPadding: Kirigami.Units.smallSpacing
+                                rightPadding: Kirigami.Units.smallSpacing
+                                verticalAlignment: Text.AlignVCenter
+                                horizontalAlignment: modelData.right === true
+                                    ? Text.AlignRight : Text.AlignLeft
+                                text: table.cellText(row.modelData, modelData.k)
+                                elide: Text.ElideRight
+                                color: table.textColor
+                                opacity: text === "" ? 0 : 0.9
+                                font.family: modelData.mono === true
+                                    ? "monospace" : table.fontFamily
+                                font.pointSize: table.fontSize
                             }
                         }
                     }
                 }
 
-                // the vertical column separators for the whole table: one line per
-                // column boundary instead of one per cell (as in State/Events)
+                // ONE line per column boundary for the whole table (not one per
+                // cell). This Item is a child of the ListView, i.e. of the
+                // Flickable's CONTENT: coordinates here are content coordinates, so
+                // the lines must NOT subtract contentX (they used to drift away
+                // from the columns as soon as the table was scrolled sideways), and
+                // they must span the whole content height, not one viewport (they
+                // used to vanish after scrolling down a screen).
                 Item {
                     anchors.fill: parent
                     z: 2
                     Repeater {
                         model: table.shownCols
-                        Kirigami.Separator {
+                        Rectangle {
                             required property int index
-                            x: {
-                                var w = Kirigami.Units.smallSpacing - hflick.contentX
-                                for (var i = 0; i <= index; i++)
-                                    w += table.colW(table.shownCols[i])
-                                          + Kirigami.Units.smallSpacing
-                                return w - Kirigami.Units.smallSpacing - 1
-                            }
+                            x: table.colRight(index) - 1
                             y: 0
-                            height: list.height
+                            width: 1
+                            height: list.contentHeight
+                            color: table.separatorColor
                             opacity: 0.25
                         }
+                    }
+                }
+
+                // THE SINGLE "+/-" OVERLAY: one instance for the whole table,
+                // moved to whichever cell the cursor is over. Replaces a
+                // HoverHandler plus a Loader in every cell.
+                Row {
+                    id: hoverOverlay
+                    z: 5
+                    spacing: 1
+                    readonly property var cd: (table.hoverColIdx >= 0
+                                               && table.hoverColIdx < table.shownCols.length)
+                                              ? table.shownCols[table.hoverColIdx] : null
+                    readonly property string val: (cd && (cd.kind || "text") === "text"
+                                                   && table.hoverRow)
+                                                  ? table.cellText(table.hoverRow, cd.k) : ""
+                    visible: val !== ""
+                    x: (table.hoverColIdx >= 0 ? table.colRight(table.hoverColIdx) : 0)
+                       - width - 2
+                    y: table.hoverRowY + (table.rowHeight - height) / 2
+                    QQC2.ToolButton {
+                        implicitWidth: Kirigami.Units.gridUnit
+                        implicitHeight: Kirigami.Units.gridUnit
+                        text: "+"
+                        QQC2.ToolTip.text: "Add to the query"
+                        QQC2.ToolTip.visible: hovered
+                        onClicked: if (hoverOverlay.cd)
+                            table.conditionRequested(hoverOverlay.cd.k, "=", hoverOverlay.val)
+                    }
+                    QQC2.ToolButton {
+                        implicitWidth: Kirigami.Units.gridUnit
+                        implicitHeight: Kirigami.Units.gridUnit
+                        text: "−"
+                        QQC2.ToolTip.text: "Exclude from the query"
+                        QQC2.ToolTip.visible: hovered
+                        onClicked: if (hoverOverlay.cd)
+                            table.conditionRequested(hoverOverlay.cd.k, "<>", hoverOverlay.val)
                     }
                 }
             }
         }
     }
 
-    // ---- column chooser ----
-    QQC2.Menu {
-        id: colMenu
-        Repeater {
-            model: table.columns
-            delegate: QQC2.MenuItem {
-                required property var modelData
-                visible: (modelData.kind || "text") === "text"
-                height: visible ? implicitHeight : 0
-                text: modelData.t
-                checkable: true
-                checked: table.hidden.indexOf(modelData.k) < 0
-                onTriggered: table.toggleColumn(modelData.k)
-            }
-        }
-        QQC2.MenuSeparator {}
-        QQC2.MenuItem {
-            text: "Show All Columns"
-            onTriggered: table.hidden = []
-        }
-    }
 }

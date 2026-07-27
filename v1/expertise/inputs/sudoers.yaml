@@ -1,0 +1,39 @@
+name: sudoers
+table: sudoers
+type: input
+version: 1.0.0
+title: Sudo rules
+icon: object-locked
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 130
+# Who may become root, and whether they must prove it with a password.
+#
+# ROOT REQUIRED — AND THIS TABLE IS EXPECTED TO BE EMPTY WITHOUT IT.
+# /etc/sudoers ships mode 0440 root:root and /etc/sudoers.d is 0750 root:root, so
+# an unprivileged collector cannot read either and osquery returns zero rows. That
+# was measured on this host, not assumed. The input is kept exactly as it is: per
+# principle 3 an honest empty table is the correct answer, and the same rule starts
+# producing rows the moment the collector runs as root. NO fallback is attempted —
+# shelling out to `sudo -n -l` would report only the CURRENT user's effective
+# rights, which is a different question dressed up as this one.
+#
+# Collection belongs to the input:
+#   * nopasswd - derived from the row's own rule_details. NOPASSWD is a keyword of
+#                the sudoers file format (sudoers(5)), i.e. part of parsing the
+#                data, not a hand-picked list of interesting values. A rule that
+#                grants root without re-authenticating is the privilege-escalation
+#                vector an analyst looks for first (v0 flagged the same thing).
+description: Rules from /etc/sudoers and /etc/sudoers.d — who may run what as
+  another user, and which rules skip the password. Both paths are root-only (0440
+  and 0750), so this table is EMPTY for an unprivileged collector and fills in only
+  when the collector runs as root; no substitute source is used.
+query: |
+  SELECT
+    source,
+    header,
+    rule_details,
+    CASE WHEN rule_details LIKE '%NOPASSWD%' THEN 1 ELSE 0 END AS nopasswd
+  FROM sudoers
+  ORDER BY source, header, rule_details

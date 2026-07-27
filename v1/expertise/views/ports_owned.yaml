@@ -3,6 +3,12 @@ name: ports_owned
 version: 1.0.0
 title: Listening ports with owner
 icon: network-server
+# Hidden as a Data tab: the `sockets` input now covers the same ground and more
+# (listening AND established AND unix, with the owner resolved in the query), so
+# two overlapping network tables would only split the reader's attention. The
+# view stays — it is the worked example of the derivation layer (a JOIN on a real
+# key column, validated by the edges mechanism) and it is queryable in SQL.
+hidden: true
 description: Attaches the owning process to each listening socket by joining on
   pid — a fact edge, not a lookup. Base tables come from two inputs
   (listening_ports, processes); the join happens here in the derivation layer.

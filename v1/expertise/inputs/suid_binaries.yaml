@@ -1,0 +1,71 @@
+name: suid_binaries
+table: suid_binaries
+type: input
+version: 1.0.0
+title: SUID binaries
+icon: application-x-executable
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 140
+# Executables that run as their OWNER rather than their caller — the standing
+# privilege-escalation surface of the machine.
+#
+# WHY THE GROUP BY (this is the whole point of the rule):
+# raw suid_bin walks /bin, /sbin, /usr/bin and /usr/sbin. On a merged-/usr distro
+# all four resolve to one real directory, so every command comes back FOUR times —
+# measured here: 136 rows for 34 actual commands. Reporting 136 would inflate the
+# apparent attack surface fourfold.
+# The fix is structural, not a hardcoded path list: two paths are the same file
+# when they share an inode. But inode ALONE over-merges — at/atq/atrm are hard
+# links to one binary (one inode, 25 inodes for 34 commands here) and are three
+# distinct entry points. So the identity key is (inode, basename): merged-/usr
+# aliases collapse, hard-linked commands survive. On a distro without merged /usr
+# the inodes differ and every path is kept. Verified: 136 -> 34, at/atq/atrm all
+# present. `paths` and `all_paths` keep the collapsed aliases visible rather than
+# silently dropping them.
+#
+# Collection belongs to the input:
+#   * name     - the command as invoked (basename of the row's own path).
+#   * kind     - 'S'/'G'/'SG' read out loud as setuid / setgid / setuid+setgid.
+#   * owner    - the identity a caller gains. Owner root is the interesting case,
+#                and a NON-root owner is equally worth seeing; both are reported.
+#   * mtime / age_days - a setuid bit set long ago is the distribution's design;
+#                one set recently is a change to investigate. v0 carried the same
+#                pair for privilege vectors so the analyst gets time, not just fact.
+#
+# LIMITATION (honest): osquery's suid_bin covers those four directories only. SUID
+# files under /opt, /usr/local or a home directory are NOT seen. Widening it would
+# mean either baking a directory list into the query or walking the filesystem on
+# every 30 s tick; neither is acceptable here, so the gap is stated instead of
+# quietly filled. Measured cost as written: ~0.32 s.
+# The fields worth reading FIRST in this table; everything else the
+# source produces stays available in the Columns panel.
+columns: [path, owner, owner_group, bits, kind, size, mtime, age_days]
+description: Setuid and setgid executables — programs that run with their owner's
+  privileges instead of the caller's. Covers /bin, /sbin, /usr/bin and /usr/sbin
+  only (osquery's suid_bin scope); SUID files under /opt, /usr/local or home
+  directories are not seen. Paths that are the same file reached through a merged
+  /usr are folded into one row, with the aliases kept in all_paths.
+query: |
+  SELECT
+    min(s.path)                                                     AS path,
+    replace(s.path, rtrim(s.path, replace(s.path, '/', '')), '')    AS name,
+    min(s.username)                                                 AS owner,
+    min(s.groupname)                                                AS owner_group,
+    min(s.permissions)                                              AS bits,
+    CASE min(s.permissions)
+         WHEN 'S'  THEN 'setuid'
+         WHEN 'G'  THEN 'setgid'
+         WHEN 'SG' THEN 'setuid+setgid'
+         ELSE min(s.permissions) END                                AS kind,
+    count(*)                                                        AS paths,
+    group_concat(s.path)                                            AS all_paths,
+    min(f.size)                                                     AS size,
+    min(f.mtime)                                                    AS mtime,
+    cast((strftime('%s', 'now') - min(f.mtime)) / 86400 AS INTEGER) AS age_days,
+    min(f.inode)                                                    AS inode
+  FROM suid_bin s
+  JOIN file f ON f.path = s.path
+  GROUP BY f.inode, name
+  ORDER BY name, path

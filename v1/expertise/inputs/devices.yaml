@@ -1,0 +1,88 @@
+name: devices
+table: devices
+type: input
+version: 1.0.0
+title: Devices
+icon: preferences-devices-tree
+interval: 900
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 320
+# Hardware inventory: usb_devices and pci_devices UNIONed into one table with a
+# `bus` column, the way v0's devices table carried a `kind`. One table, because
+# the analyst's question ("what hardware is attached to this machine") does not
+# split by bus, and a plugged-in USB device and a PCI card are the same kind of
+# fact.
+#
+# UNION ALL, not UNION: UNION would silently collapse two physically distinct
+# devices that happen to report identical rows. Nothing about a hardware
+# inventory should quietly lose a device. The slot column makes every row unique
+# anyway, so this costs nothing.
+#
+# READABLE CLASS (the v1 rule that a resolved, human column is produced HERE):
+#   * pci_devices.pci_class is already text ("Bridge", "Serial bus controller"),
+#     so it passes through.
+#   * usb_devices.class is the raw numeric USB-IF base class code — 9, 239, 2.
+#     The CASE renders it. This is the published USB-IF class-code table, a
+#     protocol constant like the syscall-number->name map, NOT a whitelist: it
+#     selects nothing, filters nothing, and every unmapped code falls through to
+#     'class <n>' so no device is hidden or mislabelled.
+#     Checked against this machine: 9 -> Hub (root hubs), 239 -> Miscellaneous
+#     (a UVC camera), 2 -> Communications, 224 -> Wireless controller (Bluetooth).
+#   * removable is osquery's tri-state (1 / 0 / -1 for unknown) rendered as
+#     words. Root hubs report unknown, and that is left as 'unknown' rather than
+#     guessed at — a hub is not "fixed", the kernel simply does not say.
+#
+# COLUMNS THAT ONE BUS DOES NOT HAVE are empty, never faked:
+#   * serial  — usb_devices has it; pci_devices has no serial column at all, so
+#     PCI rows carry ''. (Oddly useful side effect: a USB ROOT hub's serial is
+#     the PCI slot of its host controller, which links the two halves of this
+#     table to each other.)
+#   * driver  — pci_devices reports the bound kernel module (a real signal: an
+#     unbound or unexpected driver is worth looking at); usb_devices has no such
+#     column, so USB rows carry ''.
+#   * removable — meaningful only for USB; PCI rows carry ''.
+#
+# slot is the stable identifier and the sort key: the PCI address for PCI, and
+# bus:device zero-padded for USB (usb_address is the bus number and usb_port the
+# device number, as osquery reports them — cross-checked against lsusb).
+description: >
+  USB and PCI hardware in one table, distinguished by the bus column. The USB
+  class code is resolved to a readable name here; the PCI driver column shows
+  which kernel module is bound. Columns a bus does not have are left empty
+  rather than filled in: PCI has no serial and no removable flag, USB has no
+  driver. Needs no root.
+query: |
+  SELECT
+    'usb'                                          AS bus,
+    printf('%03d:%03d', u.usb_address, u.usb_port) AS slot,
+    u.vendor,
+    u.vendor_id,
+    u.model,
+    u.model_id,
+    u.serial,
+    CASE CAST(u.class AS INTEGER)
+      WHEN 1 THEN 'Audio'              WHEN 2 THEN 'Communications'
+      WHEN 3 THEN 'Human interface'    WHEN 5 THEN 'Physical'
+      WHEN 6 THEN 'Image'              WHEN 7 THEN 'Printer'
+      WHEN 8 THEN 'Mass storage'       WHEN 9 THEN 'Hub'
+      WHEN 10 THEN 'CDC data'          WHEN 11 THEN 'Smart card'
+      WHEN 13 THEN 'Content security'  WHEN 14 THEN 'Video'
+      WHEN 15 THEN 'Personal healthcare'
+      WHEN 16 THEN 'Audio/video'       WHEN 17 THEN 'Billboard'
+      WHEN 18 THEN 'USB-C bridge'      WHEN 60 THEN 'I3C'
+      WHEN 220 THEN 'Diagnostic'       WHEN 224 THEN 'Wireless controller'
+      WHEN 239 THEN 'Miscellaneous'    WHEN 254 THEN 'Application specific'
+      WHEN 255 THEN 'Vendor specific'
+      ELSE 'class ' || u.class END                 AS class,
+    u.subclass,
+    ''                                             AS driver,
+    CASE u.removable WHEN 1 THEN 'removable' WHEN 0 THEN 'fixed'
+                     ELSE 'unknown' END            AS removable
+  FROM usb_devices u
+  UNION ALL
+  SELECT
+    'pci', p.pci_slot, p.vendor, p.vendor_id, p.model, p.model_id, '',
+    p.pci_class, p.pci_subclass, p.driver, ''
+  FROM pci_devices p
+  ORDER BY bus, slot

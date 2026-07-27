@@ -1,0 +1,41 @@
+name: memory
+table: memory
+type: input
+version: 1.0.0
+title: Memory
+icon: memory
+interval: 900
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 350
+# Raw byte counters are kept exactly as osquery reports them (/proc/meminfo), so
+# nothing is lost. The derived columns are added HERE because they are the ones
+# an analyst actually reads, and each is a real computation, not a restatement:
+#   * memory_used = total - AVAILABLE, not total - free. free excludes the page
+#     cache and reclaimable slab, so "free" reads as near-zero on any healthy
+#     Linux box and would make every machine look exhausted. available is the
+#     kernel's own estimate of what a new allocation can get.
+#   * used_pct / swap_used_pct — nullif() on the denominator, so a machine with
+#     NO swap gets NULL (unknown), not a fabricated 0%.
+description: Memory and swap counters from /proc/meminfo, in bytes as osquery
+  reports them, plus used bytes and used percentage. Point-in-time snapshot, so
+  these are instantaneous levels, not an average over the interval. swap_used_pct
+  is NULL when the machine has no swap configured.
+query: |
+  SELECT
+    memory_total,
+    memory_free,
+    memory_available,
+    memory_total - memory_available AS memory_used,
+    buffers,
+    cached,
+    active,
+    inactive,
+    swap_total,
+    swap_free,
+    swap_total - swap_free          AS swap_used,
+    swap_cached,
+    round((memory_total - memory_available) * 100.0 / nullif(memory_total, 0), 1) AS used_pct,
+    round((swap_total  - swap_free)         * 100.0 / nullif(swap_total,  0), 1) AS swap_used_pct
+  FROM memory_info
+  ORDER BY memory_total

@@ -1,0 +1,23 @@
+type: taxonomy
+name: events
+title: Event taxonomy
+version: 1.0.0
+# The catalog of event fields, grouped for the UI (the field panel and the
+# "group by" list read this). The actual table schema is the output of the
+# normalize view below — these names must match its SELECT columns. ECS-ish,
+# subject -> object axis (who did what to what), as agreed for v1.
+groups:
+  - group: event
+    fields: [ts, event_kind, event_category, event_action, event_outcome, host, message]
+  - group: process (subject)
+    fields: [process_pid, process_binary, process_name, process_args, process_uid,
+             process_user, process_cwd, process_exec_id, process_start,
+             process_flags, process_auid]
+  - group: parent
+    fields: [parent_pid, parent_binary, parent_name, parent_exec_id]
+  - group: subject -> object
+    fields: [subject_name, object_type, object_name]
+  - group: network
+    fields: [source_ip, source_port, dest_ip, dest_port, protocol, direction]
+  - group: file
+    fields: [file_path, file_op]

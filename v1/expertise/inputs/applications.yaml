@@ -1,0 +1,111 @@
+name: applications
+table: applications
+type: input
+version: 1.0.0
+title: Applications
+icon: system-software-install
+# The fields worth reading FIRST in this table; everything else the
+# source produces stays available in the Columns panel.
+columns: [kind, name, version, summary, publisher, installed, owner, path]
+description: Installed software from every package manager present on this host —
+  one row per package, told apart by the kind column (rpm, pip, npm, vscode,
+  jetbrains). Honest gaps come from what each manager itself records - rpm keeps
+  no summary and no single install path, pip/npm keep no install time or size.
+# One inventory, several managers (this is v0's `applications` table, where rpm +
+# flatpak + pip all landed together). A UNION ALL keeps that shape while the
+# `kind` column keeps the provenance, so "what is installed" is one question with
+# one answer instead of five tabs the analyst has to compare by hand.
+#
+# Collection belongs to the input, so the columns are made READABLE here, in SQL,
+# not later:
+#   * version   - for rpm the full EVR the way dnf prints it, epoch prefixed only
+#                 when it is real (`1:7.1.2.27-1.fc44`); version alone is not what
+#                 is installed, and two builds of one version differ by release.
+#   * owner     - the ACCOUNT the package is installed for, resolved to a username
+#                 (osquery gives a bare uid). Empty means system-wide. npm has no
+#                 uid column at all, so it is resolved by asking which user's home
+#                 the package sits under - joined against the users table, never a
+#                 hardcoded home. Measured: 309 user / 145 system npm rows.
+#   * installed - unix SECONDS everywhere. vscode_extensions reports MILLISECONDS,
+#                 which would read as year 58000 next to rpm; divided here so one
+#                 column has one unit.
+#   * source    - provenance the manager records: for rpm the source package, which
+#                 is what shows that 7zip / 7zip-reduced / 7zip-standalone are one
+#                 upstream thing; for the editors, which edition/product it belongs
+#                 to. Empty where the manager records nothing.
+#   * arch      - rpm only, and it MATTERS: one name can be installed twice for two
+#                 architectures, and without arch those two rows look like one.
+#
+# Empty is written as '' rather than 0: a package manager that does not record a
+# size has no size, and a 0 in `installed` would render as 1970 and read as a fact.
+#
+# MEASURED on this host: 3888 rows in 2.0 s (rpm 3277, npm 454, pip 151, vscode 6).
+# rpm alone is ~1.9 s of that, and it is the whole point of the table, so it stays;
+# what is avoided is joining rpm_package_files (450k rows) to give rpm a path.
+# jetbrains_plugins returns 0 rows here (no JetBrains IDE installed) and costs
+# ~0.02 s - kept so the inventory does not silently miss plugins the day one is.
+#
+# interval: an inventory changes when something is installed, not every 30 s.
+# Re-reading the rpm database twice a minute would spend 7% of the machine's
+# collection budget re-confirming an unchanged list.
+interval: 300
+# Hidden as a tab: the app_links view shows these very rows PLUS how each
+# package sits in the dependency graph, so two tabs would be the same list
+# twice. The table itself is still collected and queryable in SQL.
+hidden: true
+query: |
+  SELECT
+    'rpm'                                       AS kind,
+    r.name                                      AS name,
+    CASE WHEN r.epoch IS NOT NULL AND r.epoch > 0
+         THEN r.epoch || ':' ELSE '' END
+      || r.version || '-' || r.release          AS version,
+    coalesce(r.arch, '')                        AS arch,
+    ''                                          AS summary,
+    coalesce(r.vendor, '')                      AS publisher,
+    ''                                          AS owner,
+    ''                                          AS path,
+    coalesce(r.source, '')                      AS source,
+    coalesce(r.size, '')                        AS size,
+    coalesce(r.install_time, '')                AS installed
+  FROM rpm_packages r
+  UNION ALL
+  SELECT 'pip', p.name, p.version, '',
+         coalesce(p.summary, ''),
+         coalesce(p.author, ''),
+         coalesce(u.username, ''),
+         coalesce(p.path, ''),
+         '', '', ''
+  FROM python_packages p
+  LEFT JOIN users u ON p.uid = u.uid
+  UNION ALL
+  SELECT 'npm', n.name, n.version, '',
+         coalesce(n.description, ''),
+         coalesce(n.author, ''),
+         coalesce((SELECT u.username FROM users u
+                   WHERE u.directory <> '' AND u.directory <> '/'
+                     AND n.path LIKE u.directory || '/%'
+                   ORDER BY length(u.directory) DESC LIMIT 1), ''),
+         coalesce(n.path, ''),
+         '', '', ''
+  FROM npm_packages n
+  UNION ALL
+  SELECT 'vscode', v.name, v.version, '',
+         '',
+         coalesce(v.publisher, ''),
+         coalesce(u.username, ''),
+         coalesce(v.path, ''),
+         coalesce(v.vscode_edition, ''), '',
+         coalesce(v.installed_at / 1000, '')
+  FROM vscode_extensions v
+  LEFT JOIN users u ON v.uid = u.uid
+  UNION ALL
+  SELECT 'jetbrains', j.name, j.version, '',
+         '',
+         coalesce(j.vendor, ''),
+         coalesce(u.username, ''),
+         coalesce(j.path, ''),
+         coalesce(j.product_type, ''), '', ''
+  FROM jetbrains_plugins j
+  LEFT JOIN users u ON j.uid = u.uid
+  ORDER BY kind, name, version, arch, path

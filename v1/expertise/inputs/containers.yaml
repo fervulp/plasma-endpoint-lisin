@@ -1,0 +1,63 @@
+name: containers
+table: containers
+type: input
+version: 1.0.0
+title: Containers
+icon: container
+# Containers start and stop far more often than an inventory changes, but the
+# query talks to the Docker daemon over a socket, so it does not ride the 30 s
+# process cadence either.
+interval: 60
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 190
+description: >-
+  Docker containers, from osquery's docker_containers table. HONEST LIMITS: this
+  reads the Docker daemon socket, and it returns NOTHING - not an error - in
+  three different situations that the table cannot tell apart: the daemon is not
+  running, the collector's user cannot read /var/run/docker.sock (that needs the
+  docker group or root), or there are simply no containers. An empty tab
+  therefore means "nothing visible here", not "nothing exists"; check the daemon
+  and the group before reading it as clean. Verified on this machine: the daemon
+  is up and the socket is readable, and the count is genuinely zero because no
+  containers are defined. Only Docker is covered - Podman and containerd
+  workloads do NOT appear in this table, and no fallback is invented for them.
+# Collection belongs to the input, so the columns an analyst needs are produced
+# HERE rather than derived later:
+#   * short_id   - the 12-char form docker itself prints, so rows can be matched
+#                  against what the user sees in `docker ps`; the full id is kept
+#                  in its own column and is what the row is really keyed by;
+#   * created_at - created is a raw epoch; rendered readable, and left EMPTY when
+#                  it is 0 rather than printing a 1970 date that means "unknown";
+#   * privileged / readonly_rootfs - real containment signals, rendered as a word
+#                  instead of 1/0 so the table reads without a legend. A
+#                  privileged container is not isolated from the host, which is
+#                  exactly what an EDR is asked about;
+#   * pid        - the host-side PID of the container's main process. This is the
+#                  join back to the processes table, so a container can be tied
+#                  to what it is actually running on this host.
+# Ordered newest-first, with the id breaking ties so the order cannot shuffle
+# between runs.
+query: |
+  SELECT
+    substr(c.id, 1, 12)                                     AS short_id,
+    c.name,
+    c.image,
+    c.command,
+    c.state,
+    c.status,
+    c.pid,
+    CASE WHEN c.privileged = 1 THEN 'yes' ELSE '' END       AS privileged,
+    CASE WHEN c.readonly_rootfs = 1 THEN 'yes' ELSE '' END  AS readonly_rootfs,
+    c.security_options,
+    c.created,
+    CASE WHEN c.created > 0
+         THEN datetime(c.created, 'unixepoch') ELSE '' END  AS created_at,
+    c.started_at,
+    c.finished_at,
+    c.path,
+    c.config_entrypoint,
+    c.image_id,
+    c.id
+  FROM docker_containers c
+  ORDER BY c.created DESC, c.id

@@ -1,0 +1,77 @@
+name: storage
+table: storage
+type: input
+version: 1.0.0
+title: Storage
+icon: drive-harddisk
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 310
+# Collection belongs to the input (v1 principle), so the two things an analyst
+# actually reads are produced HERE, in SQL, not guessed later:
+#
+#   * kind (disk | partition | mapped) is derived STRUCTURALLY, from the parent
+#     chain in this same table — no device-name pattern is hardcoded:
+#       - parent is not itself a block device      -> disk
+#         (a whole NVMe disk's parent is the /dev/nvmeN controller, which is not
+#         a block device, so "empty parent" alone would not have worked)
+#       - parent is a disk                         -> partition
+#       - parent is itself a partition             -> mapped (device-mapper:
+#         LUKS/LVM volume stacked on a partition)
+#     v0 merged the crypt wrapper into its partition; here the wrapper stays its
+#     own row and is simply labelled, so nothing is lost by the merge.
+#   * size_gb — block_devices.size is a count of 512-byte sectors (it is read
+#     from /sys/class/block/*/size, always 512-byte units regardless of the
+#     device's own block_size). Multiplying by block_size would be wrong and off
+#     by 8x on a 4K device. size_bytes keeps the exact magnitude.
+#
+# HONEST EMPTY (this collector runs as a normal user, not root):
+#   * encryption_status / encryption_type come from disk_encryption, which
+#     osquery refuses to populate without root ("Not running as root, disk
+#     encryption status not available"). The LEFT JOIN is kept so the columns
+#     exist and fill in immediately if the collector is ever run privileged.
+#     They are EMPTY here even on a machine that really is LUKS-encrypted.
+#   * fs_type / label / uuid come from a libblkid probe of the raw device, which
+#     needs read access to /dev/<disk> (root, or the `disk` group). osquery logs
+#     "Not running as root, LVM and other column data not available" and returns
+#     them empty. Filesystem type per MOUNT is available without root — see the
+#     mounts input.
+description: >
+  Block devices — disks, partitions and device-mapper volumes — with the
+  encryption status attached. Limitation: run as a normal user, osquery cannot
+  probe raw devices, so fs_type/label/uuid and both encryption columns come back
+  EMPTY even when the disk really is encrypted; they need root. The topology,
+  sizes, vendor/model/serial are complete.
+query: |
+  SELECT
+    b.name,
+    b.parent,
+    CASE WHEN p.name IS NULL THEN 'disk'
+         WHEN g.name IS NULL THEN 'partition'
+         ELSE 'mapped' END                        AS kind,
+    b.vendor,
+    b.model,
+    b.serial,
+    b.size * 512                                  AS size_bytes,
+    round(b.size * 512.0 / 1073741824.0, 2)       AS size_gb,
+    b.block_size,
+    -- WHAT IS ON THE DEVICE. osquery fills block_devices.type/label/uuid from the
+    -- filesystem superblock, which a non-root process may not read — measured
+    -- here: all three come back empty. For a device that is MOUNTED the same
+    -- facts are visible through the mount table, so they are taken from there and
+    -- the raw column is kept as the fallback. An unmounted partition stays empty,
+    -- which is the truth rather than a guess.
+    COALESCE(NULLIF(b.type, ''), m.type, '')      AS fs_type,
+    b.label,
+    b.uuid,
+    m.path                                        AS mounted_at,
+    CASE WHEN m.path IS NULL THEN '' ELSE 'yes' END AS mounted,
+    e.encryption_status,
+    e.type                                        AS encryption_type
+  FROM block_devices b
+  LEFT JOIN block_devices p ON p.name = b.parent
+  LEFT JOIN block_devices g ON g.name = p.parent
+  LEFT JOIN disk_encryption e ON e.name = b.name
+  LEFT JOIN mounts m ON m.device = b.name OR m.device_alias = b.name
+  ORDER BY b.name

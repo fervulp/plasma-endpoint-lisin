@@ -1,0 +1,36 @@
+name: uptime
+table: uptime
+type: input
+version: 1.0.0
+title: Uptime
+icon: chronometer
+interval: 60
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 360
+# boot_time is the column with actual investigative value: "how long has it been
+# up" is a number that changes every second, while "WHEN did it boot" is a fixed
+# instant an analyst can line up against events, logins and a suspected reboot.
+# Derived HERE rather than left to the reader, and emitted as ISO-8601 UTC with
+# an explicit Z — the same convention the events store uses, so the two can be
+# compared directly (the UI renders local time at the display boundary).
+# CHECKED: it does not drift. now() and total_seconds both advance one second per
+# second, so their difference is constant — 5 consecutive runs returned the exact
+# same instant, and it agrees with `who -b`. Had it jittered, this table would
+# have counted as "changed" on every 30 s cycle.
+description: How long this machine has been running, and the instant it booted
+  (boot_time, ISO-8601 UTC). Uptime is measured from the kernel's own clock, so
+  it survives no reboot — a value smaller than the previous collection means the
+  machine restarted in between.
+query: |
+  SELECT
+    days,
+    hours,
+    minutes,
+    seconds,
+    total_seconds,
+    strftime('%Y-%m-%dT%H:%M:%SZ', strftime('%s', 'now') - total_seconds, 'unixepoch') AS boot_time,
+    days || 'd ' || hours || 'h ' || minutes || 'm'                                    AS uptime_text,
+    round(total_seconds / 86400.0, 2)                                                  AS up_days
+  FROM uptime
+  ORDER BY total_seconds

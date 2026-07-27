@@ -1,0 +1,67 @@
+name: scheduled
+table: scheduled
+type: input
+version: 1.0.0
+title: Scheduled
+icon: appointment-new
+interval: 60
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 60
+# Collection belongs to the input:
+#   * schedule - the five cron fields joined into the one string a human reads,
+#                or the @event keyword (@reboot/@daily) when the entry uses one.
+#                The five raw columns are kept beside it for filtering.
+#   * run_as   - WHO the entry runs as. This is not a column osquery returns; it
+#                has to be derived, and the rule is a format fact from crontab(5),
+#                not a guess: the SYSTEM crontabs (/etc/crontab and /etc/cron.d/*)
+#                carry a user field between the time spec and the command, while a
+#                per-user crontab does not - there the spool file is named after
+#                its owner. So: first token of command for system files, file
+#                basename otherwise.
+#   * command  - with that user field stripped for system entries, so the column
+#                means the same thing in every row and can be compared or joined.
+#                Live: "root run-parts /etc/cron.hourly" -> run_as=root,
+#                command="run-parts /etc/cron.hourly".
+#   * scope    - system (under /etc) or user.
+# The user-spool branch has no live rows on this machine (see below), so its
+# basename expression was checked separately against a literal path rather than
+# claimed to work: '/var/spool/cron/someuser' -> 'someuser'.
+# The fields worth reading FIRST in this table; everything else the
+# source produces stays available in the Columns panel.
+columns: [command, minute, hour, day_of_month, month, day_of_week, path, event]
+description: >
+  Cron entries osquery can read: /etc/crontab and /etc/cron.d/*. HONEST LIMIT -
+  per-user crontabs live in /var/spool/cron, which is mode 0700 root, so a
+  collector running as a normal user sees NONE of them; this is not "no user cron
+  jobs exist", it is "we cannot look". Two more real gaps, stated rather than
+  papered over: the run-parts drop-in directories (/etc/cron.hourly and friends)
+  are script directories, not crontab files, so their scripts show up only as the
+  run-parts command that calls them; and on Fedora most timed work is systemd
+  timers, which are in the services table as kind = 'timer', not here. One row on
+  this machine is the correct answer, not a broken query - Fedora's /etc/crontab
+  ships with environment assignments and comments only.
+query: |
+  SELECT
+    path,
+    CASE WHEN path LIKE '/etc/%' THEN 'system' ELSE 'user' END       AS scope,
+    CASE WHEN path LIKE '/etc/%'
+         THEN split(command, ' ', 0)
+         ELSE replace(path, rtrim(path, replace(path, '/', '')), '')
+    END                                                              AS run_as,
+    CASE WHEN path LIKE '/etc/%'
+         THEN ltrim(substr(command, length(split(command, ' ', 0)) + 1))
+         ELSE command
+    END                                                              AS command,
+    CASE WHEN event <> '' THEN event
+         ELSE minute || ' ' || hour || ' ' || day_of_month || ' ' ||
+              month || ' ' || day_of_week
+    END                                                              AS schedule,
+    event,
+    minute,
+    hour,
+    day_of_month,
+    month,
+    day_of_week
+  FROM crontab
+  ORDER BY path, hour, minute, command

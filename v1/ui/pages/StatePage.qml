@@ -8,46 +8,25 @@ import "../components"
 import "../views"
 import "."
 
-// System state: read-only tables view. Table/field/record management
-// lives in the SQL tab. Right sidebars (details, columns) are full height.
+// The "Data" section: read-only tables (state snapshots + the events stream),
+// each read/filtered/grouped through the shared QueryBar and rendered by the
+// shared DataTable. Right sidebars (details, columns) are full height.
 Kirigami.Page {
     // no page title: the section is "Data" in the drawer; a header just wastes space
     id: page
+    objectName: "statePage"
     title: ""
     padding: 0
 
     // grey canvas, so the white panels read as floating cards above it
-    background: Rectangle {
-        Kirigami.Theme.colorSet: Kirigami.Theme.Window
-        Kirigami.Theme.inherit: false
-        color: Kirigami.Theme.backgroundColor
-    }
+    background: PageBackground {}
 
     property var s: root.sysState
-    // Vulnerabilities live in a separate tab of the "Dashboards" section: that is
-    // not an inventory of the system but a list of tasks, "what to patch".
-    // EVENTS is just another Data tab now (no separate menu). It lives in
-    // events.db, so the backend routes tableRows("events", ...) there; here it is
-    // a synthetic tab with a curated column set (the full field set is in the
-    // Details sidebar and via SQL). colcfg is an empty object so all its columns
-    // show by default.
-    property int eventsTotal: 0        // all events in events.db (for the tab count)
-    function refreshEventsTotal() {
-        var r = backend.tableRows("events", "", "", 1, 0)
-        page.eventsTotal = r.total || 0
-    }
-    readonly property var eventsTab: ({
-        name: "events", title: "Events", icon: "view-list-details",
-        builtin: true, count: page.eventsTotal, collected_at: "",
-        // hidden-by-default (still available in the Columns picker)
-        colcfg: ({ hidden: ["user_name", "event_module", "process_pid",
-                            "subject_name"] }),
-        columns: ["ts", "event_module", "event_category", "event_action",
-                  "event_outcome", "subject_name", "process_name", "process_pid",
-                  "user_name", "destination_ip", "object_type", "object_name",
-                  "message"]
-    })
-    // THE EVENT TAXONOMY: all 107 field names + the fields grouped by category.
+    // EVENTS is just another Data tab. It is served by the backend like every
+    // other tab (its rows come from the separate event store via
+    // tableRows("events", ...), its curated default columns + count come in the
+    // snapshot); this page no longer fabricates it. tabPrio sorts it first.
+    // THE EVENT TAXONOMY: all field names + the fields grouped by category.
     // Loaded once (the taxonomy is static). Used for the events tab: every field
     // is offered in the query bar SELECT, and the Details sidebar groups by category.
     readonly property var eventTax: backend.eventTaxonomy()
@@ -66,27 +45,24 @@ Kirigami.Page {
             return eventTax.groups
         return [{ group: "", fields: cur.columns }]
     }
-    // priority of the state tables (Events is always first, then Processes, then
-    // the rest by how central they are to an investigation).
-    readonly property var tabPrio: ({
-        processes: 1, ports: 2, applications: 3, services: 4, scheduled: 5,
-        persistence: 6, open_files: 7, app_config: 8, config_files: 9,
-        privesc: 10, suid_binaries: 11, users: 12, network: 13, dns: 14,
-        unix_sockets: 15, net_config: 16, browser_extensions: 17,
-        browser_history: 18, shell_history: 19, logins: 20, kernel_modules: 21,
-        mounts: 22, security: 23, firewall: 24, unpackaged_config: 25
-    })
+    // THE READING ORDER COMES FROM THE RULES. Each source declares `priority:`
+    // in its own YAML (lower first), so adding a source no longer means editing a
+    // list of table names in the interface. A table without one sorts after those
+    // that have one, alphabetically. Events is served with its own priority too.
     property var tabsModel: {
-        var t = (s ? s.tabs : []).filter(function (x) {
-            return x.name !== "vulnerabilities"
-        })
-        var arr = t.slice()
+        var arr = (s ? s.tabs : []).slice()
         arr.sort(function (a, b) {
-            var pa = page.tabPrio[a.name] || 99, pb = page.tabPrio[b.name] || 99
+            // NB: `prio || 99` is wrong here — events has priority 0, and 0 is
+            // falsy, so it would fall through to 99 and sort LAST. Check for
+            // undefined explicitly.
+            // NB: an explicit undefined check, not `|| big` — priority 0 is a
+            // legal value and would be swallowed by a falsy test.
+            var pa = a.priority; if (pa === undefined || pa === null) pa = 1e9
+            var pb = b.priority; if (pb === undefined || pb === null) pb = 1e9
             return pa !== pb ? pa - pb
                              : String(a.title || a.name).localeCompare(String(b.title || b.name))
         })
-        return [page.eventsTab].concat(arr)
+        return arr
     }
     property int tabIndex: 0
     // THE ROWS OF THE CURRENT TABLE, fetched by name. The snapshot used to carry
@@ -97,51 +73,16 @@ Kirigami.Page {
     property var curRows: []          // ONE page, as the database returned it
     property int curTotal: 0          // how many rows the condition matches in total
     property string rowsError: ""
-    // JOIN state: when joinTable is set, the current table is LEFT JOINed with it
-    // on joinLeft = joinRight and the joined columns appear (prefixed) after it.
-    property string joinTable: ""
-    property string joinLeft: ""
-    property string joinRight: ""
-    property var joinCols: []         // columns the join query returned (base + join.*)
     function loadRows() {
         if (!cur) { curRows = []; curTotal = 0; rowsError = ""; return }
         var where = page.whereSql()
         var order = sortCol !== "" ? (sortCol + (sortAsc ? " ASC" : " DESC")) : ""
         var lim = pageLimit > 0 ? pageLimit : 0
         var off = pageLimit > 0 ? pageIndex * pageLimit : 0
-        var r
-        if (page.joinTable !== "" && page.joinLeft !== "" && page.joinRight !== "") {
-            r = backend.tableJoinRows(cur.name, page.joinTable, page.joinLeft,
-                                      page.joinRight, where, order, lim, off)
-            page.joinCols = r.columns || []
-        } else {
-            r = backend.tableRows(cur.name, where, order, lim, off)
-            page.joinCols = []
-        }
+        var r = backend.tableRows(cur.name, where, order, lim, off)
         curRows = r.rows || []
         curTotal = r.total || 0
         rowsError = r.error || ""
-    }
-    property var joinTablesList: []   // tables that can be joined to the current one
-    function fetchJoinTables() {
-        // works for events too: it joins state tables (cross-database)
-        joinTablesList = cur ? (backend.joinTables(cur.name) || []) : []
-    }
-    function setJoinTable(t) {
-        joinTable = String(t || "")
-        if (joinTable === "") { joinLeft = ""; joinRight = "" }
-        else {
-            var s = backend.joinSuggest(cur.name, joinTable)   // suggest the ON pair
-            joinLeft = s.left || ""; joinRight = s.right || ""
-        }
-        pageIndex = 0
-        loadRows()
-    }
-    function joinTableColumns() {
-        for (var i = 0; i < joinTablesList.length; i++)
-            if (joinTablesList[i].name === joinTable)
-                return joinTablesList[i].columns || []
-        return []
     }
     // filtering the list of tables by name
     property string tabFilter: ""
@@ -160,10 +101,8 @@ Kirigami.Page {
     property var cur: tabIndex >= 0 && tabIndex < tabsModel.length
                       ? tabsModel[tabIndex] : null
 
-    // the columns to render: the join result's columns when a join is active,
-    // otherwise the current table's own columns
-    property var listCols: (joinTable !== "" && joinCols.length)
-                           ? joinCols : (cur ? cur.columns : [])
+    // the columns to render: the current table's own columns
+    property var listCols: cur ? cur.columns : []
     property var colOrder: {
         if (!cur) return listCols
         const cfg = cur.colcfg
@@ -207,10 +146,6 @@ Kirigami.Page {
     // private keys the value is empty), and public keys are open by definition -
     // we show their content directly. Only real secrets are masked.
     readonly property var sensitiveCols: ["secret", "private", "token", "password"]
-    // Events are append-only (events.db), not an editable state table: the row
-    // editor and cell writes are disabled for that tab (setCell would target a
-    // non-existent state table). Details/filtering/sorting still work.
-    readonly property bool curEditable: !(cur && cur.name === "events")
     // WHICH COLUMNS ARE SHOWN BY DEFAULT: all of them except the long ones
     // (content, description, vrl) and the secret ones.
     //
@@ -225,9 +160,32 @@ Kirigami.Page {
                                                     || sensitiveCols.includes(c))
     // A selection made in the query bar wins, but only for the columns this table
     // actually has - so it can never outlive the table it was made for.
+    // THE TABLE'S OWN COLUMN SET, before any hand-picked SELECT. Keeping this
+    // separate breaks a two-way loop that caused a family of bugs: the selection
+    // was derived from the shown columns while the shown columns were derived
+    // from the selection, so which one won depended on the order two bindings
+    // happened to re-evaluate. Now the base is one-directional (rule -> shown),
+    // the query bar's DEFAULT is the base, and a hand-picked SELECT overrides
+    // what is shown without ever feeding back into the default.
+    property var baseCols: {
+        var out = colOrder.filter(c => !hiddenCols.includes(c))
+        if (groupBy.length || groupKeys.length)
+            out = out.filter(c => groupBy.indexOf(c) < 0 && groupKeys.indexOf(c) < 0)
+        return out
+    }
     property var visibleCols: {
         var mine = selectCols.filter(c => listCols.includes(c))
-        return mine.length ? mine : colOrder.filter(c => !hiddenCols.includes(c))
+        var out = mine.length ? mine : baseCols
+        // A COLUMN GROUPED BY IS NOT REPEATED IN THE TABLE. The group panel on the
+        // left already says which value this is; showing the same value again in
+        // every row of the right-hand table is a column of one repeated word.
+        // Both lists: groupBy is what the user just typed (so the column vanishes
+        // immediately, without waiting for the database round trip), groupKeys is
+        // what the database confirmed as a key — an aggregate among the terms is
+        // not a column and is not in either.
+        if (groupBy.length || groupKeys.length)
+            out = out.filter(c => groupBy.indexOf(c) < 0 && groupKeys.indexOf(c) < 0)
+        return out
     }
 
     property var savedWidths: cur && cur.colcfg && cur.colcfg.widths
@@ -237,21 +195,51 @@ Kirigami.Page {
     // changes (curName), not on every automatic data refresh - otherwise the user
     // loses the selected row and the position on every tick.
     property string curName: cur ? cur.name : ""
+    // ONE TABLE REBUILD PER TAB SWITCH. Each of these assignments feeds a binding
+    // the table is built from (rows, columns), and every one of them used to
+    // rebuild the delegates: loading first and resetting after cost three full
+    // rebuilds (measured: ~0.5 s each on a 21-column page). So: tear the table
+    // down cheaply first (empty rows), reset everything while it is empty, and
+    // load ONCE at the end. _switching keeps onCurChanged from loading again.
+    property bool _switching: false
+    // EMPTY THE TABLE BEFORE THE COLUMNS CHANGE. tabIndex feeds `cur`, which feeds
+    // the column set; if the old rows are still in place when the columns change,
+    // every row delegate is rebuilt against the new columns and then thrown away
+    // (measured: that rebuild is the bulk of a tab switch). Clearing here, on the
+    // index itself, means the column change lands on an empty table and the rows
+    // are built exactly once, by loadRows below.
+    onTabIndexChanged: { curRows = []; curTotal = 0; rowsError = "" }
     onCurNameChanged: {
-        // A DIFFERENT TABLE HAS DIFFERENT FIELDS: both the selection and the
-        // condition of the previous table are meaningless here - reset them with the view.
-        page.loadRows()
+        _switching = true
+        curRows = []; curTotal = 0; rowsError = ""
         page.queryText = ""; page.queryError = ""; page.selectCols = []
         if (typeof qbar !== "undefined") qbar.clearAll()
         liveWidths = ({}); selRows = []; selAnchor = -1; pageIndex = 0
         sortCol = ""; sortAsc = true; lastSel = null; selName = ""
         allSelected = false
-        joinTable = ""; joinLeft = ""; joinRight = ""; joinCols = []
-        fetchJoinTables()
+        groupBy = []; groupKeys = []; groupMeasures = []   // a grouping is per table
+        groupPicked = false; groupVal = ""; groupParts = []
+        syncColumns()          // the new table's columns, built once
+        // and only THEN the selection, from the columns that were just computed —
+        // otherwise the bar is cleared against the previous table's column list
+        if (typeof qbar !== "undefined") qbar.setSelection(page.baseCols)
+        page.loadRows()
+        // AND AGAIN once the event loop has settled. The bar re-derives its own
+        // selection from bindings that re-evaluate after this handler returns, so
+        // an assignment made here alone was overwritten a moment later — the
+        // SELECT then listed the whole table instead of the shown columns.
+        Qt.callLater(function () {
+            if (typeof qbar !== "undefined" && !page._switching)
+                qbar.setSelection(page.baseCols)
+        })
+        _switching = false
     }
     // The same tab, fresh data: we re-point the selection and the details row at
     // the NEW row objects by _id (so that they show the current values).
     onCurChanged: {
+        // a tab SWITCH is handled by onCurNameChanged (one rebuild); this handler
+        // is only for fresh data of the SAME table
+        if (_switching) return
         // fresh data for the same table: re-read the rows, then re-point the
         // selection at the new objects
         if (cur && cur.name === curName && curRows.length === 0) page.loadRows()
@@ -290,23 +278,36 @@ Kirigami.Page {
         }
     }
     Component.onCompleted: {
-        // v1: the Events tab has no source yet — open the first tab that has
-        // rows so Data does not come up blank on Events.
+        // if the first tab (Events) is genuinely empty, open the first one that
+        // has rows so Data does not come up blank.
         if (page.tabIndex === 0 && page.cur && (page.cur.count || 0) === 0)
             for (var i = 0; i < page.tabsModel.length; i++)
                 if ((page.tabsModel[i].count || 0) > 0) { page.tabIndex = i; break }
-        page.loadRows(); page.refreshEventsTotal(); page.fetchJoinTables(); applyFocus()
+        page.syncColumns(); page.loadRows(); applyFocus()
     }
 
-    // FRESH DATA WITHOUT THRASHING. The snapshot arrives while the pipeline
-    // collects (once a second at most), and re-reading the table on every one of
-    // them would keep the list rebuilding under the cursor. We coalesce them: one
-    // read shortly after the last snapshot, and only for the table on screen.
-    onSChanged: rowsTimer.restart()
+    // FRESH DATA WITHOUT THRASHING. A snapshot arrives whenever events are
+    // ingested (seconds apart) or a collection ran. Re-reading the table on every
+    // one of them would keep the list rebuilding under the cursor, so:
+    //   * only the table ON SCREEN is re-read, and only when the page is visible;
+    //   * a snapshot that carries no NEW COLLECTION (`gen` unchanged) cannot have
+    //     changed a state table — only the events stream grows, so only the
+    //     Events tab re-reads;
+    //   * and the reads are coalesced by a short timer.
+    property int _seenGen: -1
+    onSChanged: {
+        if (!page.visible) return
+        var g = s && s.gen !== undefined ? s.gen : -1
+        var isEvents = cur && cur.name === "events"
+        if (g === _seenGen && !isEvents) return
+        _seenGen = g
+        rowsTimer.restart()
+    }
+    onVisibleChanged: if (visible) rowsTimer.restart()
     Timer {
         id: rowsTimer
         interval: 400
-        onTriggered: { page.loadRows(); page.refreshEventsTotal() }
+        onTriggered: page.loadRows()
     }
     Connections {
         target: root
@@ -328,6 +329,8 @@ Kirigami.Page {
         const o = Object.assign({}, liveWidths)
         o[c] = Math.max(60, w)
         liveWidths = o
+        _widthVer++          // the column signature changed -> rebuild the widths
+        syncColumns()
     }
     function persistWidths() {
         if (!cur) return
@@ -353,25 +356,6 @@ Kirigami.Page {
         saveColCfg(colOrder, h)
     }
 
-    // whether an on-demand collection is running
-    property bool collecting: false
-    Connections {
-        target: backend
-        function onCollectingChanged() { page.collecting = backend.isCollecting() }
-    }
-
-    function setQuick(t) { qbar.quickText = t; qbar.apply() }
-    // for verification by rendering
-    function setGroupBy(fs) {
-        qbar.addClause("group"); qbar.spec.groupBy = fs; qbar.touch(); qbar.apply()
-    }
-    function pickGroup(row) {
-        page.groupPicked = true
-        page.groupVal = String(row.value || "")
-        page.groupParts = row.parts || []
-        page.applyQuery(page.queryText)
-    }
-
     // sort + filters + pagination
     property string sortCol: ""
     property bool sortAsc: true
@@ -383,7 +367,10 @@ Kirigami.Page {
         pageIndex = 0
         page.loadRows()          // ORDER BY is the database's job
     }
-    onPageIndexChanged: page.loadRows()
+    // not during a tab switch: that handler resets pageIndex BEFORE the sort, so
+    // this fired an extra query carrying the previous table's ORDER BY (which the
+    // new table has no such column for), and defeated the one-rebuild rule.
+    onPageIndexChanged: if (!_switching) page.loadRows()
     onPageLimitChanged: { pageIndex = 0; page.loadRows() }
     // ---- THE SINGLE SEARCH, AS IN EVENTS ----
     // The condition is executed by the DATABASE (stateRows), not by parsing a
@@ -416,16 +403,13 @@ Kirigami.Page {
     // the columns. Risk columns are named differently in different tables, so we
     // look at whichever exist: severity/cvss_rating (vulnerabilities), risk
     // (privesc), exposure (sockets), status (kernel_params).
-    function accentOf(r) { return String(page.rowAccent(r)) }
     // CELL TEXT: an ISO-8601 timestamp is shown as readable LOCAL time (not the
     // raw "…T12:03:57Z"); everything else as-is. Applies to every table, so any
     // time column reads nicely.
     function cellDisplay(r, k) {
         var v = r[k]
         if (v === undefined || v === null) return ""
-        var s = String(v)
-        if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/.test(s)) return Fmt.local(s)
-        return s
+        return String(Fmt.maybeLocal(v))
     }
     // the severity accent: the ONE shared mapping (Sev.js), so a row in "Data"
     // gets the same colour for the same severity as every dashboard table
@@ -474,16 +458,58 @@ Kirigami.Page {
     // the values always show
     onGroupByChanged: reloadGroups()
     function reloadGroups() {
-        if (!cur || !groupBy.length) { groupRows = []; return }
-        var r = backend.stateGroups(cur.name, groupBy.join(","), page.baseWhere())
+        if (!cur || !groupBy.length) {
+            // clearing the grouping must also forget its keys — they hide their
+            // columns from the table, and a stale key kept a column hidden after
+            // the grouping was removed.
+            groupRows = []; groupKeys = []; groupMeasures = []; groupError = ""
+            return
+        }
+        // JSON, not a comma-joined string: a grouping term may itself be an
+        // expression containing commas (substr(path,1,12)) and joining would cut
+        // it in half.
+        var r = backend.stateGroups(cur.name, JSON.stringify(groupBy),
+                                    page.baseWhere())
         groupRows = r.rows || []
+        // the split into keys and measures is the database's answer, not a guess
+        // made here: an aggregate term becomes a measure column, the rest keys
+        groupKeys = r.keys || []
+        groupMeasures = r.measures || []
+        groupError = r.error || ""
     }
+    property string groupError: ""
     // ---- the group panel as the SHARED DataTable (same formatting/functionality) ----
+    // widths of the group columns, resizable exactly like the main table's
+    property var groupWidths: ({})
+    function groupColWidth(k) {
+        return groupWidths[k] !== undefined ? groupWidths[k]
+                                            : (k === "_count" ? 70 : 150)
+    }
+    function setGroupColWidth(k, w) {
+        var o = Object.assign({}, groupWidths); o[k] = Math.max(40, w)
+        groupWidths = o
+    }
+    // COUNT IS THE POINT OF A GROUPING, so it must always be on screen. It used
+    // to sit after a `fill` column whose minimum width is wider than this panel —
+    // the fill pushed the count past the right edge and it could only be reached
+    // by scrolling. No fill here: every column has a real width and the panel
+    // scrolls if the values are long.
+    // the keys and the measures the database actually used, as it reported them
+    property var groupKeys: []
+    property var groupMeasures: []
     readonly property var groupColumns: {
-        var out = []
-        for (var i = 0; i < groupBy.length; i++)
-            out.push({ k: "g" + i, t: groupBy[i], fill: i === groupBy.length - 1, w: 8 })
-        out.push({ k: "_count", t: "count", w: 7, right: true })
+        var out = [{ k: "_count", t: "count",
+                     w: groupColWidth("_count") / Kirigami.Units.gridUnit,
+                     right: true }]
+        for (var i = 0; i < groupKeys.length; i++)
+            out.push({ k: "g" + i, t: groupKeys[i],
+                       w: groupColWidth("g" + i) / Kirigami.Units.gridUnit })
+        // an aggregate the user asked for (sum(own_mb), avg(...)) is a COLUMN of
+        // the grouping, not a key — numbers to the right, like any measure
+        for (var j = 0; j < groupMeasures.length; j++)
+            out.push({ k: "m" + j, t: groupMeasures[j],
+                       w: groupColWidth("m" + j) / Kirigami.Units.gridUnit,
+                       right: true })
         return out
     }
     readonly property var groupTableRows: {
@@ -492,20 +518,27 @@ Kirigami.Page {
             var gr = groupRows[i]
             var parts = gr.parts || [String(gr.value)]
             var o = { _id: String(i), _count: gr.n, _gval: gr.value, _gparts: parts }
-            for (var j = 0; j < groupBy.length; j++)
+            for (var j = 0; j < groupKeys.length; j++)
                 o["g" + j] = j < parts.length ? String(parts[j]) : ""
+            var ms = gr.measures || []
+            for (var k = 0; k < ms.length; k++)
+                o["m" + k] = String(ms[k])
             out.push(o)
         }
         return out
     }
-    // format the field columns exactly like the main table; count as a number
+    // format the key columns exactly like the main table; count and the measures
+    // are numbers and are shown as they came back
     function groupCellDisplay(row, key) {
         if (key === "_count") return String(row._count)
         var val = row[key]
+        if (key.charAt(0) === "m") return val === undefined ? "" : String(val)
         if (val === "" || val === undefined) return "(empty)"
         var idx = parseInt(key.substring(1))
-        var pseudo = {}; pseudo[page.groupBy[idx]] = val
-        return page.cellDisplay(pseudo, page.groupBy[idx])
+        var name = page.groupKeys[idx]
+        if (name === undefined) return String(val)
+        var pseudo = {}; pseudo[name] = val
+        return page.cellDisplay(pseudo, name)
     }
     function isGroupSel(row) {
         return page.groupPicked && page.groupVal === String(row._gval || "")
@@ -527,17 +560,24 @@ Kirigami.Page {
         if (queryText === "") return ""
         return hasOperator(queryText) ? queryText : freeText(queryText)
     }
-    // the condition of the selected group: AND over all its fields
+    // A grouping term is either a plain column or an expression, and the two are
+    // written into SQL differently: a column name is QUOTED as an identifier, an
+    // expression must be passed through as it is (quoting substr(path,1,12) would
+    // ask for a column with that name).
+    function groupTerm(f) {
+        return /^[A-Za-z0-9_]+$/.test(f) ? '"' + f + '"' : f
+    }
+    // the condition of the selected group: AND over all its terms
     function groupCond() {
-        if (!groupBy.length || !groupPicked) return ""
+        if (!groupKeys.length || !groupPicked) return ""
         var parts = []
-        for (var i = 0; i < groupBy.length; i++) {
-            var f = groupBy[i]
+        for (var i = 0; i < groupKeys.length; i++) {
+            var t = groupTerm(groupKeys[i])
             var v = i < groupParts.length ? String(groupParts[i]) : ""
             if (v === "")
-                parts.push('("' + f + '" IS NULL OR "' + f + '" = \'\')')
+                parts.push('(' + t + ' IS NULL OR ' + t + ' = \'\')')
             else
-                parts.push('"' + f + '" = \'' + v.replace(/'/g, "''") + '\'')
+                parts.push(t + ' = \'' + v.replace(/'/g, "''") + '\'')
         }
         return parts.length > 1 ? "(" + parts.join(" AND ") + ")" : parts[0]
     }
@@ -602,11 +642,6 @@ Kirigami.Page {
         page.loadRows()
         queryError = page.rowsError
     }
-    // The rows arrive already selected, sorted and paged by the database, so
-    // there is nothing left to do here. Filtering in JS meant carrying every row
-    // of the table across the QML boundary, and that cost grew with the size of
-    // the table: 1.5 s per switch to applications, 0.5 s to package_files.
-    property var filteredRows: curRows
     property int pageLimit: 50
     property int pageIndex: 0
     property int pageCount: pageLimit > 0
@@ -621,9 +656,18 @@ Kirigami.Page {
     property var lastSel: null         // the last clicked one - for the details sidebar
     property int selAnchor: -1         // the index for a shift range
     property string selName: ""        // the tab the selection belongs to
+    // A MAP, NOT A SCAN. isSel is called for every row (twice: highlight and
+    // checkbox) on every rebuild, and it used to walk the whole selection — with a
+    // page selected that is rows x selection comparisons for one repaint.
+    readonly property var _selIds: {
+        var m = ({})
+        for (var i = 0; i < selRows.length; i++)
+            if (selRows[i] && selRows[i]._id !== undefined) m[selRows[i]._id] = true
+        return m
+    }
     function isSel(r) {
         if (allSelected) return true
-        return r._id !== undefined && selRows.some(x => x._id === r._id)
+        return r._id !== undefined && _selIds[r._id] === true
     }
     // how many are selected, honouring the all-pages flag
     property int selCount: allSelected ? curTotal : selRows.length
@@ -665,16 +709,39 @@ Kirigami.Page {
     // THE COLUMN DESCRIPTORS for the shared DataTable: a checkbox column, an
     // event-type icon column (Events tab only), then the visible data columns
     // with their widths (colWidth is in pixels, the template wants gridUnits).
-    property var dtColumns: {
+    //
+    // NOT A BINDING — AND THAT IS THE POINT. Every collection push hands the page
+    // a fresh snapshot, so `cur` (and with it listCols/colOrder/visibleCols) is a
+    // NEW object even when nothing about the table changed. As a binding this list
+    // was therefore rebuilt every few seconds, and a new column list tears down
+    // and recreates every cell in the table — the whole table flickering on a
+    // timer. Now it is rebuilt only when its SIGNATURE really changes.
+    // the field list handed to the query bar — rebuilt with the columns, i.e.
+    // only when the table (or its column set) actually changed
+    property var qbarFields: []
+    property var dtColumns: []
+    property string _colSig: ""
+    property int _widthVer: 0          // bumped by a column resize
+    function syncColumns() {
+        var cols = visibleCols
+        var sig = (cur ? cur.name : "") + "|" + cols.join("") + "|" + _widthVer
+        if (sig === _colSig) return
+        _colSig = sig
         var out = [{ k: "_check", kind: "check", w: 2 }]
         if (cur && cur.name === "events")
             out.push({ k: "_icon", kind: "icon", w: 1.6 })
-        var cols = visibleCols
         for (var i = 0; i < cols.length; i++)
             out.push({ k: cols[i], t: cols[i],
                        w: colWidth(cols[i]) / Kirigami.Units.gridUnit })
-        return out
+        dtColumns = out
+        // THE FIELDS ARE THE CURRENT TABLE'S FIELDS — nothing else. Offering the
+        // whole event taxonomy here meant a picker full of names this table does
+        // not have: pick one and the query came back "no such column", or it was
+        // silently dropped. What a table has is what the database says it has.
+        qbarFields = listCols.filter(function (c) { return !c.startsWith("_") })
+                             .map(function (c) { return { name: c } })
     }
+    onVisibleColsChanged: syncColumns()
     // resizing fires continuously while dragging; persist once it settles
     Timer { id: persistTimer; interval: 400; onTriggered: page.persistWidths() }
 
@@ -808,31 +875,20 @@ Kirigami.Page {
             // THE SINGLE QUERY BAR - the same component as in "Events"
             QueryBar {
                 id: qbar
+                objectName: "queryBar"
                 Layout.fillWidth: true
                 Layout.leftMargin: Kirigami.Units.smallSpacing
                 Layout.rightMargin: Kirigami.Units.smallSpacing
-                // the fields offered in the pickers = THIS table's columns (and the
-                // joined table's columns once a JOIN is made). For EVENTS it is the
-                // WHOLE taxonomy (107 fields), not just the 13 shown by default -
-                // any field can be added to SELECT / a condition.
-                fields: (page.onEvents && page.joinTable === ""
-                         && page.eventTax.names && page.eventTax.names.length
-                         ? page.eventTax.names
-                         : page.listCols.filter(c => !c.startsWith("_")))
-                                     .map(function (c) { return { name: c } })
-                defaultSelect: page.visibleCols
+                // the fields offered in the pickers = THIS table's columns. For
+                // EVENTS it is the WHOLE taxonomy (not just the columns shown by
+                // default) - any field can be added to SELECT / a condition.
+                // built from the STABLE column list, not straight off the
+                // snapshot: bound to listCols this rebuilt ~100 field objects on
+                // every push (and with them the bar's derived name lists), for
+                // pickers that are almost always closed.
+                fields: page.qbarFields
+                defaultSelect: page.baseCols
                 placeholder: "type SQL, or plain text to search this table"
-                // JOIN button lives in the bar; the page owns the state + backend.
-                // Events joins a state table across databases (ATTACH).
-                joinTables: page.joinTablesList
-                joinTable: page.joinTable
-                joinLeft: page.joinLeft
-                joinRight: page.joinRight
-                onJoinTableChosen: function (t) { page.setJoinTable(t) }
-                onJoinFieldsChosen: function (l, r) {
-                    page.joinLeft = l; page.joinRight = r
-                    page.pageIndex = 0; page.loadRows()
-                }
                 onApplied: function (spec, sql) {
                     page.applySelectCols(spec.select)
                     var g = spec.groupBy.slice()
@@ -865,9 +921,6 @@ Kirigami.Page {
                 }
             }
 
-            // (JOIN now lives as a button IN the query bar toolbar above, next to
-            // Group by / Sort - see the QueryBar join* bindings)
-
             // (Select page / Select all / Clear and the "Selected: N rows" count
             // moved out of here into the bottom bar, next to the page controls -
             // the space goes to the table)
@@ -883,17 +936,26 @@ Kirigami.Page {
             //      formatting and functionality as the main table ----
             Item {
                 visible: page.groupBy.length > 0
-                Layout.preferredWidth: Math.min(page.width * 0.45,
-                                                Kirigami.Units.gridUnit * (8 + 9 * page.groupBy.length))
+                // wide enough for the columns as they are actually sized (so the
+                // count is never cut off), but never more than half the page
+                Layout.preferredWidth: {
+                    var w = Kirigami.Units.smallSpacing * 2
+                    for (var i = 0; i < page.groupColumns.length; i++)
+                        w += page.groupColumns[i].w * Kirigami.Units.gridUnit
+                             + Kirigami.Units.smallSpacing
+                    return Math.min(page.width * 0.5, w + Kirigami.Units.gridUnit)
+                }
                 Layout.fillHeight: true
                 DataTable {
                     anchors.fill: parent
                     rowHeight: page.rowHeight
+                    resizable: true          // drag a column edge, as in the table
                     columns: page.groupColumns
                     rows: page.groupTableRows
                     formatter: page.groupCellDisplay
                     isSelected: page.isGroupSel
                     onRowClicked: function (row, index, mods) { page.toggleGroup(row) }
+                    onColumnResized: function (key, w) { page.setGroupColWidth(key, w) }
                 }
             }
             Kirigami.Separator {
@@ -943,10 +1005,17 @@ Kirigami.Page {
                         rowMenu.popup()
                     }
                 }
+                // AN EMPTY TABLE AND A FAILED QUERY LOOK NOTHING ALIKE. The error
+                // used to be stored and never shown, so a query the database
+                // refused read as "there is nothing here" — the worst possible
+                // answer for an analyst.
                 Kirigami.PlaceholderMessage {
                     anchors.centerIn: parent
+                    width: parent.width - Kirigami.Units.gridUnit * 4
                     visible: page.pagedRows.length === 0
-                    text: "Empty"
+                    icon.name: page.rowsError !== "" ? "dialog-error" : ""
+                    text: page.rowsError !== "" ? "The query failed" : "Empty"
+                    explanation: page.rowsError
                 }
             }
             }
@@ -1063,10 +1132,13 @@ Kirigami.Page {
             searchPlaceholder: "find a field…"
             onSearchTextChanged: page.detailFilter = searchText
 
-            QQC2.ScrollView {
+            // built only while open (see the Columns panel for why)
+            Loader {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.topMargin: 10         // gap between the search and the fields
+                active: detailsPanel.open
+                sourceComponent: QQC2.ScrollView {
                 ColumnLayout {
                     width: detailsPanel.panelWidth - Kirigami.Units.largeSpacing * 2
                     spacing: Kirigami.Units.smallSpacing
@@ -1133,6 +1205,7 @@ Kirigami.Page {
                         }
                     }
                 }
+                }
             }
         }
 
@@ -1145,39 +1218,48 @@ Kirigami.Page {
             panelWidth: Kirigami.Units.gridUnit * 14
             onCloseRequested: open = false
 
-            QQC2.ScrollView {
+            // BUILT ONLY WHILE OPEN. A closed panel is still a live object tree in
+            // QML (`visible` only skips painting), so this list used to build five
+            // Controls per column — a hundred of them for `processes` — and rebuild
+            // them on every tab switch, for a panel nobody was looking at.
+            Loader {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                ColumnLayout {
-                    width: colPanel.panelWidth - Kirigami.Units.largeSpacing * 2
-                    spacing: 0
-                    Repeater {
-                    model: page.colOrder
-                    delegate: RowLayout {
-                        Layout.fillWidth: true
+                active: colPanel.open
+                sourceComponent: QQC2.ScrollView {
+                    ColumnLayout {
+                        width: colPanel.panelWidth - Kirigami.Units.largeSpacing * 2
                         spacing: 0
-                        QQC2.CheckBox {
-                            checked: !page.hiddenCols.includes(modelData)
-                            onToggled: page.toggleCol(modelData)
-                        }
-                        QQC2.Label {
-                            text: modelData
-                            Layout.fillWidth: true
-                            elide: Text.ElideRight
-                            opacity: page.hiddenCols.includes(modelData) ? 0.5 : 1
-                        }
-                        QQC2.ToolButton {
-                            icon.name: "go-up"
-                            enabled: index > 0
-                            onClicked: page.moveCol(modelData, -1)
-                        }
-                        QQC2.ToolButton {
-                            icon.name: "go-down"
-                            enabled: index < page.colOrder.length - 1
-                            onClicked: page.moveCol(modelData, 1)
+                        Repeater {
+                            model: page.colOrder
+                            delegate: RowLayout {
+                                required property var modelData
+                                required property int index
+                                Layout.fillWidth: true
+                                spacing: 0
+                                QQC2.CheckBox {
+                                    checked: !page.hiddenCols.includes(modelData)
+                                    onToggled: page.toggleCol(modelData)
+                                }
+                                QQC2.Label {
+                                    text: modelData
+                                    Layout.fillWidth: true
+                                    elide: Text.ElideRight
+                                    opacity: page.hiddenCols.includes(modelData) ? 0.5 : 1
+                                }
+                                QQC2.ToolButton {
+                                    icon.name: "go-up"
+                                    enabled: index > 0
+                                    onClicked: page.moveCol(modelData, -1)
+                                }
+                                QQC2.ToolButton {
+                                    icon.name: "go-down"
+                                    enabled: index < page.colOrder.length - 1
+                                    onClicked: page.moveCol(modelData, 1)
+                                }
+                            }
                         }
                     }
-                }
                 }
             }
         }
@@ -1323,36 +1405,4 @@ Kirigami.Page {
         }
     }
 
-    // -------- row editor (double click / Edit) --------
-    Kirigami.Dialog {
-        id: editDialog
-        title: "Record — " + (page.cur ? page.cur.title : "")
-        standardButtons: Kirigami.Dialog.Ok | Kirigami.Dialog.Cancel
-        padding: Kirigami.Units.largeSpacing
-        preferredWidth: Kirigami.Units.gridUnit * 24
-
-        property var row: null
-        function openFor(r) { row = r; open() }
-
-        onAccepted: {
-            const cols = page.cur.columns
-            for (let i = 0; i < cols.length; i++) {
-                const v = fieldsRep.itemAt(i).text
-                if (v !== String(editDialog.row[cols[i]] ?? ""))
-                    backend.setCell(page.cur.name, editDialog.row._id, cols[i], v)
-            }
-            backend.reload()
-        }
-
-        Kirigami.FormLayout {
-            Repeater {
-                id: fieldsRep
-                model: editDialog.row && page.cur ? page.cur.columns : []
-                QQC2.TextField {
-                    Kirigami.FormData.label: modelData
-                    text: editDialog.row ? String(editDialog.row[modelData] ?? "") : ""
-                }
-            }
-        }
-    }
 }

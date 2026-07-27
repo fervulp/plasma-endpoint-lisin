@@ -1,0 +1,44 @@
+name: kernel_modules
+table: kernel_modules
+type: input
+version: 1.0.0
+title: Kernel modules
+icon: application-x-sharedlib
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 210
+# The fields worth reading FIRST in this table; everything else the
+# source produces stays available in the Columns panel.
+columns: [name, status, size, used_by, address]
+description: >-
+  Modules loaded into the running kernel (what lsmod shows), with their size,
+  load status and which other modules hold them. Code here runs with full
+  kernel privilege, so "what is loaded and who pulled it in" is the question
+  this tab answers. Honest limitation: the address column is all zeros unless
+  the collector runs as root — kernel.kptr_restrict hides kernel pointers from
+  unprivileged readers, so an all-zero address means "not allowed to see it",
+  not "loaded at zero". This is a snapshot of what is loaded now; a module
+  that was inserted and removed between two runs leaves no trace here.
+# Collection belongs to the input, so the two facts an analyst reads off this
+# table are derived HERE from the row's own used_by string:
+#   * used_by_count - how many other modules depend on this one. lsmod prints
+#             them as one comma-separated string ('-' when none), which cannot
+#             be sorted or filtered; the count can. Counted as separators + 1.
+#   * in_use  - 0 means nothing currently holds the module. Combined with
+#             used_by_count it separates a leaf module from a core one.
+#   * size_kb - the byte size in kilobytes, for reading and sorting.
+query: |
+  SELECT
+    name,
+    size,
+    round(size / 1024.0, 1) AS size_kb,
+    used_by,
+    CASE WHEN used_by IN ('-', '') THEN 0
+         ELSE length(used_by) - length(replace(used_by, ',', '')) + 1
+    END AS used_by_count,
+    CASE WHEN used_by IN ('-', '') THEN 0 ELSE 1 END AS in_use,
+    status,
+    address
+  FROM kernel_modules
+  ORDER BY name

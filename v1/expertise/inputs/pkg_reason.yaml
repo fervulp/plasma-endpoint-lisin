@@ -1,0 +1,31 @@
+name: pkg_reason
+table: pkg_reason
+type: input
+kind: command
+version: 1.0.0
+title: Package install reason
+icon: package-install
+interval: 900
+hidden: true          # the raw fact; it is read through the app_footprint view
+columns: [name, reason, size_bytes]
+description: >-
+  WHY each package is on the machine — asked for by name (User), pulled in as a
+  hard dependency (Dependency), pulled in as a weak one (Weak Dependency), or
+  brought by a group. This is what decides whether `dnf remove` would also take a
+  package away: dnf removes a dependency nobody needs any more, and never removes
+  something the user asked for. Collected with the package manager's own record
+  (`dnf repoquery --installed`, from its cache, ~0.5 s) because rpm itself does
+  not store the reason on this version. The install size comes from the same
+  answer, so the number and the reason cannot disagree.
+tsv_columns: [name, reason, size_bytes]
+command: |
+  command -v dnf >/dev/null || exit 0
+  export LC_ALL=C
+  # -C: use the metadata cache. Refreshing repository metadata is the system's
+  # job (dnf-makecache.timer); a collector must not go to the network.
+  # NB: dnf's --qf does NOT interpret \t — it prints the two characters
+  # literally. So the fields are separated with a pipe (which cannot occur in a
+  # package name or a reason) and turned into real tabs here.
+  dnf repoquery -C --installed --qf '%{name}|%{reason}|%{installsize}\n' 2>/dev/null |
+    tr '|' '\t' |
+    awk -F'\t' 'NF >= 3 && $1 != "" { print $1 "\t" $2 "\t" $3 }' | sort -u

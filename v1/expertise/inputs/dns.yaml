@@ -1,0 +1,48 @@
+name: dns
+table: dns
+type: input
+version: 1.0.0
+title: DNS and hosts
+icon: network-server
+interval: 60
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 240
+description: >-
+  Name-resolution integrity in one table (v0's dns source): the configured
+  resolvers UNIONed with every /etc/hosts entry, told apart by the kind column.
+  Both halves answer the same question — "what will this machine believe an
+  address is?" — and a planted /etc/hosts line is the classic way to redirect a
+  name without touching DNS. Needs no root.
+  HONEST LIMITATIONS. (1) With systemd-resolved, /etc/resolv.conf holds only the
+  local stub resolver, so the nameserver row shows the stub and the real
+  upstream servers are NOT visible here — osquery has no table for the resolved
+  per-link configuration, and this input does not invent one. (2) osquery reuses
+  the `address` column of dns_resolvers for search rows, where it carries a
+  DOMAIN, not an address; entry_type says which it is. (3) `options` is the raw
+  resolv.conf RES_* bitmask, left undecoded.
+# UNION into one table is deliberate and is the one case the spec asks for: an
+# analyst checking name resolution should not have to look in two places.
+# The seq column keeps the resolver rows in file order (search domains are tried
+# in order, so the order is meaningful), and hosts rows sort after them.
+query: |
+  SELECT
+    'resolver'   AS kind,
+    r.type       AS entry_type,
+    r.address,
+    ''           AS hostnames,
+    r.netmask,
+    r.options,
+    r.id         AS seq
+  FROM dns_resolvers r
+  UNION ALL
+  SELECT
+    'hosts file',
+    'host',
+    h.address,
+    h.hostnames,
+    '',
+    0,
+    0
+  FROM etc_hosts h
+  ORDER BY 1, 7, 2, 3

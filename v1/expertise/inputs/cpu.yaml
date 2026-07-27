@@ -1,0 +1,49 @@
+name: cpu
+table: cpu
+type: input
+version: 1.0.0
+title: CPU
+icon: cpu
+interval: 900
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 340
+# MEASURED FIRST: `SELECT * FROM cpu_info` returns ZERO ROWS for a user-run
+# collector. On Linux that table is read from SMBIOS/DMI type-4 records, and
+# /sys/firmware/dmi/tables/DMI is -r-------- root root. A query over cpu_info
+# alone would give a permanently empty CPU tab on every non-root install.
+#
+# So the row is DRIVEN BY system_info (kernel-visible, always exactly one row)
+# and cpu_info is LEFT JOINed for the DMI detail. Consequences, both wanted:
+#   * without root — one row, real brand/cores/sockets/microcode, DMI columns NULL;
+#   * with root, or on multi-socket hardware — one row PER PHYSICAL CPU, each
+#     carrying the DMI detail. Nothing is faked and nothing is hidden.
+# load_average is folded in (three rows: 1m/5m/15m) pivoted to three columns,
+# because a load figure is only interpretable next to the core count — hence
+# load_pct_1m, load relative to the logical processors that have to absorb it.
+# cpu_brand needs the substr()+trim() dance: see the comment in system.yaml.
+description: What CPU this machine has, plus current load. device_id, model,
+  manufacturer, processor_type, cpu_status, number_of_cores, logical_processors
+  and max_clock_speed come from DMI/SMBIOS and are EMPTY without root; the brand,
+  core, socket and microcode columns are kernel-visible and always populated.
+  load_pct_1m is the 1-minute load average as a percentage of logical cores
+  (100% = every core busy).
+# NOTE (measured, not assumed): osquery's cpu_info table returns ZERO rows on
+# this Linux build — it is a WMI-era table that only fills on Windows — and the
+# cpuid table is empty too. Eight columns taken from it were therefore always
+# blank. The same facts do exist in system_info, so the CPU is described from
+# there; nothing is lost and no column pretends to be a measurement it never got.
+query: |
+  SELECT
+    trim(s.cpu_brand)                                 AS model,
+    s.cpu_type                                        AS arch,
+    s.cpu_physical_cores,
+    s.cpu_logical_cores,
+    s.cpu_sockets,
+    s.cpu_microcode,
+    round(CAST((SELECT average FROM load_average WHERE period = '1m')  AS REAL), 2) AS load_1m,
+    round(CAST((SELECT average FROM load_average WHERE period = '5m')  AS REAL), 2) AS load_5m,
+    round(CAST((SELECT average FROM load_average WHERE period = '15m') AS REAL), 2) AS load_15m,
+    round(CAST((SELECT average FROM load_average WHERE period = '1m') AS REAL)
+          / nullif(s.cpu_logical_cores, 0) * 100, 1)                                AS load_pct_1m
+  FROM system_info s

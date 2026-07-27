@@ -1,0 +1,59 @@
+name: firewall
+table: firewall
+type: input
+version: 1.0.0
+title: Firewall rules
+icon: firewall-config
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 260
+description: >-
+  Packet-filter rules as osquery reads them from the LEGACY iptables/xtables
+  interface: table, chain, policy, target, protocol, source and destination,
+  interfaces and the per-rule counters. EXPECT THIS TAB TO BE EMPTY, for two
+  separate and honest reasons. (1) It needs root — the rules are read through a
+  raw socket and /proc/net/ip_tables_names, neither of which an unprivileged
+  collector may touch. (2) Even as root it stays empty on a host whose firewall
+  runs on the nftables backend (firewalld on current Fedora does): the rules
+  then live in nf_tables, the ip_tables module is not even loaded, and osquery
+  5.x has no nftables table. So an empty tab here means "no legacy rules
+  visible", NOT "this machine has no firewall" — check the loaded kernel
+  modules (nf_tables vs ip_tables) to tell the two cases apart. Nothing is
+  faked and no shell fallback is invented to fill it.
+# Notes on the real schema, verified against the binary:
+#   * there is no `iface` column; the table has iniface/outiface (plus their
+#     masks) and they are exposed under those names;
+#   * `proto` decodes the protocol NUMBER the row carries (6/17/1/58/0) into a
+#     readable name and falls back to the number itself, so nothing is lost;
+#   * osquery exposes no rule INDEX, so the original evaluation order of a
+#     chain cannot be reconstructed from this table — ORDER BY here is only for
+#     a stable display, it is not the order the kernel applies rules in.
+query: |
+  SELECT
+    filter_name,
+    chain,
+    policy,
+    target,
+    protocol,
+    CASE protocol
+      WHEN 0  THEN 'any'
+      WHEN 1  THEN 'icmp'
+      WHEN 6  THEN 'tcp'
+      WHEN 17 THEN 'udp'
+      WHEN 58 THEN 'icmpv6'
+      ELSE CAST(protocol AS TEXT)
+    END AS proto,
+    src_ip,
+    src_mask,
+    src_port,
+    dst_ip,
+    dst_mask,
+    dst_port,
+    iniface,
+    outiface,
+    match,
+    packets,
+    bytes
+  FROM iptables
+  ORDER BY filter_name, chain, target, src_ip, dst_ip, dst_port

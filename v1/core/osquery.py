@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 _CANDIDATES = [
@@ -35,22 +36,46 @@ def binary() -> str:
     )
 
 
+_FLAGS = ["--json", "--disable_events", "--disable_audit"]
+
+
 def run(sql: str, timeout: int = 30) -> list[dict]:
     """Execute one osquery SQL statement ephemerally (no daemon, no scheduled
-    events) and return its rows."""
+    events) and return its rows. Convenient for tests and one-off reads; the
+    collector uses run_to_file() instead — see below."""
     out = subprocess.run(
-        [
-            binary(),
-            "--json",
-            "--disable_events",
-            "--disable_audit",
-            sql,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
+        [binary(), *_FLAGS, sql],
+        capture_output=True, text=True, timeout=timeout,
     )
     if out.returncode != 0:
         raise RuntimeError(f"osquery error: {out.stderr.strip()[:500]}")
     txt = out.stdout.strip()
     return json.loads(txt) if txt else []
+
+
+def run_to_file(sql: str, timeout: int = 30) -> str:
+    """Same query, but osquery's JSON goes STRAIGHT TO A FILE and the path is
+    returned — the rows are never built as Python objects.
+
+    Why: the collector's job is to move a result set into DuckDB, and DuckDB can
+    read that JSON itself. Parsing it in Python and inserting row by row cost
+    ~4 s for 4000 rows; handing DuckDB the file costs ~26 ms (measured, 155x).
+    With three dozen sources that was the difference between a 75 s collection
+    cycle and a 13 s one. The caller deletes the file.
+    """
+    fd, path = tempfile.mkstemp(prefix="lisin-osq-", suffix=".json")
+    try:
+        with os.fdopen(fd, "w") as f:
+            out = subprocess.run(
+                [binary(), *_FLAGS, sql],
+                stdout=f, stderr=subprocess.PIPE, text=True, timeout=timeout,
+            )
+        if out.returncode != 0:
+            raise RuntimeError(f"osquery error: {out.stderr.strip()[:500]}")
+        return path
+    except Exception:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        raise

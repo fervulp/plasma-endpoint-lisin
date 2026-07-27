@@ -1,0 +1,85 @@
+name: app_deps
+table: app_deps
+type: input
+kind: command
+version: 1.0.0
+title: Application dependencies
+icon: view-list-tree
+interval: 900
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 200
+columns: [package, relation, dependency, capabilities, capability]
+description: >-
+  WHAT DEPENDS ON WHAT. One row per dependency edge between installed packages:
+  package -> relation -> dependency. osquery has no table for this (rpm_packages
+  stops at the package itself), so this entry point asks rpm directly — the same
+  place the package manager itself reads.
+  Two relations are collected because they behave differently on removal:
+  `requires` (a hard dependency — removing the target takes this package with it)
+  and `recommends` (a weak one — installed by default and REMOVED ALONGSIDE the
+  package, which is why `dnf remove btop` also pulls out rocm-smi even though
+  nothing formally requires it).
+  HONEST LIMIT: only rpm is covered. pip/npm record their own dependency graphs
+  in their own metadata, which rpm knows nothing about; those show up in the
+  applications table without edges here.
+# HOW A CAPABILITY BECOMES A PACKAGE. rpm does not record "btop depends on
+# glibc": it records that btop requires the CAPABILITY `libc.so.6()(64bit)`, and
+# separately that glibc PROVIDES it. Leaving the raw capability in the table
+# would be unreadable (`rtld(GNU_HASH)` is not a package), so the two lists are
+# joined here, in the collector, exactly as the package manager would:
+#   pass 1 builds capability -> providing package from %{PROVIDENAME}
+#   pass 2 walks every requirement and looks it up
+# A capability nothing installed provides (a file path from another package, a
+# boolean expression fragment) keeps an empty `dependency` and its raw text in
+# `capability` — a fact that was not resolved, not a fact invented.
+# the order the command PRINTS them in (the display order is `columns:` above)
+tsv_columns: [package, relation, dependency, capability, capabilities]
+command: |
+  command -v rpm >/dev/null || exit 0
+  export LC_ALL=C
+  prov=$(mktemp) || exit 0
+  trap 'rm -f "$prov"' EXIT
+  # capability -> package, built once and reused for both relations
+  rpm -qa --qf '[%{PROVIDENAME}\t%{=NAME}\n]' 2>/dev/null > "$prov" || exit 0
+  # TWO rpm calls, and %{=NAME} not %{NAME}, for two reasons rpm does not explain
+  # gently: inside an array iterator [...] a plain %{NAME} is NOT expanded (it
+  # silently yields a couple of dozen rows instead of a quarter of a million), and
+  # two arrays of different length in ONE iterator abort with "array iterator used
+  # with different sized arrays" — requires and recommends are different lengths.
+  { rpm -qa --qf '[%{=NAME}\trequires\t%{REQUIRENAME}\n]' 2>/dev/null
+    rpm -qa --qf '[%{=NAME}\trecommends\t%{RECOMMENDNAME}\n]' 2>/dev/null
+  } |
+  awk -F'\t' -v P="$prov" '
+    BEGIN {
+      while ((getline line < P) > 0) {
+        split(line, a, "\t")
+        if (!(a[1] in prov)) prov[a[1]] = a[2]
+      }
+    }
+    {
+      pkg = $1; rel = $2; cap = $3
+      if (cap == "" || cap == "(none)") next
+      # rpm prints boolean deps as "(a or b)"; the flat form splits them into
+      # tokens, so the operator words are not capabilities and must not be looked
+      # up. Brackets are stripped ONLY from such fragments — on an ordinary
+      # capability the brackets are part of the name.
+      if (cap == "or" || cap == "and" || cap == "if" || cap == "else") next
+      look = cap
+      if (substr(look,1,1) == "(") { gsub(/^\(|\)$/, "", look) }
+      dep = (look in prov) ? prov[look] : ""
+      if (dep == pkg) next                      # a package providing its own need
+      # ONE ROW PER EDGE, not per symbol version. btop requires 30 separate
+      # libstdc++ symbol versions; as 30 rows that is unreadable and says nothing
+      # more than "btop needs libstdc++". They are collapsed to one edge that
+      # carries how many capabilities it stands for and one of them as an example.
+      key = pkg SUBSEP rel SUBSEP dep
+      n[key]++
+      if (!(key in ex)) ex[key] = cap
+    }
+    END {
+      for (k in n) {
+        split(k, f, SUBSEP)
+        print f[1] "\t" f[2] "\t" f[3] "\t" ex[k] "\t" n[k]
+      }
+    }' | sort -u

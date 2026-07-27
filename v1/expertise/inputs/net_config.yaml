@@ -1,0 +1,50 @@
+name: net_config
+table: net_config
+type: input
+version: 1.0.0
+title: Routes
+icon: preferences-system-network
+interval: 60
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 230
+description: >-
+  The kernel routing table from osquery — where traffic to a given destination
+  is actually sent, and out of which interface. Needs no root. The row count
+  follows whatever is installed: a split-tunnel VPN can push hundreds of routes,
+  and seeing them is the point.
+  HONEST LIMITATION: osquery's `netmask` is a PREFIX LENGTH, not a dotted mask,
+  and it arrives as 0 for local, broadcast and host routes whose real prefix is
+  /32 or /128. So no destination/prefix CIDR string is synthesized here — that
+  would print a wrong "0.0.0.0/0"-looking value for ordinary host routes. The
+  raw prefix is exposed as-is and only the genuine default route (destination
+  0.0.0.0 or :: with prefix 0) is labelled 'default'.
+# Derived HERE, from the row's own values only:
+#   * family  - ipv4/ipv6 from the destination text;
+#   * kind    - 'default' for the real default route, otherwise osquery's own
+#               type (gateway/local/broadcast/other). This is the column an
+#               analyst scans: "which way does everything else go?";
+#   * on_link - no gateway, i.e. the destination is directly reachable on the
+#               link rather than via a router.
+# Ordering puts the default route first and is otherwise fully deterministic,
+# so the table does not shuffle between 30-second runs.
+query: |
+  SELECT
+    r.destination,
+    r.netmask AS prefix,
+    r.gateway,
+    r.interface,
+    r.source,
+    r.metric,
+    r.mtu,
+    r.hopcount,
+    r.flags,
+    r.type,
+    CASE WHEN instr(r.destination, ':') > 0 THEN 'ipv6' ELSE 'ipv4' END  AS family,
+    CASE WHEN r.destination IN ('0.0.0.0', '::') AND r.netmask = '0'
+         THEN 'default' ELSE r.type END                                  AS kind,
+    CASE WHEN r.gateway = '' THEN 'yes' ELSE '' END                      AS on_link
+  FROM routes r
+  ORDER BY
+    CASE WHEN r.destination IN ('0.0.0.0', '::') AND r.netmask = '0' THEN 0 ELSE 1 END,
+    family, r.interface, r.destination, r.netmask

@@ -1,0 +1,109 @@
+name: app_disk
+table: app_disk
+type: input
+kind: command
+version: 1.0.0
+title: Application disk usage
+icon: drive-harddisk
+interval: 900
+hidden: true          # the raw measurement; it is read through the Applications view
+columns: [path, size_bytes, method]
+description: >-
+  HOW MUCH SPACE a non-rpm application actually takes, measured on disk. rpm
+  knows the size of everything it installed; pip, npm and the editor extensions
+  do not report one, so it is measured here, keyed by the same path the inventory
+  already carries.
+  Two methods, because the two layouts differ. For a Python distribution the size
+  is summed from its own RECORD file — the list pip itself would delete, which
+  covers the package wherever its files landed, not just the .dist-info folder.
+  For a node module or an extension the size is the directory tree, which is what
+  removing it frees (a bundled dependency lives inside and is counted, exactly as
+  it is on disk).
+  HONEST LIMIT: this is size on disk, not "space freed" in the dnf sense —
+  pip and npm have their own dependency graphs, so removing one package may leave
+  its dependencies behind. Where a shared dependency is its own row, its size is
+  its own row too; nothing is double counted within one method.
+tsv_columns: [path, size_bytes, method]
+command: |
+  export LC_ALL=C
+  # The app runs with PYTHONNOUSERSITE=1 (so the system Kirigami loads); leaving
+  # it set here would hide exactly the packages the user installed themselves.
+  unset PYTHONNOUSERSITE
+
+  # --- Python distributions: sum the sizes in the distribution's own RECORD ---
+  python3 - <<'EOF' 2>/dev/null || true
+  import csv, os, site
+  def tree(p):
+      n = 0
+      for dp, _dn, fn in os.walk(p):
+          for f in fn:
+              try: n += os.lstat(os.path.join(dp, f)).st_size
+              except OSError: pass
+      return n
+  roots = set(site.getsitepackages() if hasattr(site, "getsitepackages") else [])
+  try: roots.add(site.getusersitepackages())
+  except Exception: pass
+  for r in sorted(roots):
+      if not os.path.isdir(r):
+          continue
+      for d in os.listdir(r):
+          if not (d.endswith(".dist-info") or d.endswith(".egg-info")):
+              continue
+          info = os.path.join(r, d)
+          # 1. RECORD — pip's own list of what it installed, sizes included.
+          rec = os.path.join(info, "RECORD")
+          if os.path.isfile(rec):
+              total = 0
+              try:
+                  with open(rec, newline="") as f:
+                      for row in csv.reader(f):
+                          if len(row) >= 3 and row[2].isdigit():
+                              total += int(row[2])
+              except Exception:
+                  total = 0
+              if total:
+                  print(f"{info}\t{total}\trecord"); continue
+          # 2. No RECORD (typical for a distribution installed BY RPM rather than
+          #    by pip): measure the packages it says it provides. Their bytes also
+          #    belong to an rpm package — the same disk space seen through two
+          #    inventories, not two copies of it.
+          total, how = 0, "top_level"
+          tl = os.path.join(info, "top_level.txt")
+          if os.path.isfile(tl):
+              try:
+                  for line in open(tl):
+                      mod = line.strip()
+                      if not mod: continue
+                      p = os.path.join(r, mod)
+                      if os.path.isdir(p): total += tree(p)
+                      elif os.path.isfile(p + ".py"):
+                          total += os.lstat(p + ".py").st_size
+              except Exception:
+                  total = 0
+          if not total:
+              total, how = tree(info), "metadata_only"
+          print(f"{info}\t{total}\t{how}")
+  EOF
+
+  # --- node modules: the directory tree, from npm's own idea of where they live ---
+  # Every directory that IS a node module — at any depth, because a global
+  # package carries its dependencies inside itself and the inventory lists those
+  # too. A nested module's size is its own subtree, so a parent's number includes
+  # its children: that is how it sits on disk, and how much removing the parent
+  # would free.
+  if command -v npm >/dev/null; then
+    for root in $(npm root -g 2>/dev/null) /usr/lib/node_modules /usr/local/lib/node_modules; do
+      [ -d "$root" ] || continue
+      find "$root" -name package.json -printf '%h\n' 2>/dev/null
+    done | sort -u | while read -r d; do
+      du -sb "$d" 2>/dev/null | awk -F'\t' '{print $2 "\t" $1 "\ttree"}'
+    done
+  fi
+
+  # --- editor extensions: same, one directory each ---
+  for root in "$HOME"/.vscode/extensions "$HOME"/.vscode-server/extensions "$HOME"/.vscode-oss/extensions; do
+    [ -d "$root" ] || continue
+    for d in "$root"/*; do
+      [ -d "$d" ] && du -sb "$d" 2>/dev/null | awk '{print $2 "\t" $1 "\ttree"}'
+    done
+  done

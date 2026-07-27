@@ -1,0 +1,62 @@
+name: system
+table: system
+type: input
+version: 1.0.0
+title: System
+icon: computer
+interval: 900
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 330
+# ONE WIDE ROW instead of v0's three item/value tables (system + os + kernel).
+# The identity of the machine is a single fact, so it reads as a single row.
+#
+# Two things that only showed up by running the real binary:
+#   * system_info.uuid is NOT collected. osquery reads it from
+#     /sys/class/dmi/id/product_uuid, which is root-only (-r-------- root root);
+#     with no access it returns a FRESHLY GENERATED RANDOM UUID on every call
+#     (measured: 5 runs, 5 different values). It would look like a stable asset
+#     id, be worthless for correlation, and make this table differ on every 30 s
+#     cycle. /etc/machine-id is the honest stable identity if one is ever needed.
+#   * cpu_brand comes from the fixed-width CPUID brand string: 48 bytes, padded
+#     with spaces AND terminated by a NUL. trim()/rtrim() do nothing because the
+#     string ends in \0, not a space, and char(0) is the empty string in SQLite.
+#     substr(x,1,length(x)) drops the NUL (length() stops at it), then trim()
+#     removes the padding: 47 chars -> 42. Checked every other text column here
+#     for the same defect — cpu_brand is the only one affected.
+description: One row identifying this machine — hostname, OS, kernel (with its
+  boot command line) and CPU/RAM size. hardware_* and board_* come from
+  DMI/SMBIOS, which is root-only, so they are EMPTY for a user-run collector
+  and fill in by themselves under a root agent. os_build is empty on Linux —
+  the distribution has no build number.
+query: |
+  SELECT
+    s.hostname,
+    s.computer_name,
+    o.name        AS os_name,
+    o.version     AS os_version,
+    o.major       AS os_major,
+    o.minor       AS os_minor,
+    o.build       AS os_build,
+    o.platform,
+    o.platform_like,
+    o.arch,
+    k.version     AS kernel_version,
+    k.path        AS kernel_path,
+    k.arguments   AS kernel_arguments,
+    k.device      AS boot_device,
+    trim(substr(s.cpu_brand, 1, length(s.cpu_brand)))  AS cpu_brand,
+    s.cpu_type,
+    s.cpu_physical_cores,
+    s.cpu_logical_cores,
+    s.cpu_sockets,
+    s.cpu_microcode,
+    s.physical_memory,
+    round(s.physical_memory / 1073741824.0, 1)         AS memory_gb,
+    s.hardware_vendor,
+    s.hardware_model,
+    s.hardware_version,
+    s.board_vendor,
+    s.board_model
+  FROM system_info s, os_version o, kernel_info k
+  ORDER BY s.hostname

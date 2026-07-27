@@ -1,0 +1,53 @@
+name: kernel_params
+table: kernel_params
+type: input
+version: 1.0.0
+title: Kernel parameters
+icon: preferences-system
+interval: 900
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 280
+description: >-
+  Kernel tunables (sysctl): the value the kernel is RUNNING with
+  (current_value) next to the value a config file DECLARES (config_value).
+  Both are shown as osquery reports them, nothing is judged against a
+  built-in "good value" list. Limitations, honestly: osquery leaves oid
+  empty and type constant on Linux (they are BSD concepts) — the columns
+  are kept because they are part of the table; a few /proc/sys entries are
+  generators rather than settings (kernel.random.uuid), so their
+  current_value legitimately differs on every read.
+# Collection belongs to the input, so the comparison an analyst actually reads
+# is produced HERE:
+#   * state - 'kernel default' (nothing declares it) / 'as declared' /
+#             'differs' (declared in a config file but the kernel is running
+#             something else - a reboot-pending or overridden setting).
+#             Compared after normalising tabs to spaces: the kernel prints
+#             kernel.printk tab-separated while sysctl.d writes it with
+#             spaces, and a raw comparison would call that a mismatch.
+#   * declared - 1 when a config file sets it, so "show me only what this
+#             machine deliberately configures" is one WHERE away.
+# GROUP BY is not cosmetic: an unconstrained scan of system_controls on this
+# kernel returns each parameter up to 8 times (identical rows, one per
+# /proc/sys traversal path). 9207 raw rows collapse to 1639 real parameters;
+# no value is lost, because a name with two genuinely different values still
+# yields two rows.
+query: |
+  SELECT
+    name,
+    subsystem,
+    current_value,
+    config_value,
+    CASE
+      WHEN config_value = '' THEN 'kernel default'
+      WHEN trim(replace(current_value, char(9), ' ')) =
+           trim(replace(config_value,  char(9), ' ')) THEN 'as declared'
+      ELSE 'differs'
+    END AS state,
+    CASE WHEN config_value = '' THEN 0 ELSE 1 END AS declared,
+    type
+    -- `oid` is not selected: it is a BSD concept and osquery leaves it empty on
+    -- every Linux row (measured), so it was a column of nothing.
+  FROM system_controls
+  GROUP BY name, subsystem, current_value, config_value, type
+  ORDER BY name, current_value

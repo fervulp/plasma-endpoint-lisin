@@ -1,0 +1,66 @@
+name: shell_history
+table: shell_history
+type: input
+version: 1.0.0
+title: Shell History
+icon: utilities-terminal
+# History files only change when a shell writes them out (normally on exit), so
+# this does not need the 30 s process cadence.
+interval: 120
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 80
+description: >-
+  Commands recorded in per-user shell history files, joined against users so
+  every account is covered. HONEST LIMITS: only histories the collector can read
+  appear here - root's history needs root, so running unprivileged shows just the
+  invoking user. Timestamps exist only if the shell was configured to write them
+  (bash needs HISTTIMEFORMAT); where it was not, time is 0 and ts is empty rather
+  than guessed. The file is capped by HISTFILESIZE, so this is the tail of
+  history, not everything ever typed, and a live session's commands are usually
+  absent until that shell exits. Blank lines are dropped; n still counts them, so
+  n is the true line number in the file.
+# Collection belongs to the input, so the readable columns are produced HERE:
+#   * username  - joined from users (osquery gives only uid);
+#   * n         - line number in the history file. osquery has no line column, so
+#                 it is captured with ROW_NUMBER() over the table's natural read
+#                 order, which is file order. Verified against the real file: n
+#                 counts up to the last line. This is what makes the table
+#                 CHRONOLOGICAL - ordering by command or by the (usually zero)
+#                 timestamp would destroy the sequence, which is the one thing
+#                 shell history is actually read for;
+#   * program   - first token of the command, for grouping "what gets run";
+#   * shell     - derived mechanically from the history file name, not from a
+#                 list of shell names: take the basename (depth-independent, so
+#                 /root/... and /home/<u>/... both work), drop the leading dot,
+#                 keep the part before '_'. '.bash_history' -> bash,
+#                 '.zsh_history' -> zsh. An unrecognised name falls through to
+#                 its own stripped basename instead of being invented;
+#   * ts        - readable time, left EMPTY when the shell recorded none.
+query: |
+  WITH raw AS (
+    SELECT
+      sh.uid,
+      sh.time,
+      sh.command,
+      sh.history_file,
+      ROW_NUMBER() OVER (PARTITION BY sh.uid, sh.history_file) AS n
+    FROM users u
+    JOIN shell_history sh ON sh.uid = u.uid
+  )
+  SELECT
+    u.username,
+    r.uid,
+    r.n,
+    r.command,
+    split(r.command, ' ', 0)                                            AS program,
+    split(ltrim(replace(r.history_file,
+          rtrim(r.history_file, replace(r.history_file, '/', '')), ''), '.'),
+          '_', 0)                                                       AS shell,
+    r.time,
+    CASE WHEN r.time > 0 THEN datetime(r.time, 'unixepoch') ELSE '' END AS ts,
+    r.history_file
+  FROM raw r
+  LEFT JOIN users u ON u.uid = r.uid
+  WHERE trim(r.command) <> ''
+  ORDER BY u.username, r.history_file, r.n

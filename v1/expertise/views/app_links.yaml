@@ -1,0 +1,132 @@
+type: view
+name: app_links
+title: Applications
+icon: view-list-tree
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 170
+version: 2.0.0
+description: >-
+  Every installed application with its place in the dependency graph and WHAT IT
+  COSTS ON DISK. Beyond the inventory: how many packages it needs (deps_count),
+  how many need it (required_by), what it drags in weakly (recommends), its own
+  size (own_mb) and — the number people actually want — how much space removing
+  it would free (frees_mb), including the dependencies that would be autoremoved
+  with it (frees_with).
+  HOW frees_mb IS COMPUTED, and what it does not promise: a dependency is counted
+  as freed when it was installed AS a dependency (dnf's own reason, not a guess)
+  and nothing else on the machine still requires it — applied down the chain, so
+  a dependency of a dependency counts too. That is what `dnf remove X` plus the
+  usual clean-up of unneeded dependencies would take. It is a LOWER BOUND: a
+  package shared by two things being removed together is not counted, and dnf's
+  solver knows about protected packages and boolean dependencies that this does
+  not. Sizes are the installed size the package manager reports, summed over
+  architectures (removing a name removes both).
+columns: [kind, name, version, own_mb, frees_mb, deps_freed, frees_with,
+          required_by, deps_count, reason, size_from, recommends,
+          required_by_names, summary, publisher, installed]
+sql: |
+  WITH RECURSIVE edges AS (
+    SELECT DISTINCT package AS p, dependency AS d
+    FROM app_deps
+    WHERE dependency IS NOT NULL AND dependency <> '' AND dependency <> package
+  ),
+  -- how many DIFFERENT packages require each one: a package with exactly one
+  -- requirer is orphaned the moment that requirer goes
+  rc AS (SELECT d, count(DISTINCT p) AS n FROM edges GROUP BY d),
+  -- size and reason per NAME (a package installed for two architectures is two
+  -- rpm rows but one name; `dnf remove <name>` takes both)
+  pkg AS (
+    SELECT name,
+           sum(TRY_CAST(size_bytes AS BIGINT)) AS sz,
+           min(reason)                         AS reason
+    FROM pkg_reason GROUP BY name
+  ),
+  auto AS (SELECT name, sz FROM pkg
+           WHERE reason IN ('Dependency', 'Weak Dependency')),
+  -- what would be autoremoved along with each package, down the chain
+  freed(root, node) AS (
+    SELECT e.p, e.d
+      FROM edges e JOIN rc ON rc.d = e.d JOIN auto a ON a.name = e.d
+     WHERE rc.n = 1
+    UNION
+    SELECT f.root, e.d
+      FROM freed f
+      JOIN edges e ON e.p = f.node
+      JOIN rc ON rc.d = e.d
+      JOIN auto a ON a.name = e.d
+     WHERE rc.n = 1
+  ),
+  foot AS (
+    SELECT f.root AS name,
+           count(*)      AS deps_freed,
+           sum(a.sz)     AS deps_bytes,
+           string_agg(f.node, ', ' ORDER BY a.sz DESC) AS names
+    FROM freed f JOIN auto a ON a.name = f.node
+    GROUP BY f.root
+  ),
+  needs  AS (SELECT package, count(DISTINCT dependency) AS n FROM edges e(package, dependency)
+             GROUP BY package),
+  needed AS (SELECT d AS package, count(DISTINCT p) AS n,
+                    string_agg(DISTINCT p, ', ' ORDER BY p) AS names
+             FROM edges GROUP BY d),
+  weak   AS (SELECT package, string_agg(DISTINCT dependency, ', ' ORDER BY dependency) AS names
+             FROM app_deps
+             WHERE relation = 'recommends' AND dependency <> ''
+             GROUP BY package)
+  SELECT
+    a.kind,
+    a.name,
+    a.version,
+    -- rpm reports its own size; everything else is measured on disk by app_disk
+    -- and matched on the very path the inventory carries
+    round(COALESCE(pk.sz, TRY_CAST(dk.size_bytes AS BIGINT),
+                   TRY_CAST(a.size AS BIGINT), 0) / 1048576.0, 1)        AS own_mb,
+    round((COALESCE(pk.sz, TRY_CAST(dk.size_bytes AS BIGINT),
+                    TRY_CAST(a.size AS BIGINT), 0)
+           + COALESCE(ft.deps_bytes, 0)) / 1048576.0, 1)                 AS frees_mb,
+    COALESCE(ft.deps_freed, 0)                                           AS deps_freed,
+    -- biggest first: what would go with it, and how much more there is
+    CASE
+      WHEN ft.names IS NULL THEN ''
+      WHEN ft.deps_freed <= 10 THEN ft.names
+      ELSE array_to_string(array_slice(str_split(ft.names, ', '), 1, 10), ', ')
+           || ' … +' || (ft.deps_freed - 10) || ' more'
+    END                                                                  AS frees_with,
+    COALESCE(nb.n, 0)                                                    AS required_by,
+    COALESCE(nd.n, 0)                                                    AS deps_count,
+    COALESCE(pk.reason, '')                                              AS reason,
+    CASE WHEN pk.sz IS NOT NULL THEN 'package manager'
+         WHEN dk.size_bytes IS NOT NULL THEN dk.method
+         ELSE '' END                                                     AS size_from,
+    COALESCE(w.names, '')                                                AS recommends,
+    CASE
+      WHEN nb.names IS NULL THEN ''
+      WHEN nb.n <= 12 THEN nb.names
+      ELSE array_to_string(array_slice(str_split(nb.names, ', '), 1, 12), ', ')
+           || ' … +' || (nb.n - 12) || ' more'
+    END                                                                  AS required_by_names,
+    a.summary,
+    a.publisher,
+    a.installed,
+    a.arch,
+    a.owner,
+    a.path,
+    a.source
+  FROM applications a
+  -- the inventory points at a node module's package.json FILE while the size is
+  -- measured for its DIRECTORY, so the join is on the directory
+  LEFT JOIN app_disk dk
+         ON dk.path = CASE WHEN a.path LIKE '%/package.json'
+                           THEN regexp_replace(a.path, '/package\.json$', '')
+                           ELSE a.path END
+        AND a.path <> ''
+  LEFT JOIN pkg    pk ON pk.name = a.name AND a.kind = 'rpm'
+  LEFT JOIN foot   ft ON ft.name = a.name AND a.kind = 'rpm'
+  LEFT JOIN needs  nd ON nd.package = a.name AND a.kind = 'rpm'
+  LEFT JOIN needed nb ON nb.package = a.name AND a.kind = 'rpm'
+  LEFT JOIN weak   w  ON w.package  = a.name AND a.kind = 'rpm'
+  ORDER BY a.kind, a.name, a.version
+tests:
+  expect_columns: [name, own_mb, frees_mb, deps_freed, frees_with, required_by]
+  min_rows: 1

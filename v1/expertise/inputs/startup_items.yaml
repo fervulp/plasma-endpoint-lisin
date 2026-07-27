@@ -1,0 +1,67 @@
+name: startup_items
+table: startup_items
+type: input
+version: 1.0.0
+title: Startup Items
+icon: preferences-desktop-launch-feedback
+interval: 60
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 70
+# WHY THERE IS A WHERE CLAUSE. On Linux osquery's startup_items is two sources in
+# one table: the XDG autostart entries, and a full second copy of the systemd unit
+# list (589 of the 627 rows here). Those unit rows carry nothing the services table
+# lacks - name = id, path = fragment_path, status = active_state, username = User=,
+# and args is empty - so keeping them would put the same 589 rows in two tabs and
+# bury the 38 autostart entries that nothing else in v1 collects. They are dropped
+# here, not hidden: services shows them in full, with more columns.
+#
+# Collection belongs to the input:
+#   * command - osquery's `path` renamed to what it actually is. It is the Exec
+#               line of the .desktop file ("thunderbird %u",
+#               '"/usr/bin/syncthingtray" qt-widgets-gui --single-instance'), not
+#               a path to a file. Called `path` it would be mis-joined against
+#               real path columns.
+#   * program - the executable token of that Exec line: quotes stripped, first
+#               token taken. Verified on all 34 rows that have an Exec - the
+#               quoted case resolves correctly and none came out malformed. May
+#               be a bare name (thunderbird, kaccess) when the .desktop relies on
+#               PATH; that is what the entry says, so it is passed through as is.
+#   * scope   - system-wide (/etc/xdg/autostart, no username) or a user's own
+#               (~/.config/autostart). Derived from username, never from a
+#               hardcoded home directory.
+# The fields worth reading FIRST in this table; everything else the
+# source produces stays available in the Columns panel.
+columns: [name, type, status, path, source, username]
+description: >
+  Desktop-session autostart: .desktop entries run when a session starts, system-
+  wide and per user. A per-user autostart entry needs no privilege to create and
+  survives reboot, which makes it a standing persistence vector (MITRE T1547.013)
+  - 6 of the 38 entries here are user-owned. HONEST LIMITS. This input reads only
+  what osquery reports for the CURRENT collector's user; another user's
+  ~/.config/autostart is not readable without root. `args` is always empty on
+  Linux - osquery does not populate it - and is kept only because it is part of
+  the table. And 4 of the 38 rows come back with an EMPTY command even though the
+  .desktop file on disk does have an Exec= line (checked by hand: the GNOME
+  keyring entries and one launcher); that is an osquery parser gap, so the column
+  is left empty rather than backfilled from a second reader that would silently
+  disagree with the rest of the row.
+query: |
+  SELECT
+    name,
+    path                                                       AS command,
+    CASE WHEN path = '' THEN ''
+         ELSE split(replace(path, '"', ''), ' ', 0) END         AS program,
+    args,
+    source,
+    status,
+    username,
+    CASE WHEN username = '' THEN 'system' ELSE 'user' END       AS scope,
+    type
+  FROM startup_items
+  WHERE type <> 'systemd unit'
+  -- command is part of the sort, not decoration: two .desktop files in the same
+  -- directory may carry the same Name (live here: "User folders update" is both
+  -- xdg-user-dirs-update and xdg-user-dirs-gtk-update), and (source, name) alone
+  -- would let those two rows swap places between runs.
+  ORDER BY source, name, command

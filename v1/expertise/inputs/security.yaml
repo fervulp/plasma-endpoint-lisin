@@ -1,0 +1,57 @@
+name: security
+table: security
+type: input
+version: 1.0.0
+title: Security posture
+icon: security-high
+interval: 300
+# where this table sits in the reading order of the Data section
+# (lower comes first); a rule without one sorts after these.
+priority: 270
+description: >-
+  Platform security switches as name/value facts: SELinux (mode, policy,
+  booleans) and UEFI Secure Boot, from two different osquery tables unioned
+  into one shape so a single tab answers "what is turned on". Honest empties,
+  both are real on some machines and absent on others: selinux_settings
+  returns NOTHING when SELinux is not mounted at /sys/fs/selinux (booted with
+  selinux=0, or a kernel built without it), so an absent row means "not in
+  use" rather than "we failed to look". Secure Boot reports -1, shown as
+  "not reported", when the EFI variables cannot be read — a BIOS/legacy boot,
+  or a machine where efivarfs is readable by root only.
+# Collection belongs to the input:
+#   * source  - which sensor the fact came from, so the union stays traceable;
+#   * scope   - SELinux's own scope column (booleans vs config); 'uefi' for
+#               firmware facts, so the two sources never collide on a name;
+#   * value   - exactly what the table reported, unmodified;
+#   * readable - the raw 0/1 decoded from the row's OWN value. No list of
+#               "good" settings is baked in: the input states the fact, a
+#               finding rule is what may later call it good or bad.
+# Secure Boot is emitted as two name/value rows rather than one wide row so it
+# has the same shape as SELinux and can be filtered by the same WHERE.
+query: |
+  SELECT
+    'selinux'  AS source,
+    s.scope    AS scope,
+    s.key      AS name,
+    s.value    AS value,
+    s.value    AS readable
+  FROM selinux_settings s
+  UNION ALL
+  SELECT
+    'secureboot',
+    'uefi',
+    'secure_boot',
+    CAST(b.secure_boot AS TEXT),
+    CASE b.secure_boot
+      WHEN 1 THEN 'enabled' WHEN 0 THEN 'disabled' ELSE 'not reported' END
+  FROM secureboot b
+  UNION ALL
+  SELECT
+    'secureboot',
+    'uefi',
+    'setup_mode',
+    CAST(b.setup_mode AS TEXT),
+    CASE b.setup_mode
+      WHEN 1 THEN 'yes' WHEN 0 THEN 'no' ELSE 'not reported' END
+  FROM secureboot b
+  ORDER BY source, scope, name
