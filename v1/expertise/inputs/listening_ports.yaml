@@ -13,8 +13,12 @@ interval: 30
 description: Listening sockets (raw). The owning process is attached by the
   ports_owned enrichment view, not here — enrichment joins across tables that
   may come from different inputs, so it belongs in the derivation layer.
+# osquery RETURNS EACH LISTENING PORT TWICE — identical in every column, down to
+# the file descriptor and the socket inode (checked against osqueryi directly).
+# Nothing downstream can tell the copies apart, so "84 listening ports" was a
+# count of 42 sockets. DISTINCT is the rule's answer to its own source.
 query: |
-  SELECT
+  SELECT DISTINCT
     pid,
     port,
     protocol,

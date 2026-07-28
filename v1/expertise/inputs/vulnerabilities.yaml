@@ -52,6 +52,11 @@ command: |
       if len(p) < 5 or p[1] == "Name" or not p[1].startswith(("FEDORA", "RHSA", "ALSA")):
           continue
       status, aid, _type, sev, pkg = p[0], p[1], p[2], p[3], p[4]
+      # dnf prints the word None when an advisory carries no severity. Storing
+      # that word makes an ABSENCE look like a value — an empty cell says the
+      # same thing without pretending to.
+      if sev in ("None", "none"):
+          sev = ""
       # dnf prints LOCAL time; the stores keep UTC (the interface converts once,
       # at the display boundary), so the advisory date is converted here.
       issued = " ".join(p[5:7])

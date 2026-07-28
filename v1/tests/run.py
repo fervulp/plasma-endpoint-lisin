@@ -268,6 +268,51 @@ def check_rule_tests(store):
         ok(f"{len(results)} assertions from {len(have)} rules, all hold")
 
 
+# ------------------------------------------------------------- duplicates
+def check_duplicates(store):
+    """A ROW THAT APPEARS TWICE IS A COUNT THAT LIES. Three ways it happened
+    here: osquery returns every listening port twice (identical down to the file
+    descriptor, checked against osqueryi itself), rpm lists the same
+    configuration file twice for the same package, and long URLs were cut to a
+    fixed width so different addresses became the same row. The third is the
+    nastiest — the data was not duplicated, it was TRUNCATED into looking
+    duplicated, which is why a truncated value now ends in an ellipsis.
+
+    A few tables legitimately hold repeats (a history of events), so this asks
+    about SNAPSHOT tables: what is on the machine right now."""
+    section("duplicates")
+    from core.db import ident as _id
+    # a snapshot of state: each row is a thing that exists, so two identical rows
+    # mean one thing counted twice
+    skip = {"shell_history", "logins", "authentication", "pkg_history",
+            "browser_history", "events"}
+    found, checked = [], 0
+    for table in sorted(x for x in store.tables() if not x.startswith("_")):
+        if table in skip:
+            continue
+        cols = [c for c in store.columns(table) if not c.startswith("_")]
+        if not cols:
+            continue
+        total = store.row_count(table)
+        if total == 0:
+            continue
+        sel = ", ".join(_id(c) for c in cols)
+        try:
+            uniq = store.fetch(
+                f"SELECT count(*) FROM (SELECT DISTINCT {sel} FROM {_id(table)})"
+            )["rows"][0][0]
+        except Exception:  # noqa: BLE001
+            continue
+        checked += 1
+        if uniq < total:
+            found.append(f"{table}: {total} rows but only {uniq} distinct "
+                         f"({total - uniq} counted twice)")
+    for f in found:
+        bad(f)
+    if not found:
+        ok(f"{checked} snapshot tables hold no row twice")
+
+
 # ------------------------------------------------------------------- clock
 def check_clock(store):
     """EVERY STORED MOMENT IS UTC. The interface converts once, at the display
@@ -986,6 +1031,41 @@ def check_layout(backend):
         else:
             ok("changing the table still starts at its first row")
 
+    # TYPED TEXT THAT LOOKS LIKE A CONDITION IS STILL TEXT. Anything holding
+    # = < > or the word LIKE was handed to the database as SQL, so searching for
+    # "--flag=value" or "-->" answered "the query failed" — and those are exactly
+    # the strings one looks for in a command line or a message. The database
+    # decides now: if it refuses the condition, the same text is searched as text.
+    pg.setProperty("tabIndex", 0)
+    for _ in range(8):
+        app.processEvents()
+    trouble = []
+    for q, must_find in (("--flag=value", False), ("-->", False), ("a>b", False)):
+        QMetaObject.invokeMethod(pg, "applyQuery", Qt.DirectConnection,
+                                 Q_ARG("QVariant", q))
+        for _ in range(8):
+            app.processEvents()
+        err = str(pg.property("rowsError") or "")
+        if err:
+            trouble.append(f"searching for {q!r} still fails: {err[:70]}")
+    QMetaObject.invokeMethod(pg, "applyQuery", Qt.DirectConnection, Q_ARG("QVariant", ""))
+    for _ in range(6):
+        app.processEvents()
+    # and a REAL condition must still be run as one, not turned into a text search
+    QMetaObject.invokeMethod(pg, "applyQuery", Qt.DirectConnection,
+                             Q_ARG("QVariant", "1 = 1"))
+    for _ in range(8):
+        app.processEvents()
+    if pg.property("queryNote"):
+        trouble.append("a valid condition was demoted to a text search")
+    QMetaObject.invokeMethod(pg, "applyQuery", Qt.DirectConnection, Q_ARG("QVariant", ""))
+    for _ in range(6):
+        app.processEvents()
+    for x in trouble:
+        bad(x)
+    if not trouble:
+        ok("text that looks like SQL is searched as text, and real conditions run")
+
     # THE COUNTER ALTERNATES between how many rows and how full the table is.
     def counters():
         out = []
@@ -1213,6 +1293,7 @@ def main() -> int:
         check_layout(be)
         if be.owner:
             check_engine(be.store)
+            check_duplicates(be.store)
             check_clock(be.store)
             check_arity()
             check_contract(be.store)
@@ -1232,6 +1313,7 @@ def main() -> int:
                " reading through its service")
             print("  --    skipped (they write, and the owner is the only writer):"
                   " engine, data, events, errors, ingest")
+            check_duplicates(be.store)
             check_clock(be.store)
             check_arity()
             check_contract(be.store)

@@ -74,12 +74,33 @@ Kirigami.Page {
     property int curTotal: 0          // how many rows the condition matches in total
     property string rowsError: ""
     function loadRows() {
-        if (!cur) { curRows = []; curTotal = 0; rowsError = ""; return }
+        if (!cur) { curRows = []; curTotal = 0; rowsError = ""; queryNote = ""; return }
         var where = page.whereSql()
         var order = sortCol !== "" ? (sortCol + (sortAsc ? " ASC" : " DESC")) : ""
         var lim = pageLimit > 0 ? pageLimit : 0
         var off = pageLimit > 0 ? pageIndex * pageLimit : 0
         var r = backend.tableRows(cur.name, where, order, lim, off)
+        queryNote = ""
+        // TYPED TEXT THAT MERELY LOOKS LIKE A CONDITION IS STILL TEXT.
+        // Anything containing = < > or the word LIKE was handed to the database
+        // as SQL, so searching for "--flag=value", "-->" or "a>b" answered "the
+        // query failed" instead of searching for it — and those are exactly the
+        // strings one searches for in a command line or a message. No heuristic
+        // can tell a condition from a literal, so the database decides: if it
+        // refuses the condition, the same text is searched AS TEXT, and the page
+        // says which of the two happened rather than leaving it a mystery.
+        if (r.error && queryText !== "" && hasOperator(queryText)) {
+            var asText = freeText(queryText)
+            if (asText !== "") {
+                var g = groupCond()
+                var w2 = g ? "(" + asText + ") AND " + g : asText
+                var r2 = backend.tableRows(cur.name, w2, order, lim, off)
+                if (!r2.error) {
+                    r = r2
+                    queryNote = "not a condition this table accepts — searched as text"
+                }
+            }
+        }
         curRows = r.rows || []
         curTotal = r.total || 0
         rowsError = r.error || ""
@@ -205,6 +226,7 @@ Kirigami.Page {
     // changes (curName), not on every automatic data refresh - otherwise the user
     // loses the selected row and the position on every tick.
     property string curName: cur ? cur.name : ""
+    property string queryNote: ""      // set when a typed condition was searched as text
     readonly property var src: cur && cur.source ? cur.source : null
     readonly property bool srcFailed: !!(src && String(src.error || "") !== "")
     // one sentence, in the order the question is asked: what made these rows,
@@ -1062,7 +1084,9 @@ Kirigami.Page {
                         color: page.srcFailed ? Kirigami.Theme.negativeTextColor
                                               : Kirigami.Theme.textColor
                         font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        text: page.provenance
+                        text: page.queryNote !== ""
+                              ? page.queryNote + "  ·  " + page.provenance
+                              : page.provenance
                     }
                     QQC2.ToolButton {
                         visible: page.src !== null && String(page.src.ref) !== ""

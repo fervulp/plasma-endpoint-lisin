@@ -30,8 +30,10 @@ command: |
     auto=$(timeout 10 virsh dominfo "$n" 2>/dev/null |
            awk -F: '/^Autostart:/ {gsub(/ /,"",$2); print $2; exit}')
     xml=$(timeout 10 virsh dumpxml "$n" 2>/dev/null)
-    disks=$(printf '%s' "$xml" | grep -o "source file='[^']*'" | sed "s/source file='//;s/'//" | tr '\n' ' ')
-    nets=$(printf '%s' "$xml" | grep -oE "(source (network|bridge|dev)='[^']*')" | sed "s/.*='//;s/'//" | tr '\n' ' ')
+    # `tr` leaves a trailing space; a value that ends in whitespace is a value
+    # nobody can match on, so the joins are trimmed here rather than in the reader
+    disks=$(printf '%s' "$xml" | grep -o "source file='[^']*'" | sed "s/source file='//;s/'//" | paste -sd' ' -)
+    nets=$(printf '%s' "$xml" | grep -oE "(source (network|bridge|dev)='[^']*')" | sed "s/.*='//;s/'//" | paste -sd' ' -)
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$state" "$id" "$disks" "$nets" "$auto"
   done
   true

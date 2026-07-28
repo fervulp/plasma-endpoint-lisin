@@ -7,7 +7,7 @@ title: Unix sockets
 icon: network-connect
 interval: 120
 priority: 95
-columns: [path, process, pid, state, users]
+columns: [path, process, pid, state, inode, users]
 description: >-
   The listening unix sockets — the LOCAL inter-process surface, which the network
   tables never show. Everything that talks on this machine without touching the
@@ -16,13 +16,13 @@ description: >-
   case, and it stays visible here rather than being dropped.
   Owner information only appears for this user's own processes: `ss` shows the
   holder of a socket it is allowed to see, and root's are not.
-tsv_columns: [path, process, pid, state, users]
+tsv_columns: [path, process, pid, state, inode, users]
 command: |
   export LC_ALL=C
   ss -xlpH 2>/dev/null | awk '
     {
       # ss columns: Netid State Recv-Q Send-Q Local-Addr:Port Peer users:(("x",pid=N,fd=M))
-      path = $5; state = $2; users = ""; proc = ""; pid = ""
+      path = $5; state = $2; users = ""; proc = ""; pid = ""; inode = $6      # ss prints: netid state recvq sendq addr INODE peer ...
       i = index($0, "users:((")
       if (i > 0) {
         users = substr($0, i + 8)
@@ -30,5 +30,8 @@ command: |
         proc = users; sub(/^"/, "", proc); sub(/".*/, "", proc)
         pid = users; sub(/.*pid=/, "", pid); sub(/[,).].*/, "", pid)
       }
-      printf "%s\t%s\t%s\t%s\t%s\n", path, proc, pid, state, users
+      # THE INODE, so two sockets are two rows. Without it an unnamed socket
+      # (local address "*") is indistinguishable from every other one, and a
+      # dozen distinct sockets read as one repeated twelve times.
+      printf "%s\t%s\t%s\t%s\t%s\t%s\n", path, proc, pid, state, inode, users
     }'

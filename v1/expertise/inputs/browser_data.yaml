@@ -60,10 +60,16 @@ command: |
                "enabled", "ext_type", "source", "installed", "permissions",
                "origins", "update_url", "path", "url", "title", "visits",
                "last_visit"]
+      # A TRUNCATED VALUE MUST SAY SO. Cutting silently at 400 characters turned
+      # different long URLs into identical rows — seven copies of one search in
+      # one profile, which is not what the profile holds. Addresses get room, and
+      # anything cut ends in an ellipsis so the reader knows the rest exists.
+      LIMITS = {"url": 1500, "title": 500, "permissions": 800, "origins": 800}
       out = []
       for k in order:
-          v = str(f.get(k, "") or "")
-          out.append(v.replace("\t", " ").replace("\n", " ")[:400])
+          v = str(f.get(k, "") or "").replace("\t", " ").replace("\n", " ")
+          cap = LIMITS.get(k, 400)
+          out.append(v if len(v) <= cap else v[:cap - 1] + "\u2026")
       print("\t".join(out))
 
   def desktop_browsers():

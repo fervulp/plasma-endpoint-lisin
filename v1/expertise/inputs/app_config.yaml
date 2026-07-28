@@ -40,7 +40,11 @@ command: |
   # rpm's own %config flag — inside an array iteration the package name must be
   # %{=NAME}; a plain %{NAME} is not expanded and returns three rows instead of
   # thousands (a mistake made twice before, hence the note).
+  # SORT -u: rpm lists the same configuration file twice for the same package
+  # (51 rows on this machine), and a row saying "this package has this file"
+  # twice adds nothing but a wrong count.
   rpm -qa --qf '[%{=NAME}\t%{FILENAMES}\t%{FILEFLAGS:fflags}\n]' 2>/dev/null |
+    sort -u |
     awk -F'\t' '$3 ~ /c/ {
         cmd = "stat -c %y \"" $2 "\" 2>/dev/null"
         printf "%s\t%s\tsystem\tfile\t\trpm %%config\t\n", $1, $2
