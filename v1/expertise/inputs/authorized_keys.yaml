@@ -32,6 +32,9 @@ description: Public keys that grant passwordless SSH login, per user, with the
   options attached to each entry. Reads only home directories the collector may
   enter and only the default key files, so it is empty when no such key is present
   or when other users' homes are unreadable.
+# WHY IT MAY HOLD NOTHING (asserted by the tests: a source that is empty
+# without saying so is a source that broke).
+may_be_empty: 'no account on this machine has an ~/.ssh/authorized_keys file; a key appearing here is the point, so an empty table is the expected state and not a broken source'
 query: |
   SELECT
     a.uid,

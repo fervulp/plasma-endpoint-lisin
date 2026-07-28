@@ -1,0 +1,1012 @@
+{
+ "app_config": {
+  "columns": [
+   "app",
+   "entries",
+   "kind",
+   "modified",
+   "origin",
+   "path",
+   "scope"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 2985,
+  "seconds": 1.24,
+  "table": "app_config"
+ },
+ "app_deps": {
+  "columns": [
+   "capabilities",
+   "capability",
+   "dependency",
+   "package",
+   "relation"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 22365,
+  "seconds": 2.48,
+  "table": "app_deps"
+ },
+ "app_disk": {
+  "columns": [
+   "method",
+   "path",
+   "size_bytes"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 819,
+  "seconds": 1.91,
+  "table": "app_disk"
+ },
+ "applications": {
+  "columns": [
+   "arch",
+   "installed",
+   "installed_at",
+   "kind",
+   "name",
+   "owner",
+   "path",
+   "publisher",
+   "size",
+   "source",
+   "summary",
+   "version"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 3888,
+  "seconds": 2.19,
+  "table": "applications"
+ },
+ "arp": {
+  "columns": [
+   "address",
+   "interface",
+   "is_gateway",
+   "mac",
+   "permanent"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1,
+  "seconds": 0.23,
+  "table": "arp"
+ },
+ "authentication": {
+  "columns": [
+   "detail",
+   "method",
+   "origin",
+   "result",
+   "service",
+   "session",
+   "source",
+   "time",
+   "user"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1063,
+  "seconds": 1.47,
+  "table": "authentication"
+ },
+ "authorized_keys": {
+  "columns": [
+   "empty"
+  ],
+  "error": "",
+  "may_be_empty": true,
+  "rows": 0,
+  "seconds": 0.23,
+  "table": "authorized_keys"
+ },
+ "boot": {
+  "columns": [
+   "item",
+   "status",
+   "value"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 23,
+  "seconds": 0.25,
+  "table": "boot"
+ },
+ "boot_sessions": {
+  "columns": [
+   "boot_id",
+   "current",
+   "ended",
+   "ended_how",
+   "kernel",
+   "started",
+   "uptime"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 3,
+  "seconds": 0.08,
+  "table": "boot_sessions"
+ },
+ "browser_data": {
+  "columns": [
+   "browser",
+   "enabled",
+   "engine",
+   "ext_id",
+   "ext_type",
+   "installed",
+   "kind",
+   "last_visit",
+   "name",
+   "origins",
+   "path",
+   "permissions",
+   "profile",
+   "source",
+   "title",
+   "update_url",
+   "url",
+   "version",
+   "visits"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1635,
+  "seconds": 0.35,
+  "table": "browser_data"
+ },
+ "containers": {
+  "columns": [
+   "empty"
+  ],
+  "error": "",
+  "may_be_empty": true,
+  "rows": 0,
+  "seconds": 0.23,
+  "table": "containers"
+ },
+ "cpu": {
+  "columns": [
+   "arch",
+   "cpu_logical_cores",
+   "cpu_microcode",
+   "cpu_physical_cores",
+   "cpu_sockets",
+   "load_15m",
+   "load_1m",
+   "load_5m",
+   "load_pct_1m",
+   "model"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1,
+  "seconds": 0.23,
+  "table": "cpu"
+ },
+ "devices": {
+  "columns": [
+   "bus",
+   "class",
+   "driver",
+   "model",
+   "model_id",
+   "removable",
+   "serial",
+   "slot",
+   "subclass",
+   "vendor",
+   "vendor_id"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 50,
+  "seconds": 0.26,
+  "table": "devices"
+ },
+ "dns": {
+  "columns": [
+   "address",
+   "entry_type",
+   "hostnames",
+   "kind",
+   "netmask",
+   "options",
+   "seq"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 9,
+  "seconds": 0.23,
+  "table": "dns"
+ },
+ "failed_units": {
+  "columns": [
+   "active",
+   "description",
+   "load",
+   "scope",
+   "sub",
+   "unit"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 4,
+  "seconds": 0.02,
+  "table": "failed_units"
+ },
+ "filesystems": {
+  "columns": [
+   "encryption",
+   "fstype",
+   "kind",
+   "label",
+   "mountpoint",
+   "name",
+   "parent",
+   "size",
+   "uuid"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 9,
+  "seconds": 0.03,
+  "table": "filesystems"
+ },
+ "firewall": {
+  "columns": [
+   "active",
+   "default_zone",
+   "interfaces",
+   "kind",
+   "target",
+   "value",
+   "zone"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 12,
+  "seconds": 1.31,
+  "table": "firewall"
+ },
+ "flatpak_perms": {
+  "columns": [
+   "app",
+   "object",
+   "permissions",
+   "table_name"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1,
+  "seconds": 0.03,
+  "table": "flatpak_perms"
+ },
+ "iface_stats": {
+  "columns": [
+   "errors",
+   "interface",
+   "rx_bytes",
+   "rx_dropped",
+   "rx_packets",
+   "tx_bytes",
+   "tx_dropped",
+   "tx_packets"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 5,
+  "seconds": 0.03,
+  "table": "iface_stats"
+ },
+ "journal_health": {
+  "columns": [
+   "item",
+   "value"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 4,
+  "seconds": 0.02,
+  "table": "journal_health"
+ },
+ "kernel_modules": {
+  "columns": [
+   "address",
+   "in_use",
+   "name",
+   "size",
+   "size_kb",
+   "status",
+   "used_by",
+   "used_by_count"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 202,
+  "seconds": 0.24,
+  "table": "kernel_modules"
+ },
+ "kernel_params": {
+  "columns": [
+   "config_value",
+   "current_value",
+   "declared",
+   "name",
+   "state",
+   "subsystem",
+   "type"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1509,
+  "seconds": 0.51,
+  "table": "kernel_params"
+ },
+ "listening_ports": {
+  "columns": [
+   "address",
+   "family",
+   "pid",
+   "port",
+   "protocol",
+   "socket_path"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 40,
+  "seconds": 0.29,
+  "table": "listening_ports"
+ },
+ "logins": {
+  "columns": [
+   "action",
+   "ago_sec",
+   "host",
+   "origin",
+   "pid",
+   "session_sec",
+   "time",
+   "time_utc",
+   "tty",
+   "uid",
+   "username"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1545,
+  "seconds": 0.42,
+  "table": "logins"
+ },
+ "memory": {
+  "columns": [
+   "active",
+   "buffers",
+   "cached",
+   "inactive",
+   "memory_available",
+   "memory_free",
+   "memory_total",
+   "memory_used",
+   "swap_cached",
+   "swap_free",
+   "swap_total",
+   "swap_used",
+   "swap_used_pct",
+   "used_pct"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1,
+  "seconds": 0.23,
+  "table": "memory"
+ },
+ "mounts": {
+  "columns": [
+   "device",
+   "device_alias",
+   "flags",
+   "free_gb",
+   "inodes",
+   "inodes_free",
+   "nodev",
+   "noexec",
+   "nosuid",
+   "path",
+   "read_only",
+   "size_gb",
+   "type",
+   "used_gb",
+   "used_pct"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 12,
+  "seconds": 0.26,
+  "table": "mounts"
+ },
+ "net_config": {
+  "columns": [
+   "destination",
+   "family",
+   "flags",
+   "gateway",
+   "hopcount",
+   "interface",
+   "kind",
+   "metric",
+   "mtu",
+   "on_link",
+   "prefix",
+   "source",
+   "type"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 210,
+  "seconds": 0.24,
+  "table": "net_config"
+ },
+ "network": {
+  "columns": [
+   "address",
+   "broadcast",
+   "family",
+   "flags",
+   "flags_text",
+   "interface",
+   "kind",
+   "link_speed",
+   "mac",
+   "mask",
+   "mtu",
+   "promisc",
+   "state",
+   "type_id"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 8,
+  "seconds": 0.24,
+  "table": "network"
+ },
+ "open_files": {
+  "columns": [
+   "deleted",
+   "dir",
+   "fd",
+   "file_owner",
+   "file_type",
+   "filename",
+   "kind",
+   "mode",
+   "path",
+   "pid",
+   "process",
+   "process_path",
+   "size",
+   "user"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1160,
+  "seconds": 0.78,
+  "table": "open_files"
+ },
+ "pam_config": {
+  "columns": [
+   "arguments",
+   "control",
+   "module",
+   "service",
+   "type"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 401,
+  "seconds": 0.18,
+  "table": "pam_config"
+ },
+ "persistence": {
+  "columns": [
+   "detail",
+   "path",
+   "vector"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 99,
+  "seconds": 0.68,
+  "table": "persistence"
+ },
+ "pkg_history": {
+  "columns": [
+   "action",
+   "altered",
+   "command",
+   "id",
+   "ran_at"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 300,
+  "seconds": 0.14,
+  "table": "pkg_history"
+ },
+ "pkg_reason": {
+  "columns": [
+   "name",
+   "reason",
+   "size_bytes"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 3248,
+  "seconds": 0.47,
+  "table": "pkg_reason"
+ },
+ "polkit_actions": {
+  "columns": [
+   "action",
+   "allow_active",
+   "allow_any",
+   "allow_inactive",
+   "description",
+   "vendor"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 563,
+  "seconds": 0.07,
+  "table": "polkit_actions"
+ },
+ "privesc": {
+  "columns": [
+   "age_days",
+   "changed",
+   "detail",
+   "kind",
+   "name",
+   "risk",
+   "source"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 13,
+  "seconds": 2.5,
+  "table": "privesc"
+ },
+ "processes": {
+  "columns": [
+   "cgroup_path",
+   "cmdline",
+   "cpu_pct",
+   "cwd",
+   "elapsed_sec",
+   "euid",
+   "gid",
+   "mem_pct",
+   "name",
+   "nice",
+   "on_disk",
+   "path",
+   "pid",
+   "ppid",
+   "rss",
+   "start_time",
+   "started",
+   "state",
+   "threads",
+   "uid",
+   "user"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 416,
+  "seconds": 0.39,
+  "table": "processes"
+ },
+ "scheduled": {
+  "columns": [
+   "command",
+   "kind",
+   "last_run",
+   "name",
+   "next_run",
+   "run_as",
+   "schedule",
+   "scope",
+   "source"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 17,
+  "seconds": 0.06,
+  "table": "scheduled"
+ },
+ "security": {
+  "columns": [
+   "name",
+   "readable",
+   "scope",
+   "source",
+   "value"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 2,
+  "seconds": 0.39,
+  "table": "security"
+ },
+ "services": {
+  "columns": [
+   "active_state",
+   "description",
+   "following",
+   "fragment_path",
+   "id",
+   "kind",
+   "load_state",
+   "object_path",
+   "origin",
+   "run_as",
+   "source_path",
+   "sub_state",
+   "unit_file_state"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 587,
+  "seconds": 0.47,
+  "table": "services"
+ },
+ "sessions": {
+  "columns": [
+   "elapsed_sec",
+   "host",
+   "login_time",
+   "login_utc",
+   "origin",
+   "pid",
+   "pid_alive",
+   "pid_cmdline",
+   "pid_name",
+   "tty",
+   "type",
+   "uid",
+   "user"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 4,
+  "seconds": 0.24,
+  "table": "sessions"
+ },
+ "shell_history": {
+  "columns": [
+   "command",
+   "history_file",
+   "n",
+   "program",
+   "shell",
+   "time",
+   "ts",
+   "uid",
+   "username"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 996,
+  "seconds": 0.36,
+  "table": "shell_history"
+ },
+ "sockets": {
+  "columns": [
+   "family",
+   "family_name",
+   "fd",
+   "kind",
+   "local",
+   "local_address",
+   "local_port",
+   "net_namespace",
+   "path",
+   "peer",
+   "pid",
+   "process",
+   "protocol",
+   "protocol_name",
+   "remote_address",
+   "remote_port",
+   "remote_scope",
+   "socket",
+   "state",
+   "user"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 569,
+  "seconds": 0.44,
+  "table": "sockets"
+ },
+ "ssh_keys": {
+  "columns": [
+   "encrypted",
+   "filename",
+   "key_bits",
+   "key_type",
+   "named_public",
+   "passphrase",
+   "path",
+   "security_bits",
+   "strength",
+   "uid",
+   "username"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 3,
+  "seconds": 0.24,
+  "table": "ssh_keys"
+ },
+ "startup_items": {
+  "columns": [
+   "args",
+   "command",
+   "name",
+   "program",
+   "scope",
+   "source",
+   "status",
+   "type",
+   "username"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 38,
+  "seconds": 0.4,
+  "table": "startup_items"
+ },
+ "storage": {
+  "columns": [
+   "block_size",
+   "fs_type",
+   "kind",
+   "model",
+   "mounted",
+   "mounted_at",
+   "name",
+   "parent",
+   "serial",
+   "size_bytes",
+   "size_gb",
+   "vendor"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 9,
+  "seconds": 0.54,
+  "table": "storage"
+ },
+ "sudoers": {
+  "columns": [
+   "empty"
+  ],
+  "error": "",
+  "may_be_empty": true,
+  "rows": 0,
+  "seconds": 0.24,
+  "table": "sudoers"
+ },
+ "suid_binaries": {
+  "columns": [
+   "age_days",
+   "all_paths",
+   "bits",
+   "inode",
+   "kind",
+   "modified",
+   "mtime",
+   "name",
+   "owner",
+   "owner_group",
+   "path",
+   "paths",
+   "size"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 34,
+  "seconds": 0.36,
+  "table": "suid_binaries"
+ },
+ "swap_info": {
+  "columns": [
+   "name",
+   "priority",
+   "size",
+   "type",
+   "used"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1,
+  "seconds": 0.01,
+  "table": "swap_info"
+ },
+ "system": {
+  "columns": [
+   "arch",
+   "board_model",
+   "board_vendor",
+   "boot_device",
+   "computer_name",
+   "cpu_brand",
+   "cpu_logical_cores",
+   "cpu_microcode",
+   "cpu_physical_cores",
+   "cpu_sockets",
+   "cpu_type",
+   "hardware_model",
+   "hardware_vendor",
+   "hardware_version",
+   "hostname",
+   "kernel_arguments",
+   "kernel_path",
+   "kernel_version",
+   "memory_gb",
+   "os_build",
+   "os_major",
+   "os_minor",
+   "os_name",
+   "os_version",
+   "physical_memory",
+   "platform",
+   "platform_like"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1,
+  "seconds": 0.24,
+  "table": "system"
+ },
+ "ulimits": {
+  "columns": [
+   "hard_limit",
+   "hard_value",
+   "raisable",
+   "soft_limit",
+   "soft_value",
+   "type"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 15,
+  "seconds": 0.23,
+  "table": "ulimits"
+ },
+ "unix_sockets": {
+  "columns": [
+   "inode",
+   "path",
+   "pid",
+   "process",
+   "state",
+   "users"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 139,
+  "seconds": 0.04,
+  "table": "unix_sockets"
+ },
+ "unpackaged_config": {
+  "columns": [
+   "group",
+   "mode",
+   "modified",
+   "owner",
+   "path",
+   "size",
+   "writable_by"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 482,
+  "seconds": 1.22,
+  "table": "unpackaged_config"
+ },
+ "uptime": {
+  "columns": [
+   "boot_time",
+   "days",
+   "hours",
+   "minutes",
+   "seconds",
+   "total_seconds",
+   "up_days",
+   "uptime_text"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1,
+  "seconds": 0.23,
+  "table": "uptime"
+ },
+ "user_groups": {
+  "columns": [
+   "gid",
+   "group_members",
+   "groupname",
+   "membership",
+   "uid",
+   "user_kind",
+   "username"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 73,
+  "seconds": 0.3,
+  "table": "user_groups"
+ },
+ "users": {
+  "columns": [
+   "can_login",
+   "gecos",
+   "gid",
+   "home",
+   "home_exists",
+   "home_mode",
+   "home_owner",
+   "home_type",
+   "kind",
+   "primary_group",
+   "shell",
+   "uid",
+   "uid_shared",
+   "username"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 66,
+  "seconds": 0.28,
+  "table": "users"
+ },
+ "vms": {
+  "columns": [
+   "autostart",
+   "disks",
+   "id",
+   "name",
+   "networks",
+   "state"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 1,
+  "seconds": 0.2,
+  "table": "vms"
+ },
+ "vulnerabilities": {
+  "columns": [
+   "action",
+   "advisory",
+   "cve",
+   "cve_count",
+   "issued",
+   "packages",
+   "severity",
+   "status"
+  ],
+  "error": "",
+  "may_be_empty": false,
+  "rows": 82,
+  "seconds": 2.41,
+  "table": "vulnerabilities"
+ }
+}

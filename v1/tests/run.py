@@ -388,53 +388,54 @@ def check_clock(store):
         ok(f"no rule asks for local time ({len(_pl.load_inputs())} checked)")
 
 
-# ------------------------------------------------------------------ arity
-def check_arity():
-    """EVERY RULE MUST PRINT AS MANY FIELDS AS IT DECLARES. A command's output has
-    no header, so the engine maps columns by position: a value that happens to
-    contain a tab or a newline does not fail, it SHIFTS everything after it into
-    the wrong column, or tears the row in half. That is what `vms` was doing —
-    virsh prints both "Autostart:" and "Autostart Once:", a loose match caught
-    both, and the field became two lines.
+# ------------------------------------------------------------ entry points
+def check_entry_points(store):
+    """WHAT EACH ENTRY POINT PRODUCES, AGAINST WHAT IT PRODUCED BEFORE.
 
-    Every command rule is run and every line counted. It is the most expensive
-    check here (it runs the whole collection again) and worth it: this class of
-    defect produces data that looks entirely plausible."""
-    section("arity")
-    from core import pipeline as _pl, shell as _sh
-    import collections as _c
-    checked, broken = 0, []
-    for r in _pl.load_inputs():
-        if r.get("kind") != "command" or not r.get("command"):
-            continue
-        want = len(r.get("tsv_columns") or [])
-        try:
-            path = _sh.run_to_file(r["command"])
-        except Exception as e:  # noqa: BLE001
-            broken.append(f"{r.get('name')}: the command failed — "
-                          f"{str(e).splitlines()[0][:80]}")
-            continue
-        counts = _c.Counter()
-        try:
-            with open(path, errors="replace") as fh:
-                for line in fh:
-                    if line.strip():
-                        counts[line.rstrip("\n").count("\t") + 1] += 1
-        finally:
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
-        checked += 1
-        wrong = sum(n for k, n in counts.items() if k != want)
-        if wrong:
-            broken.append(f"{r.get('name')}: {wrong} line(s) of "
-                          f"{sum(counts.values())} do not have {want} fields "
-                          f"(seen: {dict(counts)})")
-    for b in broken:
-        bad(b)
-    if not broken:
-        ok(f"{checked} command rules print exactly the fields they declare")
+    A source rarely breaks loudly. dnf5 prints a fixed-width table where dnf4
+    printed pipes; osquery renames a column between releases; a tool stops being
+    installed; a permission changes. The collection still succeeds — it just
+    returns fewer rows, or the same rows with a column gone, and everything
+    downstream carries on with less.
+
+    So every entry point is run once here and compared against tests/baseline.json
+    on three counts: it must not LOSE a column, it must not collapse in row count,
+    and it must not come back empty unless the rule SAYS it may (`may_be_empty:`
+    with the reason). Growth is never a failure.
+
+    The same pass counts fields per line, because a command's output has no header
+    and columns are mapped by position: a value holding a tab or a newline shifts
+    data sideways or tears the row in half — which is exactly what `vms` was doing.
+    One collection answers both questions; two would be the sort of cost that gets
+    a check deleted later.
+
+    When a change is MEANT to change what a source collects:
+        cd v1 && PYTHONNOUSERSITE=1 python3 tests/baseline.py --update
+    and read the diff it prints — that diff is the claim being made."""
+    section("entry points")
+    sys.path.insert(0, os.path.join(V1, "tests"))
+    import baseline as _bl
+
+    now = _bl.measure(store)
+    arity = [(n, v) for n, v in now.items() if v.get("arity_wrong")]
+    for n, v in arity:
+        bad(f"{n}: {v['arity_wrong']} line(s) do not have the fields the rule "
+            f"declares (seen: {v['arity_seen']})")
+    if not arity:
+        cmds = sum(1 for v in now.values() if v.get("arity_seen"))
+        ok(f"{cmds} command rules print exactly the fields they declare")
+
+    was = _bl.load()
+    if not was:
+        bad("there is no baseline yet — run tests/baseline.py to record one")
+        return
+    problems = _bl.compare(now, was)
+    for p in problems:
+        bad(p)
+    if not problems:
+        total = sum(v["rows"] for v in now.values())
+        ok(f"{len(now)} entry points match the baseline ({total:,} rows, "
+           f"no column lost, none unexpectedly empty)")
 
 
 # --------------------------------------------------------------- contract
@@ -1295,7 +1296,7 @@ def main() -> int:
             check_engine(be.store)
             check_duplicates(be.store)
             check_clock(be.store)
-            check_arity()
+            check_entry_points(be.store)
             check_contract(be.store)
             check_rule_tests(be.store)
             check_data(be.store)
@@ -1315,7 +1316,7 @@ def main() -> int:
                   " engine, data, events, errors, ingest")
             check_duplicates(be.store)
             check_clock(be.store)
-            check_arity()
+            check_entry_points(be.store)
             check_contract(be.store)
             check_rule_tests(be.store)
             check_reads(be)

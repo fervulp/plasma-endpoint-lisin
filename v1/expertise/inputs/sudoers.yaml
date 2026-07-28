@@ -29,6 +29,9 @@ description: Rules from /etc/sudoers and /etc/sudoers.d — who may run what as
   another user, and which rules skip the password. Both paths are root-only (0440
   and 0750), so this table is EMPTY for an unprivileged collector and fills in only
   when the collector runs as root; no substitute source is used.
+# WHY IT MAY HOLD NOTHING (asserted by the tests: a source that is empty
+# without saying so is a source that broke).
+may_be_empty: '/etc/sudoers and /etc/sudoers.d are not readable without root, so this is empty by permission rather than by fact — the privilege escalation table carries what IS readable'
 query: |
   SELECT
     source,

@@ -38,6 +38,9 @@ description: >-
 #                  to what it is actually running on this host.
 # Ordered newest-first, with the id breaking ties so the order cannot shuffle
 # between runs.
+# WHY IT MAY HOLD NOTHING (asserted by the tests: a source that is empty
+# without saying so is a source that broke).
+may_be_empty: 'no container runtime is running as this user; the source asks docker, podman and kubectl and each may be absent'
 query: |
   SELECT
     substr(c.id, 1, 12)                                     AS short_id,
