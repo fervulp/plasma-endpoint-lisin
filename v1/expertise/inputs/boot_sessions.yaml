@@ -1,0 +1,111 @@
+name: boot_sessions
+table: boot_sessions
+type: input
+kind: command
+version: 1.0.0
+title: Power-ons
+icon: system-reboot
+interval: 600
+priority: 50
+columns: [started, ended, uptime, ended_how, kernel, boot_id, current]
+description: >-
+  EVERY TIME THIS COMPUTER WAS TURNED ON, one row per boot: when it started, when
+  its journal stops, how long it ran, which kernel it ran, and whether it was
+  shut down or simply stopped.
+  Why its own table: a boot is the coarsest possible fact about a machine and the
+  frame every other one sits in. "Was it even on at three in the morning" is
+  answered here and nowhere else, and an unclean end — no shutdown message before
+  the journal stops — is the difference between someone closing the lid and the
+  power being cut.
+  The journal keeps the boot list itself, so this needs no privileges and no
+  parsing of anyone's log format. The kernel version comes from the kernel's own
+  first line of that boot.
+  HONEST LIMIT: this is as far back as the JOURNAL goes, not as far back as the
+  machine does — a journal wiped or rotated takes its boots with it, and the
+  Journal health table says how much it holds.
+tsv_columns: [started, ended, uptime, ended_how, kernel, boot_id, current]
+tests:
+  min_rows: 1
+  not_empty: [started, boot_id]
+  expect:
+    - name: the boot running right now is marked as such
+      where: "current = 'yes'"
+      min_rows: 1
+    - name: every boot says how long it lasted
+      where: "uptime = ''"
+      max_rows: 0
+command: |
+  export LC_ALL=C
+  prog=$(mktemp /tmp/lisin-boots-XXXXXX.py)
+  cat > "$prog" <<'PYBOOTS'
+  import json, re, subprocess, sys, time
+
+  def run(argv, timeout=25):
+      try:
+          return subprocess.run(argv, capture_output=True, text=True,
+                                timeout=timeout).stdout
+      except Exception:
+          return ""
+
+  raw = run(["journalctl", "--list-boots", "-o", "json", "--no-pager"])
+  try:
+      boots = json.loads(raw or "[]")
+  except Exception:
+      boots = []
+
+  def stamp(us):
+      return (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(us) / 1e6))
+              if us else "")
+
+  def human(seconds):
+      s = int(seconds)
+      if s < 60:
+          return "%d s" % s
+      if s < 3600:
+          return "%d min" % (s // 60)
+      h, m = divmod(s // 60, 60)
+      return "%d h %02d min" % (h, m) if h < 48 else "%d days %d h" % (h // 24, h % 24)
+
+  # the most recent boots first; the journal may hold many and each one costs a
+  # call, so the window is bounded and the reason is the cost, not a preference
+  for b in sorted(boots, key=lambda x: x.get("index", 0), reverse=True)[:40]:
+      bid = str(b.get("boot_id") or "")
+      first, last = b.get("first_entry") or 0, b.get("last_entry") or 0
+      current = "yes" if int(b.get("index", -1)) == 0 else ""
+
+      # ASK FOR THE LINE, do not read the tail hoping to find it: the kernel
+      # announces its version in the FIRST message of a boot, and -n takes the
+      # LAST ones — which is why this column came back empty on every row.
+      kernel = ""
+      for line in run(["journalctl", "-b", bid, "-k", "--grep", "Linux version",
+                       "-o", "cat", "-n", "1", "--no-pager"]).splitlines():
+          m = re.search(r"Linux version (\S+)", line)
+          if m:
+              kernel = m.group(1)
+              break
+
+      # HOW IT ENDED, from the machine's own last words. A boot whose journal
+      # simply stops was not shut down: the power went, the kernel panicked, or
+      # the battery ran out — and that is a different fact from a clean stop.
+      tail = run(["journalctl", "-b", bid, "-o", "cat", "-n", "60", "--no-pager"])
+      low = tail.lower()
+      if current:
+          ended_how = "still running"
+      elif "powering down" in low or "power-off" in low or "shutting down" in low:
+          ended_how = "shut down"
+      elif "rebooting" in low or "reboot" in low:
+          ended_how = "rebooted"
+      elif "suspend" in low or "hibernat" in low:
+          ended_how = "suspended and did not come back"
+      else:
+          ended_how = "stopped without a shutdown"
+
+      print("\t".join((
+          stamp(first),
+          "" if current else stamp(last),
+          human((last - first) / 1e6) if last and first else "",
+          ended_how, kernel, bid, current)))
+  PYBOOTS
+  timeout 60 python3 "$prog"
+  rm -f "$prog"
+  true

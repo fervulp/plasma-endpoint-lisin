@@ -1,0 +1,163 @@
+name: authentication
+table: authentication
+type: input
+kind: command
+version: 1.0.0
+title: Authentication
+icon: dialog-password
+interval: 120
+priority: 55
+columns: [time, result, user, service, method, origin, detail, session]
+description: >-
+  EVERY ATTEMPT TO BECOME SOMEBODY on this machine, in one table: an SSH login,
+  a desktop unlock, sudo, su, a PAM session opening, a screen unlock — successful
+  and failed alike.
+  This is the one question the stream could not answer at all. Tetragon reports
+  executions, connections and file access; who logged in, from where, and whether
+  they succeeded lives in the journal, and the journal is readable here without
+  root (membership in wheel or systemd-journal is enough).
+  THREE SOURCES, one row each, deduplicated by time and message:
+  * the kernel's own audit records (USER_AUTH, USER_ACCT, CRED_ACQ, USER_START,
+    USER_LOGIN, USER_CMD) — the authoritative ones, because they carry
+    res=success/failed, the login uid and the session id;
+  * sshd's own lines — "Accepted publickey for u from 10.0.0.2 port 55000" and
+    every "Failed password", which name the method and the remote address;
+  * PAM's session lines, which say which service opened a session for whom.
+  RESULT IS NEVER GUESSED. Where the record does not state success or failure the
+  column is left empty rather than assumed — a failed attempt recorded as
+  successful is worse than one not recorded.
+  HONEST LIMIT: failed logins in /var/log/btmp need the utmp group to read, so
+  they are not here; the failures that ARE here are the ones the journal saw.
+tsv_columns: [time, result, user, service, method, origin, detail, session, source]
+tests:
+  min_rows: 1
+  not_empty: [time, service, source]
+  expect:
+    - name: an attempt is never recorded with an invented result
+      where: "result NOT IN ('success', 'failed', '')"
+      max_rows: 0
+    - name: the kernel's own audit records are read
+      where: "source = 'audit'"
+      min_rows: 1
+command: |
+  export LC_ALL=C
+  # THE PROGRAM GOES TO A FILE, not to python3 -c. Quoting it inline means three
+  # layers at once — YAML block, shell single quotes, Python — and a quote
+  # character in a COMMENT silently ended the shell string, leaving the parser
+  # matching nothing while the source still produced rows. A file has no such
+  # rule: the code below is ordinary Python.
+  prog=$(mktemp /tmp/lisin-auth-XXXXXX.py)
+  cat > "$prog" <<'PYAUTH'
+  import json, re, sys, time
+
+  # The audit record types that are ABOUT becoming somebody. The numbers are the
+  # kernel's, not ours: 1100 USER_AUTH, 1101 USER_ACCT, 1103 CRED_ACQ,
+  # 1105 USER_START, 1106 USER_END, 1112 USER_LOGIN, 1123 USER_CMD.
+  AUDIT = {"AUDIT1100": "authenticate", "AUDIT1101": "check account",
+           "AUDIT1103": "acquire credentials", "AUDIT1105": "session start",
+           "AUDIT1106": "session end", "AUDIT1112": "login",
+           "AUDIT1123": "run a command as another user"}
+  # THE AUDIT MESSAGE NESTS ITS FIELDS: the interesting ones (op, acct, exe, res)
+  # live INSIDE msg='...'. A pattern that understood the single quotes swallowed
+  # that whole blob as one value, so res was never seen and every record came out
+  # with no result at all — while the user column happened to be right, from the
+  # numeric uid outside the blob. The wrapper is removed first, then the fields
+  # are read flat.
+  KV = re.compile(r"""(\w+)=("[^"]*"|\S+)""")
+  seen, out = set(), []
+
+  def add(ts, result, user, service, method, origin, detail, session, source):
+      key = (ts, service, user, str(detail)[:60])
+      if key in seen:
+          return
+      seen.add(key)
+      out.append([ts, result, user, service, method, origin, detail, session, source])
+
+  def when(d):
+      us = int(d.get("__REALTIME_TIMESTAMP") or 0)
+      return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(us / 1e6)) if us else ""
+
+  def uname(uid):
+      try:
+          import pwd
+          return pwd.getpwuid(int(uid)).pw_name
+      except Exception:
+          return str(uid)
+
+  for line in sys.stdin:
+      try:
+          d = json.loads(line)
+      except Exception:
+          continue
+      msg = d.get("MESSAGE")
+      if isinstance(msg, list):          # the journal may hand back raw bytes
+          msg = "".join(chr(c) for c in msg if isinstance(c, int))
+      msg = str(msg or "")
+      ident = str(d.get("SYSLOG_IDENTIFIER") or d.get("_COMM") or "")
+      atype = str(d.get("_AUDIT_TYPE_NAME") or "")
+      ts, ses = when(d), str(d.get("_AUDIT_SESSION") or "")
+
+      # --- the kernel's own records: these state the result
+      if atype in AUDIT:
+          flat = msg.replace("msg='", " ").replace("'", " ")
+          f = {k: v.strip('"') for k, v in KV.findall(flat)}
+          res = f.get("res", "")
+          # NEVER GUESSED: anything that is not the word success and not the word
+          # failed leaves the column empty rather than assuming the worse or the
+          # better of the two.
+          res = res if res in ("success", "failed") else ""
+          user = f.get("acct") or (uname(f["uid"]) if f.get("uid") else "")
+          origin = f.get("addr") or f.get("hostname") or f.get("terminal") or ""
+          origin = "" if origin == "?" else origin
+          detail = f.get("cmd") or f.get("exe") or f.get("op") or ""
+          # WHICH SERVICE asked: PAM names it in op=PAM:accounting, otherwise the
+          # executable that asked. "audit" is the transport, not the service, and
+          # saying it would tell the reader nothing.
+          op = f.get("op", "")
+          svc = op.split(":")[-1] if op.startswith("PAM:") else op
+          if not svc:
+              svc = f.get("exe", "").strip('"').rsplit("/", 1)[-1] or ident
+          add(ts, res, user, svc, AUDIT[atype], origin, detail, ses, "audit")
+          continue
+
+      # --- sshd names the method and the remote address in its own words
+      m = re.match(r"(Accepted|Failed) (\S+) for (?:invalid user )?(\S+) "
+                   r"from (\S+) port (\d+)", msg)
+      if m and "ssh" in ident:
+          add(ts, "success" if m.group(1) == "Accepted" else "failed", m.group(3),
+              "sshd", m.group(2), m.group(4) + ":" + m.group(5), msg[:200], ses,
+              "sshd")
+          continue
+      if "ssh" in ident and ("Invalid user" in msg or "authentication failure" in msg
+                             or "Connection closed by authenticating user" in msg):
+          u = re.search(r"user (\S+)", msg)
+          h = re.search(r"from (\S+)", msg) or re.search(r"rhost=(\S+)", msg)
+          add(ts, "failed", u.group(1) if u else "", "sshd", "",
+              h.group(1) if h else "", msg[:200], ses, "sshd")
+          continue
+
+      # --- PAM: which service opened a session, and for whom
+      m = re.search(r"pam_unix\(([^:]+):session\): session (opened|closed) "
+                    r"for user (\S+?)\(uid=(\d+)\)", msg)
+      if m:
+          add(ts, "success", m.group(3), m.group(1), "session " + m.group(2), "",
+              msg[:200], ses, "pam")
+          continue
+
+      # --- sudo, in its own words: the command it ran, or the refusal
+      if ident == "sudo" and (" COMMAND=" in msg or "password is required" in msg
+                              or "authentication failure" in msg):
+          refused = ("password is required" in msg or "authentication failure" in msg)
+          add(ts, "failed" if refused else "", msg.split(":")[0].strip(), "sudo",
+              "", "", (msg.split("COMMAND=")[-1] if "COMMAND=" in msg else msg)[:200],
+              ses, "sudo")
+
+  out.sort(key=lambda r: r[0], reverse=True)
+  for r in out[:4000]:
+      print("\t".join(str(x).replace("\t", " ").replace("\n", " ")[:400] for r_ in [0] for x in [r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8]]))
+  PYAUTH
+  timeout 45 journalctl --since "-7 days" --no-pager -o json \
+      --output-fields=MESSAGE,SYSLOG_IDENTIFIER,_AUDIT_TYPE_NAME,_AUDIT_LOGINUID,_AUDIT_SESSION,_PID,_COMM \
+      2>/dev/null | python3 "$prog"
+  rm -f "$prog"
+  true

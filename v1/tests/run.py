@@ -91,6 +91,7 @@ def check_engine(store):
     # run's leak; clear them so the check below means what it says
     pipeline.sweep_temp(older_than=120)
     t = time.perf_counter()
+    started = time.time()
     st = pipeline.run_all(store, force=True)
     el = time.perf_counter() - t
     failed = [x for x in st["inputs"] if x["error"]]
@@ -119,9 +120,17 @@ def check_engine(store):
     # a collection cycle must not creep towards the tick
     if el > 45:
         bad(f"collection cycle {el:.0f}s is too slow for a 30 s source")
-    left = glob.glob("/tmp/lisin-osq-*.json") + glob.glob("/tmp/lisin-cmd-*.tsv")
+    # ONLY THE FILES THIS RUN COULD HAVE MADE. The pattern also matches debris
+    # left by anything else that drove a collection and was killed — a probe, an
+    # earlier session — and reporting those as a leak here sends the reader after
+    # a defect that is not in the collector.
+    left = [f for f in glob.glob("/tmp/lisin-osq-*.json")
+                     + glob.glob("/tmp/lisin-cmd-*.tsv")
+                     + glob.glob("/tmp/lisin-auth-*.py")
+                     + glob.glob("/tmp/lisin-boots-*.py")
+            if os.path.getmtime(f) >= started]
     if left:
-        bad(f"{len(left)} temp files left behind by the collector")
+        bad(f"{len(left)} temp files left behind by this collection")
     else:
         ok("no temp files left behind")
 
@@ -157,6 +166,87 @@ def check_sql_guard():
     if not wrong:
         ok(f"{len(cases)} cases: everything that writes is refused, "
            f"everything that reads is not")
+
+
+# ------------------------------------------------------------ authentication
+def check_ssh_parsing():
+    """SSH LOGINS MUST BE UNDERSTOOD ON A MACHINE THAT HAS NONE. This laptop has
+    no sshd traffic in its journal, so the rule's own tests — which run SQL
+    against what was collected — cannot say whether the SSH half works. The
+    parser is therefore driven directly with invented journal records: an
+    accepted key, a refused password, an unknown user, a PAM session and the
+    kernel's own audit verdict. Addresses are from the ranges RFC 5737 reserves
+    for documentation.
+
+    The result column is what this guards. It was wrong once already: the audit
+    message nests its fields inside a quoted blob, the pattern swallowed the blob
+    whole, and every successful authentication was recorded as a failure."""
+    section("ssh")
+    import json as _j
+    import subprocess as _sp
+    import tempfile as _tf
+    import yaml as _y
+
+    rule = _y.safe_load(
+        open(os.path.join(V1, "expertise/inputs/authentication.yaml")))
+    cmd = rule["command"]
+    prog = cmd.split("<<'PYAUTH'\n", 1)[1].split("PYAUTH\n", 1)[0]
+    prog = "\n".join(l[2:] if l.startswith("  ") else l for l in prog.split("\n"))
+    fh = _tf.NamedTemporaryFile("w", suffix=".py", delete=False)
+    fh.write(prog)
+    fh.close()
+
+    def rec(**kw):
+        d = {"__REALTIME_TIMESTAMP": "1785260000000000"}
+        d.update(kw)
+        return _j.dumps(d)
+
+    feed = "\n".join([
+        rec(SYSLOG_IDENTIFIER="sshd",
+            MESSAGE="Accepted publickey for analyst from 198.51.100.7 port 55210 ssh2"),
+        rec(SYSLOG_IDENTIFIER="sshd",
+            MESSAGE="Failed password for invalid user admin from 203.0.113.9 port 41022 ssh2"),
+        rec(SYSLOG_IDENTIFIER="sshd",
+            MESSAGE="pam_unix(sshd:session): session opened for user analyst(uid=1001) by (uid=0)"),
+        rec(_AUDIT_TYPE_NAME="AUDIT1112",
+            MESSAGE=("AUDIT1112 pid=1 uid=0 auid=1001 ses=9 msg='op=login "
+                     "acct=\"analyst\" exe=\"/usr/sbin/sshd\" addr=198.51.100.7 "
+                     "terminal=ssh res=failed'")),
+        rec(_AUDIT_TYPE_NAME="AUDIT1100",
+            MESSAGE=("AUDIT1100 pid=2 uid=1000 auid=1000 ses=6 msg='op=PAM:authentication "
+                     "acct=\"local\" exe=\"/usr/bin/sudo\" res=success'")),
+    ])
+    try:
+        out = _sp.run([sys.executable, fh.name], input=feed, capture_output=True,
+                      text=True, timeout=60)
+    finally:
+        os.unlink(fh.name)
+    if out.returncode != 0:
+        bad(f"the authentication parser failed: {out.stderr.strip()[:140]}")
+        return
+    rows = [l.split("\t") for l in out.stdout.strip().split("\n") if l.strip()]
+    got = {(r[1], r[2], r[3], r[4], r[5]) for r in rows}
+    want = [
+        (("success", "analyst", "sshd", "publickey", "198.51.100.7:55210"),
+         "an accepted key, with who and from where"),
+        (("failed", "admin", "sshd", "password", "203.0.113.9:41022"),
+         "a refused password"),
+        (("failed", "analyst", "login", "login", "198.51.100.7"),
+         "the kernel's own verdict on a failed login"),
+    ]
+    missing = [why for w, why in want if w not in got]
+    if missing:
+        for why in missing:
+            bad(f"the authentication rule does not record {why}")
+    else:
+        ok(f"{len(rows)} invented records parsed: accepted, refused, and the "
+           f"kernel's verdict")
+    # and the one that was wrong: a success must never read as a failure
+    wrong = [r for r in rows if r[1] == "failed" and "res=success" in " ".join(r)]
+    if wrong or ("success", "local", "authentication", "authenticate", "") not in got:
+        bad("a successful authentication is not recorded as success")
+    else:
+        ok("a success is recorded as a success, not as a failure")
 
 
 # ------------------------------------------------------------- rule tests
@@ -896,7 +986,12 @@ def check_paths(backend):
         v = o.property(n)
         return v.toVariant() if hasattr(v, "toVariant") else v
 
-    def pump(n=3):
+    def pump(n=6):
+        # SIX TURNS, NOT THREE. The query bar re-asserts its selection through
+        # Qt.callLater — deliberately, because the bindings it derives from
+        # re-evaluate after the handler returns — so a reader in the same turn
+        # can still see the PREVIOUS table's columns and report a mismatch that
+        # does not exist. Caught as a test that failed once and then passed.
         for _ in range(n):
             app.processEvents()
 
@@ -987,6 +1082,7 @@ def main() -> int:
     # said out loud rather than quietly passing a shorter suite.
     try:
         check_sql_guard()
+        check_ssh_parsing()
         check_bindings()
         check_layout(be)
         if be.owner:
