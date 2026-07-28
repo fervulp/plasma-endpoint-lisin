@@ -42,6 +42,10 @@ tests:
     - name: where an extension came from is recorded
       where: "kind = 'extension' AND source <> ''"
       min_rows: 5
+# UTC, NOT LOCAL. The stores keep UTC and the interface converts once, at
+# the display boundary — a bare timestamp is READ as UTC there. A rule that
+# writes local time therefore has its values shifted by the whole time zone
+# when shown: 21:21 became 00:21 the next day on this machine.
 command: |
   export LC_ALL=C
   python3 - <<'PYBROWSERS' 2>/dev/null || true
@@ -157,7 +161,7 @@ command: |
                 "system" if str(a.get("location", "")).startswith("app-") else
                 "sideloaded" if src else "unknown")
           inst = a.get("installDate") or 0
-          when = time.strftime("%Y-%m-%d", time.localtime(inst / 1000)) if inst else ""
+          when = time.strftime("%Y-%m-%d", time.gmtime(inst / 1000)) if inst else ""
           tsv(kind="extension", browser=bname, profile=prof.name, engine="mozilla",
               ext_id=a.get("id", ""), name=loc.get("name", ""),
               version=a.get("version", ""),
@@ -195,7 +199,7 @@ command: |
           try:
               # Chromium counts microseconds from 1601, not 1970
               when = time.strftime("%Y-%m-%d",
-                                   time.localtime(int(it) / 1e6 - 11644473600))
+                                   time.gmtime(int(it) / 1e6 - 11644473600))
           except Exception:
               pass
           st = ("store" if v.get("from_webstore") else
@@ -214,7 +218,7 @@ command: |
 
   def moz_hist(prof, bname):
       q = ("SELECT p.url, p.title, p.visit_count, "
-           "datetime(p.last_visit_date/1000000,'unixepoch','localtime') "
+           "datetime(p.last_visit_date/1000000,'unixepoch') "
            "FROM moz_places p WHERE p.last_visit_date IS NOT NULL "
            "ORDER BY p.last_visit_date DESC LIMIT 400")
       for url, title, vc, when in read_db(prof / "places.sqlite", q):
@@ -224,7 +228,7 @@ command: |
 
   def chr_hist(prof, bname):
       q = ("SELECT url, title, visit_count, "
-           "datetime(last_visit_time/1000000-11644473600,'unixepoch','localtime') "
+           "datetime(last_visit_time/1000000-11644473600,'unixepoch') "
            "FROM urls WHERE last_visit_time > 0 "
            "ORDER BY last_visit_time DESC LIMIT 400")
       for url, title, vc, when in read_db(prof / "History", q):

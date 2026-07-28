@@ -17,6 +17,10 @@ description: >-
   then decides what the privileged process does. `writable_by` names that
   outright instead of leaving a mode string to be decoded.
 tsv_columns: [path, owner, group, mode, size, modified, writable_by]
+# UTC, NOT LOCAL. The stores keep UTC and the interface converts once, at
+# the display boundary — a bare timestamp is READ as UTC there. A rule that
+# writes local time therefore has its values shifted by the whole time zone
+# when shown: 21:21 became 00:21 the next day on this machine.
 command: |
   export LC_ALL=C
   python3 - <<'PYCONF' 2>/dev/null || true
@@ -59,6 +63,6 @@ command: |
           print("\t".join((
               p, name_of(pwd.getpwuid, st.st_uid), name_of(grp.getgrgid, st.st_gid),
               oct(mode)[2:], str(st.st_size),
-              time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)),
+              time.strftime("%Y-%m-%d %H:%M", time.gmtime(st.st_mtime)),
               ", ".join(who))))
   PYCONF

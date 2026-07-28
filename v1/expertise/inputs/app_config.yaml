@@ -31,6 +31,10 @@ tests:
     - name: user configuration is found through XDG
       where: "scope = 'user'"
       min_rows: 5
+# UTC, NOT LOCAL. The stores keep UTC and the interface converts once, at
+# the display boundary — a bare timestamp is READ as UTC there. A rule that
+# writes local time therefore has its values shifted by the whole time zone
+# when shown: 21:21 became 00:21 the next day on this machine.
 command: |
   export LC_ALL=C
   # rpm's own %config flag — inside an array iteration the package name must be
@@ -65,5 +69,5 @@ command: |
               n = str(c)
           print("\t".join((
               name, p, "user", kind, n, origin,
-              time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)))))
+              time.strftime("%Y-%m-%d %H:%M", time.gmtime(st.st_mtime)))))
   PYU

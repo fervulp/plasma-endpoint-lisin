@@ -268,6 +268,81 @@ def check_rule_tests(store):
         ok(f"{len(results)} assertions from {len(have)} rules, all hold")
 
 
+# ------------------------------------------------------------------- clock
+def check_clock(store):
+    """EVERY STORED MOMENT IS UTC. The interface converts once, at the display
+    boundary, and a bare timestamp is READ there as UTC — so a rule that writes
+    LOCAL time has its values shifted by the whole time zone when shown. Seven
+    rules were doing it: an authentication at 21:21 local was displayed as 00:21
+    the next day.
+
+    Two ways to catch it, because a machine may be either side of UTC:
+    a moment in the FUTURE is impossible for something that already happened, and
+    a freshly collected table whose newest value sits on LOCAL now rather than UTC
+    now is storing local time. Columns that legitimately hold the future (next_*)
+    are asked about their past instead."""
+    section("clock")
+    import datetime as _dt
+    import re as _re
+    from core.db import ident as _id
+
+    now_utc = _dt.datetime.now(_dt.UTC).replace(tzinfo=None)
+    now_local = _dt.datetime.now()
+    offset = abs((now_local - now_utc).total_seconds())
+    checked, bad_cols = 0, []
+    for table in sorted(x for x in store.tables() if not x.startswith("_")):
+        cols = store.columns(table)
+        for c in cols:
+            low = c.lower()
+            if low.startswith("next"):
+                continue                      # legitimately in the future
+            if not any(k in low for k in ("time", "_at", "date", "started",
+                                          "issued", "changed", "modified",
+                                          "installed", "last_run", "ended")):
+                continue
+            try:
+                v = store.fetch(
+                    f"SELECT max(CAST({_id(c)} AS VARCHAR)) FROM {_id(table)}"
+                )["rows"][0][0]
+            except Exception:  # noqa: BLE001
+                continue
+            if not v or not _re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}", str(v)):
+                continue
+            try:
+                seen = _dt.datetime.fromisoformat(str(v)[:19].replace("T", " "))
+            except ValueError:
+                continue
+            checked += 1
+            ahead = (seen - now_utc).total_seconds()
+            if ahead > 300:
+                bad_cols.append(f"{table}.{c} = {v} — {ahead/3600:.1f} h in the "
+                                f"future, which is what local time looks like here")
+            elif offset > 600 and abs((seen - now_local).total_seconds()) < 120:
+                bad_cols.append(f"{table}.{c} = {v} sits on LOCAL now, not UTC now")
+    for b in bad_cols:
+        bad(b)
+    if not bad_cols:
+        ok(f"{checked} timestamp columns are stored in UTC")
+
+    # AND AT THE SOURCE, because the check above can only see columns whose
+    # newest value is near NOW: a file modification time from three months ago is
+    # three hours wrong in exactly the same way and looks entirely plausible. No
+    # rule may ask for local time at all — a mechanical fact about the text, and
+    # the one that catches every rule rather than the fresh ones.
+    from core import pipeline as _pl, views as _vw
+    guilty = []
+    for r in _pl.load_inputs() + _vw.load_views():
+        body = str(r.get("command") or "") + str(r.get("query") or "") + str(r.get("sql") or "")
+        for needle in ("localtime", "time.localtime", "'localtime'"):
+            if needle in body:
+                guilty.append(f"{r.get('name')} asks for {needle}")
+                break
+    for g in guilty:
+        bad(f"a rule writes LOCAL time — {g}")
+    if not guilty:
+        ok(f"no rule asks for local time ({len(_pl.load_inputs())} checked)")
+
+
 # ------------------------------------------------------------------ arity
 def check_arity():
     """EVERY RULE MUST PRINT AS MANY FIELDS AS IT DECLARES. A command's output has
@@ -1138,6 +1213,7 @@ def main() -> int:
         check_layout(be)
         if be.owner:
             check_engine(be.store)
+            check_clock(be.store)
             check_arity()
             check_contract(be.store)
             check_rule_tests(be.store)
@@ -1156,6 +1232,7 @@ def main() -> int:
                " reading through its service")
             print("  --    skipped (they write, and the owner is the only writer):"
                   " engine, data, events, errors, ingest")
+            check_clock(be.store)
             check_arity()
             check_contract(be.store)
             check_rule_tests(be.store)

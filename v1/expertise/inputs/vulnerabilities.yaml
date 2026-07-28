@@ -52,8 +52,17 @@ command: |
       if len(p) < 5 or p[1] == "Name" or not p[1].startswith(("FEDORA", "RHSA", "ALSA")):
           continue
       status, aid, _type, sev, pkg = p[0], p[1], p[2], p[3], p[4]
+      # dnf prints LOCAL time; the stores keep UTC (the interface converts once,
+      # at the display boundary), so the advisory date is converted here.
+      issued = " ".join(p[5:7])
+      try:
+          import time as _t
+          issued = _t.strftime("%Y-%m-%d %H:%M:%S", _t.gmtime(
+              _t.mktime(_t.strptime(issued, "%Y-%m-%d %H:%M:%S"))))
+      except Exception:
+          pass
       e = adv.setdefault(aid, {"status": status, "sev": sev, "pkgs": [],
-                               "cves": set(), "issued": " ".join(p[5:7])})
+                               "cves": set(), "issued": issued})
       if pkg not in e["pkgs"]:
           e["pkgs"].append(pkg)
       # an open advisory wins: the same id can be listed as installed for one

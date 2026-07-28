@@ -39,6 +39,10 @@ tests:
     - name: the kernel's own audit records are read
       where: "source = 'audit'"
       min_rows: 1
+# UTC, NOT LOCAL. The stores keep UTC and the interface converts once, at
+# the display boundary — a bare timestamp is READ as UTC there. A rule that
+# writes local time therefore has its values shifted by the whole time zone
+# when shown: 21:21 became 00:21 the next day on this machine.
 command: |
   export LC_ALL=C
   # THE PROGRAM GOES TO A FILE, not to python3 -c. Quoting it inline means three
@@ -75,7 +79,7 @@ command: |
 
   def when(d):
       us = int(d.get("__REALTIME_TIMESTAMP") or 0)
-      return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(us / 1e6)) if us else ""
+      return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(us / 1e6)) if us else ""
 
   def uname(uid):
       try:

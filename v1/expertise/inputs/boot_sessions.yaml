@@ -34,6 +34,10 @@ tests:
     - name: every boot says how long it lasted
       where: "uptime = ''"
       max_rows: 0
+# UTC, NOT LOCAL. The stores keep UTC and the interface converts once, at
+# the display boundary — a bare timestamp is READ as UTC there. A rule that
+# writes local time therefore has its values shifted by the whole time zone
+# when shown: 21:21 became 00:21 the next day on this machine.
 command: |
   export LC_ALL=C
   prog=$(mktemp /tmp/lisin-boots-XXXXXX.py)
@@ -54,7 +58,7 @@ command: |
       boots = []
 
   def stamp(us):
-      return (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(int(us) / 1e6))
+      return (time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(int(us) / 1e6))
               if us else "")
 
   def human(seconds):

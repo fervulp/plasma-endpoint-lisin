@@ -32,6 +32,10 @@ tests:
     - name: a timer says when it fires next
       where: "kind = 'timer' AND next_run <> ''"
       min_rows: 1
+# UTC, NOT LOCAL. The stores keep UTC and the interface converts once, at
+# the display boundary — a bare timestamp is READ as UTC there. A rule that
+# writes local time therefore has its values shifted by the whole time zone
+# when shown: 21:21 became 00:21 the next day on this machine.
 command: |
   export LC_ALL=C
   python3 - <<'PYSCHED' 2>/dev/null || true
@@ -48,7 +52,7 @@ command: |
           us = int(us)
       except (TypeError, ValueError):
           return ""
-      return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(us / 1e6)) if us else ""
+      return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(us / 1e6)) if us else ""
 
   # --- systemd timers, system and user. THE POINT OF A TIMER IS WHEN IT FIRES,
   # so next_run/last_run are carried; a table of timers without times answers

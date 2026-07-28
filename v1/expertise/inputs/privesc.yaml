@@ -27,6 +27,10 @@ tests:
     - name: a capability carries the age of its carrier
       where: "kind <> 'capability' OR age_days <> ''"
       min_rows: 1
+# UTC, NOT LOCAL. The stores keep UTC and the interface converts once, at
+# the display boundary — a bare timestamp is READ as UTC there. A rule that
+# writes local time therefore has its values shifted by the whole time zone
+# when shown: 21:21 became 00:21 the next day on this machine.
 command: |
   export LC_ALL=C
   python3 - <<'PYPRIV' 2>/dev/null || true
@@ -40,7 +44,7 @@ command: |
           m = os.lstat(path).st_mtime
       except OSError:
           return "", ""
-      return (time.strftime("%Y-%m-%d %H:%M", time.localtime(m)),
+      return (time.strftime("%Y-%m-%d %H:%M", time.gmtime(m)),
               str(int((time.time() - m) / 86400)))
 
   def out(kind, name, detail, risk, path, source):

@@ -7,17 +7,17 @@ title: Package history
 icon: view-history
 interval: 1800
 priority: 190
-columns: [id, when, action, altered, command]
+columns: [id, ran_at, action, altered, command]
 description: >-
   What was installed, removed or upgraded on this machine and when, from the
   package manager's own transaction log. The inventory says what is here now;
   this says when it arrived and by which command — which is the difference
   between "there is a compiler on this laptop" and "a compiler was installed at
   three in the morning".
-tsv_columns: [id, when, action, altered, command]
+tsv_columns: [id, ran_at, action, altered, command]
 tests:
   min_rows: 5
-  not_empty: [id, when, action, command]
+  not_empty: [id, ran_at, action, command]
   expect:
     - name: the transaction verb was recovered from the command line
       where: "action IN ('install','remove','upgrade','downgrade','reinstall')"
@@ -29,13 +29,20 @@ command: |
   # apart by position (id first, count last, timestamp by its shape) rather than
   # by a separator that is not there.
   dnf history list 2>/dev/null | tail -n +2 | head -300 | python3 -c '
-  import re, sys
+  import re, sys, time as _t
   pat = re.compile(r"^\s*(\d+)\s+(.*?)\s+(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(.*?)\s+(\d+)\s*$")
   for line in sys.stdin:
       m = pat.match(line.rstrip())
       if not m:
           continue
       hid, cmd, when, action, altered = m.groups()
+      # dnf prints LOCAL time; the stores keep UTC and the interface converts
+      # once at the display boundary, so it is converted here.
+      try:
+          when = _t.strftime("%Y-%m-%d %H:%M:%S", _t.gmtime(
+              _t.mktime(_t.strptime(when, "%Y-%m-%d %H:%M:%S"))))
+      except Exception:
+          pass
       if not action.strip():
           # dnf5 leaves the action column empty and the command line says what it
           # was; taking the verb from the command is the fact, not a guess
