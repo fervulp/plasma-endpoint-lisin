@@ -39,3 +39,4 @@ cveintel.json
 net_seen.json
 proc_seen.json
 RPM-GPG-KEY-lisin
+_test_broken.yaml

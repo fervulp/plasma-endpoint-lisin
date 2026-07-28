@@ -1,9 +1,0 @@
-name: db_open_files
-id: LS-O-open_files
-type: statedb
-version: 1.0.0
-title: Open files
-table: open_files
-# the key is a specific descriptor of a specific process
-key: [pid, fd, path]
-icon: document-open

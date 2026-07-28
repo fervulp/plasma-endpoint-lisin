@@ -68,7 +68,8 @@ Kirigami.ApplicationWindow {
     property var pageCache: ({})
     property var pageComps: ({
         state: statePageComp, dashboards: dashboardPageComp,
-        pipelines: pipelinesPageComp, expertise: expertisePageComp })
+        pipelines: pipelinesPageComp, expertise: expertisePageComp,
+        policies: policiesPageComp, relations: relationsPageComp })
     function pageFor(name) {
         if (pageCache[name] === undefined) {
             var comp = pageComps[name] || placeholder
@@ -194,15 +195,27 @@ Kirigami.ApplicationWindow {
                 onTriggered: root.open("pipelines")
             },
             Kirigami.Action {
+                text: "Policies"
+                icon.name: "security-medium"
+                checked: root.section === "policies"
+                onTriggered: root.open("policies")
+            },
+            Kirigami.Action {
+                text: "Relations"
+                icon.name: "distribute-graph"
+                checked: root.section === "relations"
+                onTriggered: root.open("relations")
+            },
+            Kirigami.Action {
                 text: "Expertise"
                 icon.name: "document-edit"
                 checked: root.section === "expertise"
                 onTriggered: root.open("expertise")
             }
-            // Settings (with the SQL and Errors sub-views) was a v0 page copied
-            // whole but never wired to the v1 backend — every button called a slot
-            // that does not exist. It returns when built for v1; the reference
-            // implementation still lives under v0/.
+            // Settings (with the SQL and Errors sub-views) was a page of the
+            // previous version, copied whole but never wired to this backend —
+            // every button called a slot that does not exist. It returns when it
+            // is built for v1; the old implementation is in the git history.
         ]
     }
 
@@ -216,6 +229,26 @@ Kirigami.ApplicationWindow {
     Component { id: dashboardPageComp; DashboardPage {} }
     Component { id: pipelinesPageComp; PipelinesPage {} }
     Component { id: expertisePageComp; ExpertisePage {} }
+    // TWO SECTIONS THAT ARE DECLARED BUT NOT BUILT YET. They are here as empty
+    // rooms on purpose: the place is decided, so what belongs in each is a
+    // question with an address, and nothing lands in Data by default just
+    // because there was nowhere else to put it. Each says what it is for rather
+    // than showing a blank page, because a blank page reads as a broken one.
+    Component { id: policiesPageComp; PlaceholderPage {
+        section: "Policies"
+        icon: "security-medium"
+        explanation: "Rules for what this machine is allowed to do, and what "
+                   + "should be reported when it does something else. Nothing "
+                   + "is defined here yet — the tracing policies Tetragon "
+                   + "already runs are in Expertise."
+    } }
+    Component { id: relationsPageComp; PlaceholderPage {
+        section: "Relations"
+        icon: "distribute-graph"
+        explanation: "How the tables connect: a process to its package, a "
+                   + "socket to the process holding it, a file to the rule that "
+                   + "produced it. Nothing is defined here yet."
+    } }
 
     // shown for a moment at startup before open("state") swaps in the first
     // section (also the fallback for an unknown page name)

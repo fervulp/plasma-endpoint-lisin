@@ -952,6 +952,13 @@ def check_layout(backend):
     from PySide6.QtQml import QQmlApplicationEngine
     from PySide6.QtCore import QUrl, QMetaObject, Qt, Q_ARG
 
+    # ITS OWN WINDOW, AND IT RUNS LAST. Sharing the path walk's window sounded
+    # tidier and was not: the page it hands over is not typed as an item, so the
+    # visual tree — where a ListView keeps its delegates — could not be walked
+    # from it at all, and the tab list read as empty while it was on screen.
+    # Running after the path walk instead of before it is what actually mattered:
+    # a second interface built FIRST left the column selection of eighteen tabs
+    # looking wrong to the walk that came after.
     app = QGuiApplication.instance() or QGuiApplication(sys.argv)
     eng = QQmlApplicationEngine()
     eng.rootContext().setContextProperty("backend", backend)
@@ -984,11 +991,12 @@ def check_layout(backend):
                 pass
         return out
 
-    # A QQuickItem ROOT, not the window. eng.rootObjects()[0] arrives as a plain
-    # QWindow, and objects reached through QObject.children() are not typed as
-    # items either — so childItems() is unavailable and the visual tree, where a
-    # ListView keeps its delegates, cannot be walked at all. findChild gives back
-    # a properly typed item to start from.
+    # A QQuickItem ROOT, not the window and not the page object the path walk
+    # holds: an object reached through QObject.children() is not typed as an item,
+    # so childItems() is missing on it and the visual tree — where a ListView
+    # keeps its delegates and the tab list keeps its counters — cannot be walked
+    # at all. That is why both probes came back empty while everything was on
+    # screen. findChild gives back a properly typed item to start from.
     from PySide6.QtQuick import QQuickItem
     root_item = win.findChild(QQuickItem)
 
@@ -998,6 +1006,12 @@ def check_layout(backend):
                     and it.property("tabsModel") is not None):
                 return it
         return None
+
+    pg = page_of(root_item) if root_item is not None else None
+    if pg is None:
+        bad("the Data page was not found in the window")
+        return
+
 
     def tables(o, out=None):
         # a DataTable is the thing with both a row height and a column list
@@ -1009,10 +1023,6 @@ def check_layout(backend):
             tables(c, out)
         return out
 
-    pg = page_of(root_item) if root_item is not None else None
-    if pg is None:
-        bad("the Data page was not found in the window")
-        return
     checked, blank = 0, []
     for i in (0, 1, 5, 9, 20):
         pg.setProperty("tabIndex", i)
@@ -1108,15 +1118,20 @@ def check_layout(backend):
 
     # THE COUNTER ALTERNATES between how many rows and how full the table is.
     def counters():
+        # NO POSITION FILTER. An item's x is relative to its own parent, not to
+        # the window, so "the left-hand panel" cannot be expressed that way from
+        # here — and filtering on it found nothing while the counters were on
+        # screen. Every numeric label is collected instead; the assertion is that
+        # switching the counter CHANGES them, which the pagination numbers (also
+        # numeric, also collected) do not.
         out = []
         for it in visual(pg):
             try:
                 s = it.property("text")
             except Exception:  # noqa: BLE001
                 continue
-            if isinstance(s, str) and it.x() < 400:
-                if s.endswith("%") or s.replace(",", "").isdigit():
-                    out.append(s)
+            if isinstance(s, str) and (s.endswith("%") or s.replace(",", "").isdigit()):
+                out.append(s)
         return out
 
     pg.setProperty("showFill", False)
@@ -1309,6 +1324,11 @@ def check_paths(backend):
             bad(f"qml runtime: {w[:140]}")
     else:
         ok("no qml runtime warnings")
+    # THE ENGINE COMES BACK TOO, or nothing else does: it owns the window and the
+    # page, and letting it go out of scope here deleted both under the caller's
+    # feet ("Internal C++ object already deleted"). One interface per run, because
+    # two of them over one backend overwrite each other's saved column choices.
+    return app, eng, win, page
 
 
 def main() -> int:
@@ -1330,7 +1350,6 @@ def main() -> int:
         check_sql_guard()
         check_ssh_parsing()
         check_bindings()
-        check_layout(be)
         if be.owner:
             check_engine(be.store)
             check_duplicates(be.store)
@@ -1368,6 +1387,7 @@ def main() -> int:
             check_rule_tests(be.store)
             check_reads(be)
         check_paths(be)
+        check_layout(be)
     finally:
         be.events.close()
         be.store.close()
