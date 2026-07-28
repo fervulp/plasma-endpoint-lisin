@@ -17,7 +17,6 @@ RestartSec=3
 # This unit's cgroup is DEDICATED - the whole app and every collection subprocess
 # live in it, and the eBPF collector skips it so the agent never records itself.
 # NB: the cgroup id changes on every (re)start, so after restarting this service
-# re-point the collector by hand:  sudo systemctl restart lisin-ebpf
 
 [Install]
 WantedBy=graphical-session.target

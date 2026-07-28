@@ -1335,8 +1335,11 @@ def main() -> int:
             check_engine(be.store)
             check_duplicates(be.store)
             check_clock(be.store)
-            check_orphans(be.store)
-            check_entry_points(be.store)
+            # orphans and the entry-point baseline WRITE (they drop a table and
+            # run every source), so they belong to the owner — a follower has no
+            # connection of its own to write through, and asking it to would fail
+            # with an attribute error rather than a clear refusal
+            print("  --    skipped (they write): orphans, entry points")
             check_contract(be.store)
             check_rule_tests(be.store)
             check_data(be.store)
@@ -1356,8 +1359,11 @@ def main() -> int:
                   " engine, data, events, errors, ingest")
             check_duplicates(be.store)
             check_clock(be.store)
-            check_orphans(be.store)
-            check_entry_points(be.store)
+            # orphans and the entry-point baseline WRITE (they drop a table and
+            # run every source), so they belong to the owner — a follower has no
+            # connection of its own to write through, and asking it to would fail
+            # with an attribute error rather than a clear refusal
+            print("  --    skipped (they write): orphans, entry points")
             check_contract(be.store)
             check_rule_tests(be.store)
             check_reads(be)

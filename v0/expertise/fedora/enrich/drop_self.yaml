@@ -45,7 +45,7 @@ code: |
                  + str(r.get("process_executable") or "") + " "
                  + str(r.get("process_name") or ""))
           if (pid and pid in ours) or (ppid and ppid in ours) \
-                  or ("lisin_app.py" in cmd) or ("lisin-ebpf" in cmd):
+                  or ("lisin_app.py" in cmd):
               continue                      # ours - not collected, not saved
           out.append(r)
       return out

@@ -131,11 +131,6 @@ templates:
   # file rewritten every second, an antivirus updating its own lock files.
   # Repetitive-but-worth-seeing events (polkit checks, scanner execs) are NOT
   # dropped here - they are collapsed by fedora/enrich/aggregate_events instead.
-  - {name: ebpf-rsyslog,    event_module: ebpf, match: 'rsyslog/imjournal', reason: 'rsyslog journal checkpoint', action: drop}
-  - {name: ebpf-av-locks,   event_module: ebpf, match: 'kaspersky/kesl/private|klnagent.*\.lck|eka_lock|/na_localdata/', reason: 'antivirus lock-file churn', action: drop}
-  - {name: ebpf-userwork,   event_module: ebpf, match: 'systemd-userwork', reason: 'systemd session worker processes', action: drop}
-  - {name: ebpf-tmp-churn,  event_module: ebpf, match: '\.tmp\.[0-9]+ ', reason: 'atomic-write temp files (the final rename is kept)', action: drop}
-  - {name: ebpf-claude,     event_module: ebpf, match: '/\.claude/', reason: 'the local AI coding session log', action: drop}
 
   # ---- 74: the agent's own non-interactive sudo (sudo -n) --------------------
   # Collection probes privileges with `sudo -n`; with no passwordless sudo it

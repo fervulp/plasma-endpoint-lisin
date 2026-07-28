@@ -61,5 +61,3 @@ echo
 echo "cgroup: ${CG:-<not resolved>}"
 echo
 echo "NEXT: set up the eBPF collector as root so it skips this service's cgroup:"
-echo "    sudo ./packaging/lisin-ebpf-setup $(id -un)"
-echo "If you restart lisin.service later, also: sudo systemctl restart lisin-ebpf"

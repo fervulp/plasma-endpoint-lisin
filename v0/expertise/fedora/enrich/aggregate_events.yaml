@@ -37,7 +37,6 @@ code: |
       groups = defaultdict(list)
       order = []                                    # preserve first-seen order
       for r in rows:
-          if r.get("event_module") != "ebpf":
               order.append(("keep", r))
               continue
           k = _sig(r)
