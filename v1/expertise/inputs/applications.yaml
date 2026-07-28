@@ -6,7 +6,7 @@ title: Applications
 icon: system-software-install
 # The fields worth reading FIRST in this table; everything else the
 # source produces stays available in the Columns panel.
-columns: [kind, name, version, summary, publisher, installed, owner, path]
+columns: [kind, name, version, summary, publisher, installed_at, owner, path]
 description: Installed software from every package manager present on this host —
   one row per package, told apart by the kind column (rpm, pip, npm, vscode,
   jetbrains). Honest gaps come from what each manager itself records - rpm keeps
@@ -53,59 +53,72 @@ interval: 300
 # package sits in the dependency graph, so two tabs would be the same list
 # twice. The table itself is still collected and queryable in SQL.
 hidden: true
+# A QUERY MUST NOT START WITH A COMMENT: osqueryi takes it as a command-line
+# argument, and a leading -- is read as an unknown flag. The explanation lives
+# here instead.
+#   * installed_at - the readable form of `installed`, added ONCE around the
+#     union rather than in each of its four branches, so every branch keeps
+#     saying exactly what its package manager reports. A table showing
+#     1783149040 tells a reader nothing.
 query: |
-  SELECT
-    'rpm'                                       AS kind,
-    r.name                                      AS name,
-    CASE WHEN r.epoch IS NOT NULL AND r.epoch > 0
-         THEN r.epoch || ':' ELSE '' END
-      || r.version || '-' || r.release          AS version,
-    coalesce(r.arch, '')                        AS arch,
-    ''                                          AS summary,
-    coalesce(r.vendor, '')                      AS publisher,
-    ''                                          AS owner,
-    ''                                          AS path,
-    coalesce(r.source, '')                      AS source,
-    coalesce(r.size, '')                        AS size,
-    coalesce(r.install_time, '')                AS installed
-  FROM rpm_packages r
-  UNION ALL
-  SELECT 'pip', p.name, p.version, '',
-         coalesce(p.summary, ''),
-         coalesce(p.author, ''),
-         coalesce(u.username, ''),
-         coalesce(p.path, ''),
-         '', '', ''
-  FROM python_packages p
-  LEFT JOIN users u ON p.uid = u.uid
-  UNION ALL
-  SELECT 'npm', n.name, n.version, '',
-         coalesce(n.description, ''),
-         coalesce(n.author, ''),
-         coalesce((SELECT u.username FROM users u
-                   WHERE u.directory <> '' AND u.directory <> '/'
-                     AND n.path LIKE u.directory || '/%'
-                   ORDER BY length(u.directory) DESC LIMIT 1), ''),
-         coalesce(n.path, ''),
-         '', '', ''
-  FROM npm_packages n
-  UNION ALL
-  SELECT 'vscode', v.name, v.version, '',
-         '',
-         coalesce(v.publisher, ''),
-         coalesce(u.username, ''),
-         coalesce(v.path, ''),
-         coalesce(v.vscode_edition, ''), '',
-         coalesce(v.installed_at / 1000, '')
-  FROM vscode_extensions v
-  LEFT JOIN users u ON v.uid = u.uid
-  UNION ALL
-  SELECT 'jetbrains', j.name, j.version, '',
-         '',
-         coalesce(j.vendor, ''),
-         coalesce(u.username, ''),
-         coalesce(j.path, ''),
-         coalesce(j.product_type, ''), '', ''
-  FROM jetbrains_plugins j
-  LEFT JOIN users u ON j.uid = u.uid
-  ORDER BY kind, name, version, arch, path
+  SELECT *,
+         CASE WHEN installed GLOB '[0-9]*'
+              THEN datetime(CAST(installed AS INTEGER), 'unixepoch')
+              ELSE '' END AS installed_at
+  FROM (
+    SELECT
+      'rpm'                                       AS kind,
+      r.name                                      AS name,
+      CASE WHEN r.epoch IS NOT NULL AND r.epoch > 0
+           THEN r.epoch || ':' ELSE '' END
+        || r.version || '-' || r.release          AS version,
+      coalesce(r.arch, '')                        AS arch,
+      ''                                          AS summary,
+      coalesce(r.vendor, '')                      AS publisher,
+      ''                                          AS owner,
+      ''                                          AS path,
+      coalesce(r.source, '')                      AS source,
+      coalesce(r.size, '')                        AS size,
+      coalesce(r.install_time, '')                AS installed
+    FROM rpm_packages r
+    UNION ALL
+    SELECT 'pip', p.name, p.version, '',
+           coalesce(p.summary, ''),
+           coalesce(p.author, ''),
+           coalesce(u.username, ''),
+           coalesce(p.path, ''),
+           '', '', ''
+    FROM python_packages p
+    LEFT JOIN users u ON p.uid = u.uid
+    UNION ALL
+    SELECT 'npm', n.name, n.version, '',
+           coalesce(n.description, ''),
+           coalesce(n.author, ''),
+           coalesce((SELECT u.username FROM users u
+                     WHERE u.directory <> '' AND u.directory <> '/'
+                       AND n.path LIKE u.directory || '/%'
+                     ORDER BY length(u.directory) DESC LIMIT 1), ''),
+           coalesce(n.path, ''),
+           '', '', ''
+    FROM npm_packages n
+    UNION ALL
+    SELECT 'vscode', v.name, v.version, '',
+           '',
+           coalesce(v.publisher, ''),
+           coalesce(u.username, ''),
+           coalesce(v.path, ''),
+           coalesce(v.vscode_edition, ''), '',
+           coalesce(v.installed_at / 1000, '')
+    FROM vscode_extensions v
+    LEFT JOIN users u ON v.uid = u.uid
+    UNION ALL
+    SELECT 'jetbrains', j.name, j.version, '',
+           '',
+           coalesce(j.vendor, ''),
+           coalesce(u.username, ''),
+           coalesce(j.path, ''),
+           coalesce(j.product_type, ''), '', ''
+    FROM jetbrains_plugins j
+    LEFT JOIN users u ON j.uid = u.uid
+    ORDER BY kind, name, version, arch, path
+  )

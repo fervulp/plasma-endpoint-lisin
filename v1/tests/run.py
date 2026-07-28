@@ -268,6 +268,55 @@ def check_rule_tests(store):
         ok(f"{len(results)} assertions from {len(have)} rules, all hold")
 
 
+# ------------------------------------------------------------------ arity
+def check_arity():
+    """EVERY RULE MUST PRINT AS MANY FIELDS AS IT DECLARES. A command's output has
+    no header, so the engine maps columns by position: a value that happens to
+    contain a tab or a newline does not fail, it SHIFTS everything after it into
+    the wrong column, or tears the row in half. That is what `vms` was doing —
+    virsh prints both "Autostart:" and "Autostart Once:", a loose match caught
+    both, and the field became two lines.
+
+    Every command rule is run and every line counted. It is the most expensive
+    check here (it runs the whole collection again) and worth it: this class of
+    defect produces data that looks entirely plausible."""
+    section("arity")
+    from core import pipeline as _pl, shell as _sh
+    import collections as _c
+    checked, broken = 0, []
+    for r in _pl.load_inputs():
+        if r.get("kind") != "command" or not r.get("command"):
+            continue
+        want = len(r.get("tsv_columns") or [])
+        try:
+            path = _sh.run_to_file(r["command"])
+        except Exception as e:  # noqa: BLE001
+            broken.append(f"{r.get('name')}: the command failed — "
+                          f"{str(e).splitlines()[0][:80]}")
+            continue
+        counts = _c.Counter()
+        try:
+            with open(path, errors="replace") as fh:
+                for line in fh:
+                    if line.strip():
+                        counts[line.rstrip("\n").count("\t") + 1] += 1
+        finally:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        checked += 1
+        wrong = sum(n for k, n in counts.items() if k != want)
+        if wrong:
+            broken.append(f"{r.get('name')}: {wrong} line(s) of "
+                          f"{sum(counts.values())} do not have {want} fields "
+                          f"(seen: {dict(counts)})")
+    for b in broken:
+        bad(b)
+    if not broken:
+        ok(f"{checked} command rules print exactly the fields they declare")
+
+
 # --------------------------------------------------------------- contract
 def check_contract(store):
     """A RULE'S DECLARED COLUMNS MUST EXIST. `columns:` is the rule's contract
@@ -650,13 +699,15 @@ def check_engine_visible(backend):
     # THE RATE IS THE ONE THAT LIES QUIETLY: the stream is stored in UTC and a
     # bare now() is local time, which answered "nothing in the last five minutes"
     # on a machine three hours ahead — a stopped stream and a busy one looking
-    # exactly alike.
-    if real > 1000 and stream.get("per_minute", 0) == 0:
-        recent = backend.events.fetch(
-            "SELECT count(*) FROM events WHERE ts > (now() AT TIME ZONE 'UTC')"
-            " - INTERVAL 60 MINUTE")["rows"][0][0]
-        if recent:
-            bad(f"the card says 0 events/min while {recent} arrived in the last hour")
+    # exactly alike. The check is that the card AGREES with the same window
+    # measured independently; whether the stream is live is not its business
+    # (the suite runs with the agent stopped, when zero is the honest answer).
+    same = backend.events.fetch(
+        "SELECT count(*) FROM events WHERE ts > (now() AT TIME ZONE 'UTC')"
+        " - INTERVAL 5 MINUTE")["rows"][0][0]
+    if abs(stream.get("per_minute", 0) - round(same / 5)) > 1:
+        bad(f"the card says {stream.get('per_minute')} events/min while the same "
+            f"five minutes hold {same} ({round(same / 5)}/min)")
     ok(f"the card reports {stream.get('materialized'):,} events, "
        f"{stream.get('per_minute')}/min, backlog {stream.get('backlog')}, "
        f"{len(dbs)} databases, {st['collection'].get('sources')} sources")
@@ -1087,6 +1138,7 @@ def main() -> int:
         check_layout(be)
         if be.owner:
             check_engine(be.store)
+            check_arity()
             check_contract(be.store)
             check_rule_tests(be.store)
             check_data(be.store)
@@ -1104,6 +1156,7 @@ def main() -> int:
                " reading through its service")
             print("  --    skipped (they write, and the owner is the only writer):"
                   " engine, data, events, errors, ingest")
+            check_arity()
             check_contract(be.store)
             check_rule_tests(be.store)
             check_reads(be)

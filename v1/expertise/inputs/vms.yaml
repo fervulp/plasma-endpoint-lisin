@@ -24,7 +24,11 @@ command: |
     [ -n "$n" ] || continue
     state=$(timeout 10 virsh domstate "$n" 2>/dev/null | head -1)
     id=$(timeout 10 virsh domid "$n" 2>/dev/null | tr -d ' ')
-    auto=$(timeout 10 virsh dominfo "$n" 2>/dev/null | awk -F: '/Autostart/ {gsub(/ /,"",$2); print $2}')
+    # ^Autostart: EXACTLY — dominfo also prints "Autostart Once:", so a loose
+    # match returned TWO values, the field became two lines, and the row was torn
+    # in half on the way into the table.
+    auto=$(timeout 10 virsh dominfo "$n" 2>/dev/null |
+           awk -F: '/^Autostart:/ {gsub(/ /,"",$2); print $2; exit}')
     xml=$(timeout 10 virsh dumpxml "$n" 2>/dev/null)
     disks=$(printf '%s' "$xml" | grep -o "source file='[^']*'" | sed "s/source file='//;s/'//" | tr '\n' ' ')
     nets=$(printf '%s' "$xml" | grep -oE "(source (network|bridge|dev)='[^']*')" | sed "s/.*='//;s/'//" | tr '\n' ' ')

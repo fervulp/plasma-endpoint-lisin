@@ -41,7 +41,7 @@ priority: 140
 # quietly filled. Measured cost as written: ~0.32 s.
 # The fields worth reading FIRST in this table; everything else the
 # source produces stays available in the Columns panel.
-columns: [path, owner, owner_group, bits, kind, size, mtime, age_days]
+columns: [path, owner, owner_group, bits, kind, size, modified, age_days]
 description: Setuid and setgid executables — programs that run with their owner's
   privileges instead of the caller's. Covers /bin, /sbin, /usr/bin and /usr/sbin
   only (osquery's suid_bin scope); SUID files under /opt, /usr/local or home
@@ -63,6 +63,8 @@ query: |
     group_concat(s.path)                                            AS all_paths,
     min(f.size)                                                     AS size,
     min(f.mtime)                                                    AS mtime,
+    -- the same moment a person can read; the epoch stays for the age below
+    datetime(min(f.mtime), 'unixepoch')                             AS modified,
     cast((strftime('%s', 'now') - min(f.mtime)) / 86400 AS INTEGER) AS age_days,
     min(f.inode)                                                    AS inode
   FROM suid_bin s

@@ -81,6 +81,27 @@ class Store(DuckDB):
             f"nullstr='', ignore_errors=true)",
             [path],
         )
+        # A LINE WITH THE WRONG NUMBER OF FIELDS IS A BUG IN THE RULE, and it was
+        # being swallowed: ignore_errors=true (which is right — one malformed line
+        # must not lose the other three thousand) meant a rule whose value
+        # contained a newline quietly wrote half-rows for weeks. Found in `vms`,
+        # where dominfo prints both "Autostart:" and "Autostart Once:" and the
+        # field became two lines. The file is cheap to re-read for arity, so the
+        # count is checked and the caller is told.
+        want = len(columns)
+        wrong = 0
+        try:
+            with open(path, errors="replace") as fh:
+                for line in fh:
+                    line = line.rstrip("\n")
+                    if line.strip() and line.count("\t") + 1 != want:
+                        wrong += 1
+        except OSError:
+            wrong = 0
+        if wrong:
+            raise ValueError(
+                f"{wrong} line(s) do not have the {want} fields the rule declares"
+                f" — a value with a tab or a newline in it tears the row apart")
         return self.row_count(name)
 
     def replace_table(self, name: str, rows: list[dict]) -> int:

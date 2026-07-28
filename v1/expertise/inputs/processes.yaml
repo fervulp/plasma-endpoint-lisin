@@ -13,7 +13,7 @@ interval: 30
 priority: 20
 # The fields worth reading FIRST in this table; everything else the
 # source produces stays available in the Columns panel.
-columns: [name, pid, ppid, user, cpu_pct, mem_pct, rss, elapsed_sec, state, cmdline, path, on_disk]
+columns: [name, pid, ppid, user, cpu_pct, mem_pct, rss, elapsed_sec, started, state, cmdline, path, on_disk]
 description: Running processes, point-in-time snapshot from osquery.
 # Collection belongs to the input (v1 principle), so the human-facing facts that
 # v0 got from `ps` are produced HERE by osquery SQL, not guessed later:
@@ -48,6 +48,11 @@ query: |
           nullif((strftime('%s','now') - p.start_time), 0) * 100, 2)         AS cpu_pct,
     (strftime('%s','now') - p.start_time)                                    AS elapsed_sec,
     p.start_time,
+    -- READABLE, NEXT TO THE RAW. The epoch is what the arithmetic above needs;
+    -- a person reading the table needs a time. Every other table that carries a
+    -- moment (logins, sessions) already keeps both, and the three that kept only
+    -- the number were unreadable in the interface.
+    datetime(p.start_time, 'unixepoch')                                      AS started,
     p.on_disk,
     p.cwd,
     p.threads,
