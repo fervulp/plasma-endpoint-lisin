@@ -35,9 +35,12 @@ from core.tetragon_reader import TetragonReader
 _SQL_HISTORY = data_dir() / "sql_history.json"
 _EXPERTISE = Path(__file__).resolve().parent / "expertise"
 _QUERIES_DIR = _EXPERTISE / "queries"
+# the catalogs the Expertise section lists, in reading order. "Edges" was here
+# for a relation layer nothing read; it is gone with its directory rather than
+# left as an empty catalog nobody can fill.
 _EXP_CATS = [("inputs", "Inputs"), ("events", "Normalization"),
              ("taxonomy", "Taxonomy"), ("views", "Enrichment"),
-             ("edges", "Edges"), ("queries", "Queries")]
+             ("queries", "Queries")]
 
 # The Events tab's default view: the curated columns shown first (the rest of the
 # taxonomy stays available in the Columns picker), and the noisier ones hidden by
@@ -243,6 +246,7 @@ class Backend(QObject):
         # (pipeline._due), so a fast source stays fresh without dragging every
         # slow inventory source along with it.
         pipeline.sweep_temp()      # leftovers from a previous run, if it was killed
+        pipeline.sweep_spills()    # and what a killed DuckDB left spilled
         self._push_state()
         # measure every table ONCE at startup: an hourly source would otherwise
         # have no fill figure for an hour, and a blank number reads as zero

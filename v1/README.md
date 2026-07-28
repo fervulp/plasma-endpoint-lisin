@@ -41,7 +41,6 @@ expertise/inputs/*.yaml      an entry point: an osquery query (or a command)
 expertise/views/*.yaml       enrichment: a SQL view that JOINs base tables
 expertise/events/*.yaml      how a Tetragon line becomes a taxonomy row
 expertise/taxonomy/*.yaml    the event field vocabulary
-expertise/edges/*.yaml       declared relations between tables
 ```
 
 Adding a source is adding a YAML file — a new tab appears without touching the

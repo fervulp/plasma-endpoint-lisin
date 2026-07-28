@@ -39,6 +39,34 @@ def load_inputs() -> list[dict]:
     return load_yaml_dir(INPUTS_DIR)
 
 
+def sweep_spills(older_than: int = 3600) -> int:
+    """Remove spill files left by a DuckDB that was killed.
+
+    The stores are told to spill to the data directory, so DuckDB keeps a
+    `<database>.tmp/` beside each file. A process that dies mid-query leaves its
+    spill behind — 2.3 MB found here from a run three days earlier — and nothing
+    ever collects it. This runs in the OWNER, which holds the database lock, so
+    anything still lying here belongs to a process that is gone; the age check is
+    the second belt."""
+    from .db import data_dir
+
+    now = time.time()
+    gone = 0
+    for d in glob.glob(os.path.join(data_dir(), "*.duckdb.tmp")):
+        for f in glob.glob(os.path.join(d, "*.tmp")):
+            try:
+                if now - os.path.getmtime(f) > older_than:
+                    os.unlink(f)
+                    gone += 1
+            except OSError:
+                pass
+        try:
+            os.rmdir(d)          # only if it is now empty
+        except OSError:
+            pass
+    return gone
+
+
 def sweep_temp(older_than: int = 600) -> int:
     """Delete our own leftover collection files. The normal path removes them in
     a finally block, but a process killed mid-collection cannot — and the files
@@ -184,7 +212,7 @@ def drop_orphans(store: Store) -> list[str]:
 
 def run_all(store: Store, force: bool = False) -> dict:
     """Collect the inputs that are due, then rebuild the declarative derivation
-    layer (enrichment views + validated edges). Each phase takes the store lock
+    layer (the enrichment views). Each phase takes the store lock
     itself, so the collector never holds it across a subprocess. The derivation
     is skipped when nothing was collected — the views would only be re-created
     over unchanged tables."""
