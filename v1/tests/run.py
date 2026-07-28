@@ -388,6 +388,45 @@ def check_clock(store):
         ok(f"no rule asks for local time ({len(_pl.load_inputs())} checked)")
 
 
+# ---------------------------------------------------------------- orphans
+def check_orphans(store):
+    """THE STORE MIRRORS THE EXPERTISE: one table per rule, and nothing else.
+
+    Rename a rule or delete it and its old table used to stay behind for ever —
+    as a TAB, titled by its raw name, with a provenance line naming a rule that
+    does not exist. A stale answer is worse than no answer, and this one looked
+    exactly like a real source.
+
+    Checked by making one: a table with no rule must be gone after a collection,
+    its measurements with it, and nothing a rule DOES own may be touched."""
+    section("orphans")
+    from core import pipeline as _pl, views as _vw
+
+    owned = {str(i.get("table") or i.get("name")) for i in _pl.load_inputs()}
+    owned |= {str(v.get("name")) for v in _vw.load_views()}
+    before = {t for t in store.tables() if not t.startswith("_")}
+    left = sorted(before - owned)
+    if left:
+        bad(f"tables no rule owns: {', '.join(left[:6])}")
+
+    store._con.execute("CREATE OR REPLACE TABLE _probe_orphan AS SELECT 1 AS a")
+    store._con.execute("ALTER TABLE _probe_orphan RENAME TO probe_orphan")
+    dropped = _pl.drop_orphans(store)
+    after = {t for t in store.tables() if not t.startswith("_")}
+    if "probe_orphan" in after:
+        bad("a table with no rule survived the collection")
+        store._con.execute("DROP TABLE IF EXISTS probe_orphan")
+    elif "probe_orphan" not in dropped:
+        bad("the orphan was removed without being reported")
+    else:
+        ok("a table with no rule is removed, and reported")
+    lost = sorted(owned & before - after)
+    if lost:
+        bad(f"the cleanup removed tables that ARE owned: {', '.join(lost[:6])}")
+    else:
+        ok(f"all {len(before & owned)} owned tables untouched")
+
+
 # ------------------------------------------------------------ entry points
 def check_entry_points(store):
     """WHAT EACH ENTRY POINT PRODUCES, AGAINST WHAT IT PRODUCED BEFORE.
@@ -1296,6 +1335,7 @@ def main() -> int:
             check_engine(be.store)
             check_duplicates(be.store)
             check_clock(be.store)
+            check_orphans(be.store)
             check_entry_points(be.store)
             check_contract(be.store)
             check_rule_tests(be.store)
@@ -1316,6 +1356,7 @@ def main() -> int:
                   " engine, data, events, errors, ingest")
             check_duplicates(be.store)
             check_clock(be.store)
+            check_orphans(be.store)
             check_entry_points(be.store)
             check_contract(be.store)
             check_rule_tests(be.store)

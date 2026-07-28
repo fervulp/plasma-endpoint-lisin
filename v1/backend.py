@@ -575,10 +575,17 @@ class Backend(QObject):
                 cached = (key, cols, rows_n, hidden, order)
                 self._tab_cache[name] = cached
             st = self._status.get(name, {})
+            # A TABLE WITH NO RULE MUST NOT CLAIM ONE. It should not exist at all
+            # (the collector drops what no rule owns), but if one is seen between
+            # a rename and the next collection, saying "rule: <its own name>" is
+            # an answer that is not true — and the interface would offer to open
+            # a rule that is not there.
+            owned = bool(meta.get("rule"))
             tabs.append({
-                "source": {"rule": meta.get("rule", name),
+                "source": {"rule": meta.get("rule", "") or "no rule owns this table",
                            "ref": meta.get("ref", ""),
-                           "how": meta.get("how", ""),
+                           "how": meta.get("how", "") if owned else
+                                  "left behind by a renamed or deleted rule",
                            "interval": meta.get("interval", 0),
                            "tests": bool(meta.get("tests")),
                            "enabled": meta.get("enabled", True),

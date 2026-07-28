@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 
 from . import osquery, shell, views
-from .db import load_yaml_dir
+from .db import ident, load_yaml_dir
 from .store import Store
 
 INPUTS_DIR = Path(__file__).resolve().parent.parent / "expertise" / "inputs"
@@ -141,6 +141,47 @@ def run_once(store: Store, force: bool = False) -> list[dict]:
     return status
 
 
+def drop_orphans(store: Store) -> list[str]:
+    """Remove tables that no rule owns any more.
+
+    The state store is meant to MIRROR the expertise: one table per rule. Rename a
+    rule or delete it and its old table stayed behind for ever — and it stayed as
+    a TAB, titled by its raw name, with a provenance line naming a rule that does
+    not exist. A stale answer is worse than no answer.
+
+    Only tables are considered: the underscore ones are the engine's own, and
+    every other table here was created by a rule (there are no user tables in
+    v1). This runs after a SUCCESSFUL collection, never on a run that failed to
+    load the rules — otherwise one bad read of the expertise directory would
+    empty the database."""
+    from . import views as _views
+
+    owned = {str(i.get("table") or i.get("name")) for i in load_inputs()}
+    owned |= {str(v.get("name")) for v in _views.load_views()}
+    if not owned:                    # the expertise did not load; do nothing
+        return []
+    dropped = []
+    with store._lock:
+        for name in store.tables():
+            if name.startswith("_") or name in owned:
+                continue
+            try:
+                store._con.execute(f"DROP TABLE IF EXISTS {ident(name)}")
+                store._con.execute(f"DROP VIEW IF EXISTS {ident(name)}")
+                dropped.append(name)
+            except Exception:  # noqa: BLE001 — a table in use is not fatal here
+                pass
+        if dropped:
+            for extra in ("_fill", "_derived"):
+                try:
+                    store._con.execute(
+                        f"DELETE FROM {extra} WHERE \"name\" IN "
+                        f"({', '.join('?' * len(dropped))})", dropped)
+                except Exception:  # noqa: BLE001 — the table may not exist yet
+                    pass
+    return dropped
+
+
 def run_all(store: Store, force: bool = False) -> dict:
     """Collect the inputs that are due, then rebuild the declarative derivation
     layer (enrichment views + validated edges). Each phase takes the store lock
@@ -149,7 +190,9 @@ def run_all(store: Store, force: bool = False) -> dict:
     over unchanged tables."""
     inputs = run_once(store, force=force)
     derive: dict = {}
+    dropped: list[str] = []
     if inputs:
         with store._lock:
             derive = views.apply(store)
-    return {"inputs": inputs, "derive": derive}
+        dropped = drop_orphans(store)
+    return {"inputs": inputs, "derive": derive, "dropped": dropped}
