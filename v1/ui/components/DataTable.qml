@@ -31,6 +31,34 @@ Item {
     // absent/"text" for an ordinary value column.
     property var columns: []
     property var rows: []
+
+    // THE SCROLL POSITION SURVIVES A DATA REFRESH.
+    // The rows are replaced wholesale every few seconds (a snapshot arrives and
+    // the page re-reads its page of the table), and replacing a ListView's model
+    // puts it back at the top — so reading anything below the first screen was
+    // impossible: every ten seconds the table threw you back to row one.
+    // The position is therefore saved before the model changes and put back
+    // after, bounded to whatever the new content allows. Going to the top is
+    // still right when the table itself changes — a different tab, another page,
+    // a new sort — and that is the caller's decision, made with scrollToTop().
+    property real _keepY: 0
+    onRowsChanged: {
+        _keepY = list.contentY
+        keepScroll.restart()
+    }
+    Timer {
+        id: keepScroll
+        interval: 0                      // after the view has taken the new model
+        onTriggered: {
+            var maxY = Math.max(0, list.contentHeight - list.height)
+            list.contentY = Math.min(table._keepY, maxY)
+        }
+    }
+    function scrollToTop() {
+        table._keepY = 0
+        list.contentY = 0
+        hflick.contentX = 0
+    }
     property var selected: null
     // ONE natural row height for EVERY table that uses this template, computed the
     // same way (a hidden ItemDelegate built like a row: default padding + a

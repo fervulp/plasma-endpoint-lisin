@@ -134,6 +134,8 @@ class Backend(QObject):
         # (the event ingest runs on its own thread) — without this, a stopped
         # stream stayed invisible until the next source happened to collect.
         self._status_rev = 0
+        self._fill: dict[str, float] = {}   # share of cells that hold a value
+        self._fill_gen = -1
         self._cycle: dict = {}        # what the last collection cycle cost
         self._compacted: dict = {}    # what the last file rewrite reclaimed
         self._engine_cache: tuple = (0.0, {})
@@ -242,6 +244,12 @@ class Backend(QObject):
         # slow inventory source along with it.
         pipeline.sweep_temp()      # leftovers from a previous run, if it was killed
         self._push_state()
+        # measure every table ONCE at startup: an hourly source would otherwise
+        # have no fill figure for an hour, and a blank number reads as zero
+        for _t in self.store.tables():
+            if not _t.startswith("_"):
+                self._measure_fill(_t)
+        self._push_state()
         cycles = 0
         while True:
             self._run_all()
@@ -310,9 +318,15 @@ class Backend(QObject):
                     else:
                         self._collected_at[x["table"]] = now
                         self._set_status(x["table"], rows=x.get("rows", 0), at=now)
+                        self._measure_fill(x["table"])
             for v in st.get("derive", {}).get("views", []):
                 if v.get("error"):
                     self._set_status(v["view"], v["error"])
+                elif v.get("view"):
+                    # a derivation is filled by the same cycle, so it is measured
+                    # by it too — otherwise the four view tabs are the only ones
+                    # with no number, which reads as "not measurable"
+                    self._measure_fill(v["view"])
         except Exception as e:  # noqa: BLE001
             self._set_status("_collector", str(e))
         if ran:
@@ -327,6 +341,47 @@ class Backend(QObject):
         # every open page re-read for no new data.
         if ran or force:
             self._push_state()
+
+    def _measure_fill(self, table: str) -> None:
+        """HOW FULL A TABLE IS — the share of its cells that hold a value.
+
+        A source that keeps returning its rows while one of its columns has gone
+        empty looks perfectly healthy by row count alone: that is exactly how the
+        browser tab sat at a tenth of the machine's extensions, and how four
+        storage columns stayed blank for weeks. The row count answers "did it
+        collect"; this answers "did it collect anything".
+
+        Measured HERE, on the collector's thread and only for the table that was
+        just rewritten — which is also the only moment the answer can change.
+        Doing it while building a snapshot cost 1.9 s on the thread that draws the
+        window."""
+        try:
+            cols = self.store.columns(table)
+            rows = self.store.row_count(table)
+            filled = self._filled(table, cols)
+            cells = rows * len(filled)
+            share = round(sum(filled) / cells, 3) if cells else None
+            self._fill[table] = share
+            # KEPT IN THE DATABASE, not only in this process: a second window
+            # collects nothing, and a window that has just started has not
+            # collected the hourly sources yet — both would show no number at all
+            # while the first one shows it, which is a difference nobody can
+            # explain. Stored where every reader can see it.
+            if share is not None:
+                with self.store._lock:
+                    # `at` is a reserved word in DuckDB (AT TIME ZONE) — the same
+                    # trap as the column named `load`, and the same lesson: an
+                    # identifier gets quoted or gets a name that is not a keyword.
+                    self.store._con.execute(
+                        'CREATE TABLE IF NOT EXISTS _fill ('
+                        '  "name" VARCHAR PRIMARY KEY, "share" DOUBLE,'
+                        '  "measured_at" VARCHAR)')
+                    self.store._con.execute('DELETE FROM _fill WHERE "name" = ?',
+                                            [table])
+                    self.store._con.execute("INSERT INTO _fill VALUES (?, ?, ?)",
+                                            [table, share, _iso_now()])
+        except Exception:  # noqa: BLE001 — a measurement must never break a run
+            self._fill.pop(table, None)
 
     def _push_state(self):
         try:
@@ -352,6 +407,22 @@ class Backend(QObject):
                 filled = self.events.materialize()
                 if lines or filled:
                     self._push_state()  # refresh the Events tab count
+                if cycles % 20 == 0:    # the stream's own fill, now and then
+                    try:
+                        cols = [c for c in self.events.columns("events")
+                                if c != "seq"]
+                        n = self.events.row_count("events")
+                        parts = ", ".join(
+                            f"sum(CASE WHEN {ident(c)} IS NULL OR "
+                            f"CAST({ident(c)} AS VARCHAR) = '' THEN 0 ELSE 1 END)"
+                            for c in cols)
+                        vals = self.events.fetch(
+                            f"SELECT {parts} FROM events")["rows"][0]
+                        cells = n * len(cols)
+                        self._fill["events"] = (round(sum(int(v or 0) for v in vals)
+                                                      / cells, 3) if cells else None)
+                    except Exception:  # noqa: BLE001
+                        pass
                 if self.reader.cursor_error:
                     self._set_status("_events", self.reader.cursor_error)
                 else:
@@ -406,6 +477,7 @@ class Backend(QObject):
             # curated first, then the rest — the default order reads as a phrase
             "columns": shown + hidden,
             "count": cnt, "collected_at": self._events_at,
+            "fill": self._fill.get("events"),
             "colcfg": {"hidden": hidden},
         }
 
@@ -422,15 +494,10 @@ class Backend(QObject):
         except Exception:  # noqa: BLE001
             return 0
 
-    def _dead_columns(self, table: str, cols: list[str]) -> list[str]:
-        """Columns that hold NO value at all in this table, right now.
-
-        A column that is empty in every row is noise in a table view — it costs a
-        column of width and tells the reader nothing. Rather than curate a list of
-        "interesting" fields by hand (which would go stale the moment a source
-        changes), the emptiness is MEASURED and those columns start hidden; they
-        are one click away in the Columns panel, and they appear by themselves as
-        soon as they carry data. One query per table, cached per collection."""
+    def _filled(self, table: str, cols: list[str]) -> list[int]:
+        """How many rows hold a value, per column — ONE query, used for two
+        answers: which columns are empty in every row (they start hidden), and how
+        full the table is overall. Both were worth a query; neither is worth two."""
         if not cols or cols == ["empty"]:
             return []
         parts = ", ".join(
@@ -442,6 +509,18 @@ class Backend(QObject):
             vals = self.store.fetch(f"SELECT {parts} FROM {ident(table)}")["rows"][0]
         except Exception:  # noqa: BLE001
             return []
+        return [int(v or 0) for v in vals]
+
+    def _dead_columns(self, table: str, cols: list[str]) -> list[str]:
+        """Columns that hold NO value at all in this table, right now.
+
+        A column that is empty in every row is noise in a table view — it costs a
+        column of width and tells the reader nothing. Rather than curate a list of
+        "interesting" fields by hand (which would go stale the moment a source
+        changes), the emptiness is MEASURED and those columns start hidden; they
+        are one click away in the Columns panel, and they appear by themselves as
+        soon as they carry data. One query per table, cached per collection."""
+        vals = self._filled(table, cols)
         return [c for c, v in zip(cols, vals) if not v]
 
     # ---------- snapshot ----------
@@ -451,6 +530,17 @@ class Backend(QObject):
         # for a view (ports_owned) that re-executes its JOIN. Both the count and
         # the column list only change when the table is rewritten, so they are
         # cached and refreshed only when the collection timestamp moved.
+        # what the collector measured, from wherever it is running
+        if self._fill_gen != self._gen:
+            try:
+                for n, s in self.store.fetch(
+                        "SELECT name, share FROM _fill")["rows"]:
+                    self._fill.setdefault(str(n), s)
+                    if not self.owner:      # a follower has no measurements of its own
+                        self._fill[str(n)] = s
+            except Exception:  # noqa: BLE001 — the table appears with the first run
+                pass
+            self._fill_gen = self._gen
         tabs = []
         for name in self.store.tables():
             if name.startswith("_"):
@@ -467,6 +557,7 @@ class Backend(QObject):
             cached = self._tab_cache.get(name)
             if cached is None or cached[0] != key:
                 cols = self.store.columns(name)
+                rows_n = self.store.row_count(name)
                 # what the rule itself declares comes first; otherwise the
                 # columns that are empty in every row start hidden
                 declared = meta.get("columns") or []
@@ -481,7 +572,7 @@ class Backend(QObject):
                 else:
                     hidden = self._dead_columns(name, cols)
                     order = []
-                cached = (key, cols, self.store.row_count(name), hidden, order)
+                cached = (key, cols, rows_n, hidden, order)
                 self._tab_cache[name] = cached
             st = self._status.get(name, {})
             tabs.append({
@@ -500,6 +591,12 @@ class Backend(QObject):
                 "builtin": True,
                 "columns": cached[1],
                 "count": cached[2],
+                # MEASURED BY THE COLLECTOR, not here: a snapshot is sent every few
+                # seconds and scanning every column of every table cost 1.9 s on
+                # the thread that draws the window. The collector measures a table
+                # right after it fills it, which is also the only moment the answer
+                # can change.
+                "fill": self._fill.get(name),
                 "colcfg": {"hidden": cached[3], "order": cached[4]},
                 "collected_at": stamp,
             })

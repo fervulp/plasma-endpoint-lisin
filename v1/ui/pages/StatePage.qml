@@ -86,6 +86,16 @@ Kirigami.Page {
     }
     // filtering the list of tables by name
     property string tabFilter: ""
+
+    // the counter in the tab list alternates between the row count and how full
+    // the table is; fifteen seconds each, so neither has to be hunted for
+    property bool showFill: false
+    Timer {
+        running: page.visible
+        interval: 15000
+        repeat: true
+        onTriggered: page.showFill = !page.showFill
+    }
     readonly property var shownTabs: {
         if (tabFilter === "") return tabsModel
         var q = tabFilter.toLowerCase()
@@ -306,6 +316,7 @@ Kirigami.Page {
             for (var i = 0; i < page.tabsModel.length; i++)
                 if ((page.tabsModel[i].count || 0) > 0) { page.tabIndex = i; break }
         page.syncColumns(); page.loadRows(); applyFocus()
+        if (dtable) dtable.scrollToTop()   // a different table starts at its top
     }
 
     // FRESH DATA WITHOUT THRASHING. A snapshot arrives whenever events are
@@ -388,11 +399,12 @@ Kirigami.Page {
         } else { sortCol = c; sortAsc = true }
         pageIndex = 0
         page.loadRows()          // ORDER BY is the database's job
+        if (dtable) dtable.scrollToTop()   // a new order is a new reading
     }
     // not during a tab switch: that handler resets pageIndex BEFORE the sort, so
     // this fired an extra query carrying the previous table's ORDER BY (which the
     // new table has no such column for), and defeated the one-rebuild rule.
-    onPageIndexChanged: if (!_switching) page.loadRows()
+    onPageIndexChanged: if (!_switching) { page.loadRows(); if (dtable) dtable.scrollToTop() }
     onPageLimitChanged: { pageIndex = 0; page.loadRows() }
     // ---- THE SINGLE SEARCH, AS IN EVENTS ----
     // The condition is executed by the DATABASE (stateRows), not by parsing a
@@ -845,10 +857,34 @@ Kirigami.Page {
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
+                            // THE COUNTER ALTERNATES: fifteen seconds of "how
+                            // many rows", then fifteen of "how full" — the share
+                            // of cells that hold a value. A source that keeps
+                            // returning its rows while a column has gone empty is
+                            // invisible in the count alone; that is how the
+                            // browser tab sat at a tenth of this machine's
+                            // extensions. Both numbers are about the same table,
+                            // so they take the same place rather than a new column.
                             QQC2.Label {   // the counter is always visible on the right
-                                text: modelData.count
+                                text: page.showFill && modelData.fill !== undefined
+                                                    && modelData.fill !== null
+                                      ? Math.round(modelData.fill * 100) + "%"
+                                      : modelData.count
+                                color: page.showFill && modelData.fill !== undefined
+                                                     && modelData.fill !== null
+                                       ? (modelData.fill < 0.5
+                                          ? Kirigami.Theme.negativeTextColor
+                                          : Kirigami.Theme.textColor)
+                                       : Kirigami.Theme.textColor
                                 opacity: 0.55
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                QQC2.ToolTip.visible: tabCountHover.hovered
+                                QQC2.ToolTip.delay: 400
+                                QQC2.ToolTip.text: modelData.count + " rows"
+                                    + (modelData.fill !== undefined && modelData.fill !== null
+                                       ? ", " + Math.round(modelData.fill * 100)
+                                         + "% of the cells hold a value" : "")
+                                HoverHandler { id: tabCountHover }
                             }
                         }
                     }

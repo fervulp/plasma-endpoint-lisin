@@ -666,13 +666,36 @@ def check_layout(backend):
     for _ in range(12):
         app.processEvents()
 
+    def visual(root):  # noqa: E306
+        """Every item in the VISUAL tree. A ListView's delegates hang off its
+        contentItem, and QObject.children() does not reach them — which is why
+        the tab list read as empty from a probe while it was on screen."""
+        out, stack, seen = [], [root], set()
+        while stack:
+            it = stack.pop()
+            if it is None or id(it) in seen:
+                continue
+            seen.add(id(it))
+            out.append(it)
+            try:
+                stack.extend(it.childItems())
+            except Exception:  # noqa: BLE001 — not every object is an Item
+                pass
+        return out
+
+    # A QQuickItem ROOT, not the window. eng.rootObjects()[0] arrives as a plain
+    # QWindow, and objects reached through QObject.children() are not typed as
+    # items either — so childItems() is unavailable and the visual tree, where a
+    # ListView keeps its delegates, cannot be walked at all. findChild gives back
+    # a properly typed item to start from.
+    from PySide6.QtQuick import QQuickItem
+    root_item = win.findChild(QQuickItem)
+
     def page_of(o):
-        if o.property("curName") is not None and o.property("tabsModel") is not None:
-            return o
-        for c in o.children():
-            r = page_of(c)
-            if r:
-                return r
+        for it in visual(o):
+            if (it.property("curName") is not None
+                    and it.property("tabsModel") is not None):
+                return it
         return None
 
     def tables(o, out=None):
@@ -685,7 +708,7 @@ def check_layout(backend):
             tables(c, out)
         return out
 
-    pg = page_of(win)
+    pg = page_of(root_item) if root_item is not None else None
     if pg is None:
         bad("the Data page was not found in the window")
         return
@@ -709,6 +732,75 @@ def check_layout(backend):
             bad(f"the table is not drawn — {b}")
     else:
         ok(f"the table fills the page on {checked} tabs")
+
+    # THE SCROLL POSITION MUST SURVIVE A DATA REFRESH. Rows are replaced every
+    # few seconds, and replacing a ListView's model puts it back at the top:
+    # reading anything below the first screen was impossible, because every ten
+    # seconds the table threw you back to row one.
+    pg.setProperty("tabIndex", 1)
+    for _ in range(8):
+        app.processEvents()
+    # the widest visible one is the table itself; the narrow hidden one is the
+    # grouping panel's
+    vis = sorted((d for d in tables(pg) if d.property("visible")),
+                 key=lambda d: -d.property("width"))
+    dt = vis[0] if vis else None
+    lv = next((i for i in visual(dt)
+               if i.property("contentY") is not None
+               and i.property("cacheBuffer") is not None), None) if dt else None
+    if lv is None:
+        bad("the table's list was not found, so the scroll cannot be checked")
+    else:
+        lv.setProperty("contentY", 300.0)
+        for _ in range(4):
+            app.processEvents()
+        QMetaObject.invokeMethod(pg, "loadRows", Qt.DirectConnection)
+        for _ in range(10):
+            app.processEvents()
+        kept = lv.property("contentY")
+        if abs(kept - 300.0) > 2:
+            bad(f"a refresh moved the scroll from 300 px to {kept:.0f} px")
+        else:
+            ok("the scroll position survives a data refresh")
+        QMetaObject.invokeMethod(dt, "scrollToTop", Qt.DirectConnection)
+        for _ in range(4):
+            app.processEvents()
+        if lv.property("contentY") > 2:
+            bad("scrollToTop did not return to the first row")
+        else:
+            ok("changing the table still starts at its first row")
+
+    # THE COUNTER ALTERNATES between how many rows and how full the table is.
+    def counters():
+        out = []
+        for it in visual(pg):
+            try:
+                s = it.property("text")
+            except Exception:  # noqa: BLE001
+                continue
+            if isinstance(s, str) and it.x() < 400:
+                if s.endswith("%") or s.replace(",", "").isdigit():
+                    out.append(s)
+        return out
+
+    pg.setProperty("showFill", False)
+    for _ in range(6):
+        app.processEvents()
+    rows_shown = counters()
+    pg.setProperty("showFill", True)
+    for _ in range(8):
+        app.processEvents()
+    fill_shown = counters()
+    pcts = [s for s in fill_shown if s.endswith("%")]
+    if not rows_shown:
+        bad("the tab list shows no counter at all")
+    elif not pcts:
+        bad("switching the counter to fill showed no percentage")
+    elif rows_shown == fill_shown:
+        bad("the counter did not change when switched to fill")
+    else:
+        ok(f"the tab counter alternates: {len(rows_shown)} counts, "
+           f"{len(pcts)} of them become percentages")
 
 
 def check_bindings():
