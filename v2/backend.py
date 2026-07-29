@@ -96,10 +96,17 @@ class Backend(QObject):
             req, ovr, eff = (flatpak.requested(app_id), flatpak.override(app_id),
                              flatpak.effective(app_id))
             cats = []
-            for key, title, why in flatpak.CATEGORIES:
+            for key, title, why, icon in flatpak.CATEGORIES:
                 e = eff.get(key, {"granted": [], "denied": []})
+                # A FAMILY THAT CARRIES THE SANDBOX ESCAPE IS NOT LIKE THE OTHERS.
+                # The block is marked, so the eye lands on it before it starts
+                # reading forty chips — the alternative is a red line somewhere in
+                # the middle of a list nobody reads to the end.
+                alarming = any(x.split("=")[0] == flatpak.ESCAPE_NAME
+                               for x in e["granted"])
                 cats.append({
-                    "key": key, "title": title, "why": why,
+                    "key": key, "title": title, "why": why, "icon": icon,
+                    "alarming": alarming,
                     "requested": req.get(key, []),
                     "override": ovr.get(key, []),
                     "granted": e["granted"], "denied": e["denied"],

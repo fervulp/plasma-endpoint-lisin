@@ -38,21 +38,30 @@ from pathlib import Path
 # about them: what it can reach, then what it can talk to, then what it can be.
 # The names on the right are flatpak's own — nothing here is invented, and a
 # family that flatpak does not have cannot be shown as if it did.
+# key, title, why, icon. The icon is part of the description, not decoration:
+# a family is recognised by its picture before its name is read — and every one
+# of these was checked to exist in the icon theme, because a missing icon leaves
+# a blank square that reads as a broken page.
 CATEGORIES = [
     ("filesystems", "Files", "Paths the application can see. Everything else "
-                             "does not exist from inside the sandbox."),
+                             "does not exist from inside the sandbox.", "folder"),
     ("shared", "Network and IPC", "Whether it can reach the network at all, and "
-                                  "whether it shares the host's IPC namespace."),
+                                  "whether it shares the host's IPC namespace.",
+     "network-connect"),
     ("sockets", "Sockets", "The desktop's own channels: the display server, "
-                           "sound, the buses, the ssh and gpg agents, printing."),
+                           "sound, the buses, the ssh and gpg agents, printing.",
+     "preferences-desktop-display"),
     ("devices", "Devices", "Hardware nodes: the GPU, virtualisation, shared "
-                           "memory, or everything under /dev."),
+                           "memory, or everything under /dev.",
+     "drive-removable-media"),
     ("features", "Features", "Development tools, other architectures, "
-                             "bluetooth, the vehicle bus."),
+                             "bluetooth, the vehicle bus.",
+     "applications-development"),
     ("session bus", "Session bus", "Which services on your own bus it may talk "
-                                   "to or own. This is where sandbox escape lives."),
+                                   "to or own. This is where sandbox escape lives.",
+     "preferences-system-network"),
     ("system bus", "System bus", "The same for the system bus, where the "
-                                 "machine's own services are."),
+                                 "machine's own services are.", "system-run"),
 ]
 
 # Sections of the override file, mapped to the category they belong to.
@@ -187,7 +196,7 @@ def effective(app_id: str) -> dict:
     round would tell an operator they are protected when they are not."""
     req, ovr = requested(app_id), override(app_id)
     out = {}
-    for cat, _title, _why in CATEGORIES:
+    for cat, _title, _why, _icon in CATEGORIES:
         granted = {e for e in req.get(cat, []) if not e.startswith("!")}
         denied = set()
         for e in ovr.get(cat, []):

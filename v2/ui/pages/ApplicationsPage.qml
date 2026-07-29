@@ -247,45 +247,32 @@ Kirigami.Page {
                             + "this machine's overrides. An override never applies "
                             + "to a running instance."
                     }
-                    Repeater {
-                        model: page.detail ? page.detail.categories : []
-                        delegate: ColumnLayout {
-                            required property var modelData
-                            Layout.fillWidth: true
-                            Layout.topMargin: Kirigami.Units.smallSpacing
-                            spacing: 1
-                            RowLayout {
+                    // THE FAMILIES AS BLOCKS, two across when there is room.
+                    // Seven families of permissions read badly as a list — the eye
+                    // has nowhere to rest and every entry looks like every other.
+                    // As blocks each family is one object you take in at a glance,
+                    // and the chips inside carry their own state, so half a page is
+                    // still readable.
+                    GridLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: Kirigami.Units.smallSpacing
+                        columns: scroller.availableWidth > Kirigami.Units.gridUnit * 46
+                                 ? 2 : 1
+                        columnSpacing: Kirigami.Units.smallSpacing
+                        rowSpacing: Kirigami.Units.smallSpacing
+
+                        Repeater {
+                            model: page.detail ? page.detail.categories : []
+                            delegate: PermissionBlock {
+                                required property var modelData
                                 Layout.fillWidth: true
-                                QQC2.Label {
-                                    text: modelData.title
-                                    font.bold: true
-                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 9
-                                }
-                                QQC2.Label {
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.WordWrap
-                                    text: (modelData.granted || []).length
-                                          ? modelData.granted.join(",  ")
-                                          : "nothing"
-                                    opacity: (modelData.granted || []).length ? 1 : 0.5
-                                }
-                            }
-                            QQC2.Label {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: Kirigami.Units.gridUnit * 9
-                                wrapMode: Text.WordWrap
-                                visible: (modelData.denied || []).length > 0
-                                color: Kirigami.Theme.negativeTextColor
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                text: "denied here: " + (modelData.denied || []).join(",  ")
-                            }
-                            QQC2.Label {
-                                Layout.fillWidth: true
-                                Layout.leftMargin: Kirigami.Units.gridUnit * 9
-                                wrapMode: Text.WordWrap
-                                opacity: 0.5
-                                font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                text: modelData.why
+                                Layout.preferredWidth: 1     // equal columns
+                                title: modelData.title
+                                icon: modelData.icon
+                                why: modelData.why
+                                granted: modelData.granted || []
+                                denied: modelData.denied || []
+                                alarming: !!modelData.alarming
                             }
                         }
                     }
