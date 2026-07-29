@@ -4,7 +4,15 @@ Name=LiSin App manager
 GenericName=Flatpak application control
 Comment=See and control what each flatpak application is allowed to do
 Icon=application-x-executable
-Exec=env PYTHONNOUSERSITE=1 QT_QUICK_CONTROLS_STYLE=org.kde.desktop python3 /home/local/nosave/linda/lisin/v2/lisin_apps.py
+# THE LAUNCHER, not a bare python call. It is a file the desktop reads once and
+# caches; putting the environment inline here means a change to how the app is
+# started needs the entry reinstalled, whereas the script can be edited in place.
+Exec=/home/local/nosave/linda/lisin/v2/lisin-apps
 Terminal=false
-Categories=System;Security;Settings;
+# ONE main category. Listing System, Security and Settings put the entry in three
+# menus at once, which desktop-file-validate warns about and users experience as
+# the same program appearing three times.
+Categories=Settings;Security;
+Keywords=flatpak;sandbox;permissions;application;
 StartupNotify=true
+StartupWMClass=lisin_apps.py

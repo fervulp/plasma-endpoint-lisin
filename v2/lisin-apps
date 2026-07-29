@@ -1,0 +1,10 @@
+#!/bin/bash
+# LiSin App manager — the launcher the desktop entry runs.
+#
+# PYTHONNOUSERSITE=1 is not optional: a pip-installed PySide6 in the user site
+# shadows the system one, and then the system Kirigami cannot be found — the
+# window fails to load with an import error that says nothing about the cause.
+# The desktop style is what makes it look like the rest of the desktop rather
+# than the default Qt theme.
+exec env PYTHONNOUSERSITE=1 QT_QUICK_CONTROLS_STYLE=org.kde.desktop \
+     python3 /home/local/nosave/linda/lisin/v2/lisin_apps.py "$@"
