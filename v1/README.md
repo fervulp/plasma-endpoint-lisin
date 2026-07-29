@@ -38,6 +38,9 @@ In `expertise/`, not in the code:
 expertise/inputs/*.yaml      an entry point: an osquery query (or a command)
                              plus its table, cadence and the columns worth
                              reading first
+expertise/outputs/*.yaml     an output point: a table declared with its fields,
+                             created because it was declared — so a table exists
+                             with its columns before anything writes to it
 expertise/views/*.yaml       enrichment: a SQL view that JOINs base tables
 expertise/events/*.yaml      how a Tetragon line becomes a taxonomy row
 expertise/taxonomy/*.yaml    the event field vocabulary

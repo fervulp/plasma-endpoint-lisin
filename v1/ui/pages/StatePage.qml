@@ -246,6 +246,7 @@ Kirigami.Page {
         if (cur && cur.count !== undefined)
             parts.push(cur.count + " rows")
         if (src.tests) parts.push("has its own tests")
+        if (cur && cur.about) parts.push(String(cur.about).split(". ")[0])
         if (src.enabled === false) parts.push("disabled")
         return parts.join(" · ")
     }
@@ -786,8 +787,13 @@ Kirigami.Page {
         var out = [{ k: "_check", kind: "check", w: 2 }]
         if (cur && cur.name === "events")
             out.push({ k: "_icon", kind: "icon", w: 1.6 })
+        // WHAT EACH FIELD MEANS travels with the column. A rule that declares
+        // its fields says what each one holds; without carrying that here the
+        // sentence stays in a file nobody has open while the reader looks at the
+        // header and guesses.
+        var docs = (cur && cur.docs) ? cur.docs : ({})
         for (var i = 0; i < cols.length; i++)
-            out.push({ k: cols[i], t: cols[i],
+            out.push({ k: cols[i], t: cols[i], doc: docs[cols[i]] || "",
                        w: colWidth(cols[i]) / Kirigami.Units.gridUnit })
         dtColumns = out
         // THE FIELDS ARE THE CURRENT TABLE'S FIELDS — nothing else. Offering the

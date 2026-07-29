@@ -19,7 +19,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import osquery, shell, views
+from . import osquery, outputs, shell, views
 from .db import ident, load_yaml_dir
 from .store import Store
 
@@ -186,6 +186,10 @@ def drop_orphans(store: Store) -> list[str]:
 
     owned = {str(i.get("table") or i.get("name")) for i in load_inputs()}
     owned |= {str(v.get("name")) for v in _views.load_views()}
+    # a declared table is owned by its output even when nothing writes to it —
+    # otherwise the cleanup would delete exactly the empty tables an output point
+    # exists to create
+    owned |= {str(o.get("table") or o.get("name")) for o in outputs.load_outputs()}
     if not owned:                    # the expertise did not load; do nothing
         return []
     dropped = []
@@ -216,6 +220,10 @@ def run_all(store: Store, force: bool = False) -> dict:
     itself, so the collector never holds it across a subprocess. The derivation
     is skipped when nothing was collected — the views would only be re-created
     over unchanged tables."""
+    # DECLARED TABLES FIRST. An output creates its table before anything writes
+    # to it, so a source that fills a declared table finds it there, and a table
+    # nobody fills still exists with its fields.
+    outs = outputs.apply(store)
     inputs = run_once(store, force=force)
     derive: dict = {}
     dropped: list[str] = []
@@ -223,4 +231,5 @@ def run_all(store: Store, force: bool = False) -> dict:
         with store._lock:
             derive = views.apply(store)
         dropped = drop_orphans(store)
-    return {"inputs": inputs, "derive": derive, "dropped": dropped}
+    return {"inputs": inputs, "outputs": outs, "derive": derive,
+            "dropped": dropped}

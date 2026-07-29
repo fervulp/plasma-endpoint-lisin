@@ -276,6 +276,15 @@ Item {
                             anchors.rightMargin: hdrSort.visible ? 20 : 0
                             visible: hcell.kind === "text"
                             text: modelData.t || ""
+                            // WHAT THE FIELD MEANS, where the field is. A rule
+                            // that declares its fields says what each one holds;
+                            // that sentence belongs on the column, not only in
+                            // the file nobody has open.
+                            QQC2.ToolTip.visible: hdrHover.hovered
+                                                  && String(modelData.doc || "") !== ""
+                            QQC2.ToolTip.text: String(modelData.doc || "")
+                            QQC2.ToolTip.delay: 400
+                            HoverHandler { id: hdrHover }
                             opacity: 0.7
                             font.bold: true
                             elide: Text.ElideRight

@@ -1,0 +1,23 @@
+name: policy_findings
+table: policy_findings
+type: output
+version: 1.0.0
+title: Policy findings
+icon: security-medium
+priority: 40
+description: >-
+  WHAT A POLICY DECIDED, one row per finding: which rule spoke, about what, and
+  when. The table exists before anything writes to it — that is what an output
+  point is for. A declared table with no rows says "nothing has been found yet";
+  a table that does not exist says "this was never set up", and those are
+  different answers to a question an operator actually asks.
+  Nothing fills this yet: the Policies section is declared and not built. When it
+  is, its rule writes here and this description stops being a promise.
+fields:
+  - {name: seen_at,  type: TIMESTAMP, description: when the finding was made, UTC}
+  - {name: policy,   type: VARCHAR,   description: the rule that produced it}
+  - {name: severity, type: VARCHAR,   description: how much it matters, in the policy's own words}
+  - {name: subject,  type: VARCHAR,   description: who or what acted}
+  - {name: object,   type: VARCHAR,   description: what it acted on}
+  - {name: detail,   type: VARCHAR,   description: the evidence, in one line}
+  - {name: source,   type: VARCHAR,   description: which table or stream it was read from}

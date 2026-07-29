@@ -26,7 +26,7 @@ from pathlib import Path
 import yaml
 from PySide6.QtCore import QObject, Signal, Slot
 
-from core import eventstore, pipeline, remote, ruletest, service, views
+from core import eventstore, outputs, pipeline, remote, ruletest, service, views
 from core.db import data_dir, ident, load_yaml_dir, select_only
 from core.eventstore import EventStore
 from core.store import Store
@@ -39,8 +39,8 @@ _QUERIES_DIR = _EXPERTISE / "queries"
 # for a relation layer nothing read; it is gone with its directory rather than
 # left as an empty catalog nobody can fill.
 _EXP_CATS = [("inputs", "Inputs"), ("events", "Normalization"),
-             ("taxonomy", "Taxonomy"), ("views", "Enrichment"),
-             ("queries", "Queries")]
+             ("taxonomy", "Taxonomy"), ("outputs", "Outputs"),
+             ("views", "Enrichment"), ("queries", "Queries")]
 
 # The Events tab's default view: the curated columns shown first (the rest of the
 # taxonomy stays available in the Columns picker), and the noisier ones hidden by
@@ -215,6 +215,7 @@ class Backend(QObject):
             m[t] = {"title": inp.get("title", t), "icon": inp.get("icon", "table"),
                     "hidden": bool(inp.get("hidden")),
                     "columns": inp.get("columns") or [],
+                    "about": str(inp.get("description") or "").strip(),
                     "priority": inp.get("priority"),
                     "rule": inp.get("name", t),
                     "ref": "inputs/" + str(inp.get("name", t)),
@@ -225,11 +226,29 @@ class Backend(QObject):
                     "interval": inp.get("interval", pipeline.DEFAULT_INTERVAL),
                     "tests": bool(inp.get("tests")),
                     "enabled": inp.get("enabled") is not False}
+        # A DECLARED TABLE DESCRIBES ITSELF. An output says what its table is,
+        # what its fields mean and in what order they read — so the tab has a
+        # title and columns before a single row exists.
+        for o in outputs.load_outputs():
+            n = o.get("table") or o.get("name")
+            m[n] = {"title": o.get("title", n), "icon": o.get("icon", "table"),
+                    "hidden": bool(o.get("hidden")),
+                    "columns": [f[0] for f in outputs.fields_of(o)],
+                    "docs": {f[0]: f[2] for f in outputs.fields_of(o) if f[2]},
+                    "about": str(o.get("description") or "").strip(),
+                    "priority": o.get("priority"),
+                    "rule": o.get("name", n),
+                    "ref": "outputs/" + str(o.get("name", n)),
+                    "how": "declared by an output point",
+                    "interval": 0,
+                    "tests": bool(o.get("tests")),
+                    "enabled": True}
         for v in views.load_views():
             n = v.get("name")
             m[n] = {"title": v.get("title", n), "icon": v.get("icon", "table"),
                     "hidden": bool(v.get("hidden")),
                     "columns": v.get("columns") or [],
+                    "about": str(v.get("description") or "").strip(),
                     "priority": v.get("priority"),
                     "rule": n,
                     "ref": "views/" + str(n),
@@ -586,6 +605,8 @@ class Backend(QObject):
             # a rule that is not there.
             owned = bool(meta.get("rule"))
             tabs.append({
+                "about": meta.get("about", ""),
+                "docs": meta.get("docs", {}),
                 "source": {"rule": meta.get("rule", "") or "no rule owns this table",
                            "ref": meta.get("ref", ""),
                            "how": meta.get("how", "") if owned else

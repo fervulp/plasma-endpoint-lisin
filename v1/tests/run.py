@@ -388,6 +388,72 @@ def check_clock(store):
         ok(f"no rule asks for local time ({len(_pl.load_inputs())} checked)")
 
 
+# ---------------------------------------------------------------- outputs
+def check_outputs(store):
+    """A TABLE DECLARED BY A RULE MUST EXIST BECAUSE IT WAS DECLARED.
+
+    Until outputs, a table existed only as a side effect of collecting: a source
+    ran, and whatever shape its result had became the table. There was no place
+    to say what a table IS, and an empty table was indistinguishable from one
+    that had never been created.
+
+    Three things are checked, because each is a different promise: the declared
+    table exists with exactly its declared fields; a field ADDED to the rule
+    appears in the table; and a field REMOVED from the rule is LEFT ALONE —
+    dropping a column would destroy data the rule stopped describing but the
+    machine may still have produced, which is not a decision an automatic apply
+    gets to take."""
+    section("outputs")
+    from core import outputs as _out
+    from core.db import ident as _id
+
+    rules = _out.load_outputs()
+    if not rules:
+        bad("no output points are declared at all")
+        return
+    _out.apply(store)
+    for rule in rules:
+        table = str(rule.get("table") or rule.get("name"))
+        want = [f[0] for f in _out.fields_of(rule)]
+        have = store.columns(table)
+        if not have:
+            bad(f"{table}: declared, but the table was not created")
+            continue
+        missing = [c for c in want if c not in have]
+        if missing:
+            bad(f"{table}: declared fields that do not exist: {', '.join(missing)}")
+        else:
+            ok(f"{table}: exists with all {len(want)} declared fields")
+
+    # a field added to a rule reaches the table, and one removed is kept
+    probe = rules[0]
+    table = str(probe.get("table") or probe.get("name"))
+    grown = dict(probe)
+    grown["fields"] = list(probe.get("fields") or []) + [
+        {"name": "_probe_added", "type": "VARCHAR", "description": "written by the tests"}]
+    real_load = _out.load_outputs
+    _out.load_outputs = lambda: [grown]
+    try:
+        _out.apply(store)
+        after_add = store.columns(table)
+        _out.load_outputs = lambda: [probe]      # the field is gone from the rule
+        _out.apply(store)
+        after_drop = store.columns(table)
+    finally:
+        _out.load_outputs = real_load
+    if "_probe_added" not in after_add:
+        bad("a field added to an output rule does not reach the table")
+    elif "_probe_added" not in after_drop:
+        bad("a field removed from the rule was DROPPED from the table, taking any "
+            "data in it")
+    else:
+        ok("a declared field is added, and an undeclared one is left in place")
+    try:
+        store._con.execute(f"ALTER TABLE {_id(table)} DROP COLUMN _probe_added")
+    except Exception:  # noqa: BLE001 — the probe column is not worth failing over
+        pass
+
+
 # ---------------------------------------------------------------- orphans
 def check_orphans(store):
     """THE STORE MIRRORS THE EXPERTISE: one table per rule, and nothing else.
@@ -817,9 +883,10 @@ def check_provenance(backend):
         bad(f"tabs that do not say HOW they are collected: {', '.join(unknown[:6])}")
     # the rule a table names must be a rule that exists — a dead link here is
     # worse than no link, because it looks like an answer
-    from core import pipeline as _pl, views as _vw
+    from core import outputs as _op, pipeline as _pl, views as _vw
     known = {f"inputs/{i.get('name')}" for i in _pl.load_inputs()}
     known |= {f"views/{v.get('name')}" for v in _vw.load_views()}
+    known |= {f"outputs/{o.get('name')}" for o in _op.load_outputs()}
     known |= {"events/normalize"}
     broken = [(t["name"], t["source"]["ref"]) for t in tabs
               if t["source"].get("ref") and t["source"]["ref"] not in known]
