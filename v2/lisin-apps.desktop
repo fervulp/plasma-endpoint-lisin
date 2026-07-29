@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=LiSin App manager
+GenericName=Flatpak application control
+Comment=See and control what each flatpak application is allowed to do
+Icon=application-x-executable
+Exec=env PYTHONNOUSERSITE=1 QT_QUICK_CONTROLS_STYLE=org.kde.desktop python3 /home/local/nosave/linda/lisin/v2/lisin_apps.py
+Terminal=false
+Categories=System;Security;Settings;
+StartupNotify=true
